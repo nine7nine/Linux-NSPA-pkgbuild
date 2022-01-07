@@ -1,0 +1,14 @@
+This repo contains my linux kernel packages based on Linux-CachyOS sources.
+
+Original source and project can be found here;
+
+https://github.com/CachyOS/linux-cachyo
+
+I add some misc patches for my own purposes.
+
+NOTE: I remove downloading the patches from the original source and instead
+I include the patches in the packages -- as to not rely on external github 
+sources that may disappear, at some point.
+
+I remove ${_patchsource} from the pkgbuild after downloading
+all patches. Then i run updpkgums and finally, I create the source package.
