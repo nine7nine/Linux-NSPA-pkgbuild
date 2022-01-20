@@ -1,0 +1,43 @@
+From 301e79c65a75d101e3987605feaf896021ead227 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Thu, 6 May 2021 00:12:28 -0700
+Subject: [PATCH 30/60] sched/fair: Compile out NUMA code entirely when NUMA is
+ disabled
+
+Scheduler code is very hot and every little optimization counts. Instead
+of constantly checking sched_numa_balancing when NUMA is disabled,
+compile it out.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+Signed-off-by: Alexander Winkowski <dereference23@outlook.com>
+---
+ kernel/sched/fair.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 6f16dfb74246..8152dc562661 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -2629,7 +2629,8 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
+ 	struct numa_group *ng;
+ 	int priv;
+ 
+-	if (!static_branch_likely(&sched_numa_balancing))
++	if (!IS_ENABLED(CONFIG_NUMA_BALANCING) ||
++	    !static_branch_likely(&sched_numa_balancing))
+ 		return;
+ 
+ 	/* for example, ksmd faulting in a user's mm */
+@@ -11071,7 +11072,8 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
+ 		entity_tick(cfs_rq, se, queued);
+ 	}
+ 
+-	if (static_branch_unlikely(&sched_numa_balancing))
++	if (IS_ENABLED(CONFIG_NUMA_BALANCING) &&
++	    static_branch_unlikely(&sched_numa_balancing))
+ 		task_tick_numa(rq, curr);
+ 
+ 	update_misfit_status(curr, rq);
+-- 
+2.34.1
+
