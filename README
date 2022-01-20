@@ -2,13 +2,15 @@ This repo contains my linux kernel packages based on Linux-CachyOS sources.
 
 Original source and project can be found here;
 
-https://github.com/CachyOS/linux-cachyo
+https://github.com/CachyOS/linux-cachyos
 
-I add some misc patches for my own purposes.
+I add some misc patches for my own purposes. I include a threadsirq fixup for
+amd-pinctrl / i2c related drivers and some misc wine-related stuff. 
 
-NOTE: I remove downloading the patches from the original source and instead
-I include the patches in the packages -- as to not rely on external github 
-sources that may disappear, at some point.
+As well, I have packages for both vanilla and PREEMPT_RT kernels for Archlinux.
 
-I remove ${_patchsource} from the pkgbuild after downloading
-all patches. Then i run updpkgums and finally, I create the source package.
+NOTE: the kernel configs are my local configs, specifically for my machine. If
+anyone is using these packages, you will have to generate your own config - as
+mine are 'make localmodconfig'd, as i use modprobed-db;
+
+https://wiki.archlinux.org/title/Modprobed-db
