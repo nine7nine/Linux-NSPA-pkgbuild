@@ -185,6 +185,9 @@ source=(
   "10002-mm-Support-soft-dirty-flag-read-with-reset.patch"
   "10062-amd_pinctrl-IRQF_NO_THREAD.patch"
   "10063-designware-i2c_IRQF_NO_THREAD.patch"
+  "10064-hidraw-Replace_hidraw_device_table_rwsem.patch"
+  "10065-background_reclaim_of_hugepages.patch"
+  "10066-sched_rt-rr_timeslice_1_jiffy.patch"
 )
 #if [ -n "$_use_pgo" ]; then
 #  source+=("0001-PGO.patch")
@@ -714,4 +717,7 @@ md5sums=('121e4f65cf16ff76527020ea596fa431'
          '6eba5c2051cc4ace6e5748bc7e031e79'
          'fbcc5c44ea0e0da0d7f73df2377cedbb'
          '9ec1b2e94d637cdd5348473296c44169'
-         'db7646f8882c01088370c92baceb7d44')
+         'db7646f8882c01088370c92baceb7d44'
+         '2febe27c9376e03c0826c2e188d219ef'
+         'd4ac933e3938899f159a8248c0c35154'
+         '390865cd3a74027e06cec0c61305607f')
