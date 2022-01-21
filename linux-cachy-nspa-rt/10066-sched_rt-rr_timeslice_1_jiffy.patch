@@ -1,0 +1,34 @@
+From 03db0c143cdd6faee37b796bd8bf368bce3a7d3a Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Wed, 27 Jan 2021 23:07:44 -0800
+Subject: [PATCH] sched/rt: Change default SCHED_RR timeslice from 100 ms to 1
+ jiffy
+
+For us, it's most helpful to have the round-robin timeslice as low as is
+allowed by the scheduler to reduce latency. Since it's limited by the
+scheduler tick rate, just set the default to 1 jiffy, which is the
+lowest possible value.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+Signed-off-by: Alexander Winkowski <dereference23@outlook.com>
+---
+ include/linux/sched/rt.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/sched/rt.h b/include/linux/sched/rt.h
+index e5af028c08b4..80014831b48c 100644
+--- a/include/linux/sched/rt.h
++++ b/include/linux/sched/rt.h
+@@ -59,9 +59,9 @@ extern void normalize_rt_tasks(void);
+ 
+ 
+ /*
+- * default timeslice is 100 msecs (used only for SCHED_RR tasks).
++ * default timeslice is 1 jiffy (used only for SCHED_RR tasks).
+  * Timeslices get refilled after they expire.
+  */
+-#define RR_TIMESLICE		(100 * HZ / 1000)
++#define RR_TIMESLICE		(1)
+ 
+ #endif /* _LINUX_SCHED_RT_H */
+
