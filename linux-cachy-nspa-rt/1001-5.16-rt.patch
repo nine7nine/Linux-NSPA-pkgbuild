@@ -1769,14 +1769,14 @@ index 605969ed0f96..12fad0c2e61f 100644
  	struct fast_pool	*fast_pool = this_cpu_ptr(&irq_randomness);
  	struct pt_regs		*regs = get_irq_regs();
  	unsigned long		now = jiffies;
-@@ -1266,32 +1322,17 @@ void add_interrupt_randomness(int irq, int irq_flags)
+@@ -1286,32 +1342,17 @@ void add_interrupt_randomness(int irq, i
  	fast_mix(fast_pool);
  	add_interrupt_bench(cycles);
  
 -	if (unlikely(crng_init == 0)) {
 -		if ((fast_pool->count >= 64) &&
 -		    crng_fast_load((char *) fast_pool->pool,
--				   sizeof(fast_pool->pool))) {
+-				   sizeof(fast_pool->pool)) > 0) {
 -			fast_pool->count = 0;
 +	/*
 +	 * On PREEMPT_RT the entropy can not be fed into the input_pool because
@@ -1810,7 +1810,7 @@ index 605969ed0f96..12fad0c2e61f 100644
  }
  EXPORT_SYMBOL_GPL(add_interrupt_randomness);
  
-@@ -1507,9 +1548,8 @@ static void _warn_unseeded_randomness(const char *func_name, void *caller,
+@@ -1527,9 +1568,8 @@ static void _warn_unseeded_randomness(co
  	print_once = true;
  #endif
  	if (__ratelimit(&unseeded_warning))
@@ -5384,19 +5384,6 @@ index b2e553f9255b..48a19ed8486d 100644
  #ifdef CONFIG_DEBUG_LOCK_ALLOC
  void __rt_rwlock_init(rwlock_t *rwlock, const char *name,
  		      struct lock_class_key *key)
-diff --git a/kernel/locking/ww_rt_mutex.c b/kernel/locking/ww_rt_mutex.c
-index 0e00205cf467..d1473c624105 100644
---- a/kernel/locking/ww_rt_mutex.c
-+++ b/kernel/locking/ww_rt_mutex.c
-@@ -26,7 +26,7 @@ int ww_mutex_trylock(struct ww_mutex *lock, struct ww_acquire_ctx *ww_ctx)
- 
- 	if (__rt_mutex_trylock(&rtm->rtmutex)) {
- 		ww_mutex_set_context_fastpath(lock, ww_ctx);
--		mutex_acquire_nest(&rtm->dep_map, 0, 1, ww_ctx->dep_map, _RET_IP_);
-+		mutex_acquire_nest(&rtm->dep_map, 0, 1, &ww_ctx->dep_map, _RET_IP_);
- 		return 1;
- 	}
- 
 diff --git a/kernel/panic.c b/kernel/panic.c
 index cefd7d82366f..f4c7c77595bd 100644
 --- a/kernel/panic.c
