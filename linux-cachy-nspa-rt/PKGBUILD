@@ -165,7 +165,7 @@ source=(
   "0001-zstd-patches.patch"
   "0001-cc.patch"
   "0010-ELF.patch"
-  "1001-5.16-rt.patch"
+  "patch-5.16.2-rt19.patch"
   "1002-5.16-mg-lru-rt.patch"
   "1003-5.16-cfi-rt.patch"
   "auto-cpu-optimization.sh"
@@ -682,7 +682,7 @@ md5sums=('6c504067f42447ea00880f8801cc5faf'
          'b8de60147525240358a5aea6d809f0ed'
          'd2a8951a9292e5c397b8cdd50b61a92b'
          'a05b47e1970509a27f36501534751a9b'
-         'c5f054c9f8057d793e72bdd263f34efe'
+         'b5075456961806959ba2f0b8c23d9298'
          'a400ac10a22d76a1884dc57f7a8b645c'
          '3c1a68f944fbee64be15739bdb37976d'
          '21c98f19e883879dd3336c1fa143fd31'
