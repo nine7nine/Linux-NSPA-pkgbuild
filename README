@@ -4,8 +4,23 @@ Original source and project can be found here;
 
 https://github.com/CachyOS/linux-cachyos
 
-I add some misc patches for my own purposes. I include a threadsirq fixup for
-amd-pinctrl / i2c related drivers and some misc wine-related stuff. 
+I add some misc patches for my own purposes. I include a threadsirq and other fixup for
+amd-pinctrl / i2c related drivers, some misc wine-related stuff, etc.
+
+My patch list;
+
+* 10001-mm-Support-soft-dirty-flag-reset-for-VA-range.patch
+* 10002-mm-Support-soft-dirty-flag-read-with-reset.patch
+* 10020-mm-Lower-the-non-hugetlbpage-pageblock-size-to-reduc.patch
+* 10021-mm-Don-t-hog-the-CPU-and-zone-lock-in-rmqueue_bulk.patch
+* 10030-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch
+* 10060-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch
+* 10062-amd_pinctrl-IRQF_NO_THREAD.patch 
+* 10063-designware-i2c_IRQF_NO_THREAD.patch
+* 10064-hidraw-Replace_hidraw_device_table_rwsem.patch
+* 10065-background_reclaim_of_hugepages.patch
+* 10066-sched_rt-rr_timeslice_1_jiffy.patch
+* 10067-gpiolib_amd-pinctrl.patch
 
 As well, I have packages for both vanilla and PREEMPT_RT kernels for Archlinux.
 
