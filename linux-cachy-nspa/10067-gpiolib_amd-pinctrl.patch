@@ -1,0 +1,48 @@
+@@ -, +, @@ 
+---
+ drivers/gpio/gpiolib.c        | 3 +++
+ drivers/pinctrl/pinctrl-amd.c | 5 ++++-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+--- a/drivers/gpio/gpiolib.c	
++++ a/drivers/gpio/gpiolib.c	
+@@ -3738,6 +3738,9 @@ int gpiod_configure_flags(struct gpio_desc *desc, const char *con_id,
+ {
+ 	int ret;
+ 
++	gpiod_info(desc, "gpiod_configure_flags lflags 0x%08lx dflags 0x%08x\n",
++		   lflags, dflags);
++
+ 	if (lflags & GPIO_ACTIVE_LOW)
+ 		set_bit(FLAG_ACTIVE_LOW, &desc->flags);
+ 
+--- a/drivers/pinctrl/pinctrl-amd.c	
++++ a/drivers/pinctrl/pinctrl-amd.c	
+@@ -719,7 +719,7 @@ static int amd_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
+ 	int i;
+ 	u32 arg;
+ 	int ret = 0;
+-	u32 pin_reg;
++	u32 pin_reg, pin_reg_old;
+ 	unsigned long flags;
+ 	enum pin_config_param param;
+ 	struct amd_gpio *gpio_dev = pinctrl_dev_get_drvdata(pctldev);
+@@ -729,6 +729,7 @@ static int amd_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin,
+ 		param = pinconf_to_config_param(configs[i]);
+ 		arg = pinconf_to_config_argument(configs[i]);
+ 		pin_reg = readl(gpio_dev->base + pin*4);
++		pin_reg_old = pin_reg;
+ 
+ 		switch (param) {
+ 		case PIN_CONFIG_INPUT_DEBOUNCE:
+@@ -796,6 +797,8 @@ static int amd_pinconf_set(struct pinctr
+ 			pin_reg |= (arg & BIT(0)) << PULL_UP_SEL_OFF;
+ 			pin_reg &= ~BIT(PULL_UP_ENABLE_OFF);
+ 			pin_reg |= ((arg>>1) & BIT(0)) << PULL_UP_ENABLE_OFF;
++			dev_info(&gpio_dev->pdev->dev, "Setting pull-up on pin %u pinctrl 0x%08x -> 0x%08x\n",
++				 pin, pin_reg_old, pin_reg);
+ 			break;
+ 
+ 		case PIN_CONFIG_DRIVE_STRENGTH:
+
+-- 
+
