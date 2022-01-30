@@ -1,5 +1,9 @@
+From 3f839c90f2091969ca489167b44b260a5c08a897 Mon Sep 17 00:00:00 2001
+From: ninez <johnstonljordan@gmail.com>
+Date: Sat, 29 Jan 2022 09:55:56 -0500
+Subject: [PATCH] pinctrl-amd.c IRQF_NO_THREAD
 
- - amd_pinctrl pukes on boot with threadirqs boot parameter, as seen in the 
+ - amd_pinctrl pukes on boot with threadirqs boot parameter, as seen in the
    kernel ring buffer.
 
 [    1.926523] ------------[ cut here ]------------
@@ -32,9 +36,16 @@
 [    1.926652]  </TASK>
 [    1.926653] ---[ end trace 0000000000000000 ]---
 
---- a/drivers/pinctrl/pinctrl-amd.c	2019-09-15 14:00:11.132606148 -0400
-+++ b/drivers/pinctrl/pinctrl-amd.c	2019-09-17 02:02:53.163694381 -0400
-@@ -1049,7 +1049,7 @@ static int amd_gpio_probe(struct platfor
+Signed-off-by: ninez <johnstonljordan@gmail.com>
+---
+ drivers/pinctrl/pinctrl-amd.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/pinctrl/pinctrl-amd.c b/drivers/pinctrl/pinctrl-amd.c
+index ecab9064a845..e427476bab67 100644
+--- a/drivers/pinctrl/pinctrl-amd.c
++++ b/drivers/pinctrl/pinctrl-amd.c
+@@ -1049,7 +1049,7 @@ static int amd_gpio_probe(struct platform_device *pdev)
  	}
  
  	ret = devm_request_irq(&pdev->dev, gpio_dev->irq, amd_gpio_irq_handler,
@@ -43,3 +54,6 @@
  	if (ret)
  		goto out2;
  
+-- 
+2.35.1
+

@@ -180,7 +180,6 @@ source=(
   "10064-hidraw-Replace_hidraw_device_table_rwsem.patch"
   "10065-background_reclaim_of_hugepages.patch"
   "10066-sched_rt-rr_timeslice_1_jiffy.patch"
-  "10067-gpiolib_amd-pinctrl.patch"
 )
 #if [ -n "$_use_pgo" ]; then
 #  source+=("0001-PGO.patch")
@@ -475,7 +474,7 @@ prepare() {
   scripts/config --enable CONFIG_TCP_CONG_BBR2
   scripts/config --enable CONFIG_DEFAULT_BBR2
   scripts/config --set-str CONFIG_DEFAULT_TCP_CONG bbr2
-  echo "Setting performance governor..."
+  echo "Setting Schedutil governor..."
   scripts/config --enable CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
   scripts/config --disable CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE
   scripts/config --enable CONFIG_CPU_FREQ_GOV_ONDEMAND
@@ -692,9 +691,8 @@ md5sums=('6c504067f42447ea00880f8801cc5faf'
          'baf1fac3e4b4abb4e9b9fb0fca97a699'
          '6eba5c2051cc4ace6e5748bc7e031e79'
          'fbcc5c44ea0e0da0d7f73df2377cedbb'
-         '9ec1b2e94d637cdd5348473296c44169'
-         'db7646f8882c01088370c92baceb7d44'
+         '772ee946219728ec1c41bc5da59d0387'
+         '90ef5c2f9166bdf01cf2b481c389fa92'
          '2febe27c9376e03c0826c2e188d219ef'
          'd4ac933e3938899f159a8248c0c35154'
-         '390865cd3a74027e06cec0c61305607f'
-         'd324e0cbc9f921b29cea39d6659e832e')
+         '390865cd3a74027e06cec0c61305607f')

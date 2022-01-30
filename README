@@ -20,7 +20,6 @@ My patch list;
 * 10064-hidraw-Replace_hidraw_device_table_rwsem.patch
 * 10065-background_reclaim_of_hugepages.patch
 * 10066-sched_rt-rr_timeslice_1_jiffy.patch
-* 10067-gpiolib_amd-pinctrl.patch
 
 As well, I have packages for both vanilla and PREEMPT_RT kernels for Archlinux.
 
