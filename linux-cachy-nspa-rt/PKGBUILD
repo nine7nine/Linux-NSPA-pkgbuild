@@ -123,7 +123,7 @@ else
   pkgbase=linux-cachy-nspa-rt
 fi
 _major=5.16
-_minor=3
+_minor=4
 #_minorc=$((_minor+1))
 #_rcver=rc8
 pkgver=${_major}.${_minor}
@@ -157,15 +157,13 @@ source=(
   "0001-cpu.patch"
   "0001-clearlinux.patch"
   "0001-misc.patch"
-  "0001-net-patches.patch"
   "0001-fixes-misc.patch"
-  "0001-pf-patches.patch"
   "0001-futex-winesync.patch"
   "0001-hwmon.patch"
   "0001-zstd-patches.patch"
   "0001-cc.patch"
   "0010-ELF.patch"
-  "patch-5.16.2-rt19.patch"
+  "1001-patch-5.16.4-rt21.patch"
   "1002-5.16-mg-lru-rt.patch"
   "1003-5.16-cfi-rt.patch"
   "auto-cpu-optimization.sh"
@@ -662,7 +660,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 
-md5sums=('6c504067f42447ea00880f8801cc5faf'
+md5sums=('4a6796ff9e020abb3666d40775ab4867'
          '812ca5a5887d5a51149204dd6ed2d72a'
          '3d8d1eeebba7d038f6d890619233e605'
          '88ecfa045fff42d9744c28e90f177fbb'
@@ -673,15 +671,13 @@ md5sums=('6c504067f42447ea00880f8801cc5faf'
          'd4c38ce51fb9a69aa92ad9b9e0199122'
          'a687c26c262ccb9ad7cb54697a1476bc'
          '80920e501b9b87bfe587edff445e6efe'
-         'bf010dff1d7a48191d491eba2dde1227'
          'e65542f1346a17ad3d94df92d6b659e4'
-         'be1e00d93e9c2ba91ee6017b82e64194'
          '28dcc1fe3029c6c316773bbcbe82954d'
          'bcbe26e4874913a233bac2ea46ed945b'
          'b8de60147525240358a5aea6d809f0ed'
          'd2a8951a9292e5c397b8cdd50b61a92b'
          'a05b47e1970509a27f36501534751a9b'
-         'b5075456961806959ba2f0b8c23d9298'
+         '074a63c4684e3d88dd0e4fb0ac0d8f2b'
          'a400ac10a22d76a1884dc57f7a8b645c'
          '3c1a68f944fbee64be15739bdb37976d'
          '21c98f19e883879dd3336c1fa143fd31'
