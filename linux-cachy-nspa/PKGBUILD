@@ -102,7 +102,7 @@ else
   pkgbase=linux-cachy-nspa
 fi
 _major=5.17
-_minor=7
+_minor=9
 #_minorc=$((_minor+1))
 #_rcver=rc8
 pkgver=${_major}.${_minor}
@@ -666,7 +666,7 @@ for _p in "${pkgname[@]}"; do
     }"
 done
 
-sha256sums=('22f67ef6b12ef6c0c0353be4b90b4bf4b9b18b858c16c346fa495b67ec718c99'
+sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
             '6fbdcc2ba3b65df2b08721cdcbaf53ec60fcaf349258636ca7ee137891a74884'
             '09aa0e17190ee113a352573b2d2386cc04b522641fd277306e8ace9fd7af0037'
             'ddaf45cc72ed743f70c8754505357e94d6dd4133bfde6e9c6afc59f4cc12ee69'
