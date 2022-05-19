@@ -136,9 +136,6 @@ source=(
   "0008-fixes-miscellaneous.patch"
   "0009-fs-patches.patch"
   "0010-hwmon.patch"
-  "0011-lru-le9.patch"
-  "0012-spf-lru.patch"
-  "0014-lrng.patch"
   "0015-ck-hrtimer.patch"
   "auto-cpu-optimization.sh"
   "10060-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
@@ -668,7 +665,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
-            '7dc79f53700bcfb3764ea45dffd960da310756d36fbfee2b4805bae308ee2e3f'
+            '210e6a4aa70ee8dd4c53a02d874d654837b4346daa8c45e00b457d54ceab6a43'
             '09aa0e17190ee113a352573b2d2386cc04b522641fd277306e8ace9fd7af0037'
             'ddaf45cc72ed743f70c8754505357e94d6dd4133bfde6e9c6afc59f4cc12ee69'
             '6b31e4655e5ff9dbe95fb7db665426dad2bf3e33b5102d040a256f707cc99a23'
@@ -679,9 +676,6 @@ sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
             '4567a7b51d98643b599a9cd5029c7c433661a3519ecf9816d4557e6bd8174917'
             '12ebabff02f66e1583232591fc4ddf09c6437f11a4c59045d6d50d4be0f3693e'
             '648063b388a87acc28546677ad5cb85d475204024275ebb44ba4d389862b280b'
-            '9c2c0ccee49c17663f27dcdf43cfa02cd45ee15d53ff1a05da7e683098abdde1'
-            '1b2dd9147b7443a42ec49e9d1bf01d1209bfcbe625e686e90f0276abb3ed52ec'
-            '761abc5bd65c194b6b810af1022df5888ce0ecbe70ffe4cd67e6e0c748fb78a2'
             '07e34ca2f03d96837166ff4764503a76ff6f499107716455073e5e081b40a146'
             '65ec9ac5b8b28d5b61df1c72498059be2e7cb1f9b965bac0e4ffed3c05520b2b'
             'e3c106cfac323c6f677b698b080b48798ea63786a7153f81d9a21f749e73168d'
