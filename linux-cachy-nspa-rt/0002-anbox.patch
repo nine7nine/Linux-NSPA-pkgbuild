@@ -1,10 +1,9 @@
-From 92c5d65763831844226826b94bb2b3c3e00cb287 Mon Sep 17 00:00:00 2001
-From: Piotr Gorski <lucjan.lucjanov@gmail.com>
-Date: Mon, 28 Jun 2021 13:48:36 +0200
-Subject: [PATCH] android: export symbold and enable building ashmem and binder
- as modules
+From 84dafd0e0b6f7fc9d225bbeb34e900b1622f0f89 Mon Sep 17 00:00:00 2001
+From: Peter Jung <admin@ptr1337.dev>
+Date: Thu, 5 May 2022 20:14:12 +0200
+Subject: [PATCH 02/17] anbox
 
-Signed-off-by: Piotr Gorski <lucjan.lucjanov@gmail.com>
+Signed-off-by: Peter Jung <admin@ptr1337.dev>
 ---
  drivers/android/Kconfig          | 2 +-
  drivers/android/Makefile         | 7 ++++---
@@ -22,7 +21,7 @@ Signed-off-by: Piotr Gorski <lucjan.lucjanov@gmail.com>
  13 files changed, 22 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/android/Kconfig b/drivers/android/Kconfig
-index 53b22e262..f3c50236e 100644
+index 53b22e26266c..f3c50236e8d1 100644
 --- a/drivers/android/Kconfig
 +++ b/drivers/android/Kconfig
 @@ -9,7 +9,7 @@ config ANDROID
@@ -35,7 +34,7 @@ index 53b22e262..f3c50236e 100644
  	default n
  	help
 diff --git a/drivers/android/Makefile b/drivers/android/Makefile
-index c9d3d0c99..55411d9a9 100644
+index c9d3d0c99c25..55411d9a9c2a 100644
 --- a/drivers/android/Makefile
 +++ b/drivers/android/Makefile
 @@ -1,6 +1,7 @@
@@ -50,7 +49,7 @@ index c9d3d0c99..55411d9a9 100644
 +binder_linux-$(CONFIG_ANDROID_BINDERFS)	+= binderfs.o
 +binder_linux-$(CONFIG_ANDROID_BINDER_IPC_SELFTEST) += binder_alloc_selftest.o
 diff --git a/drivers/android/binder_alloc.c b/drivers/android/binder_alloc.c
-index 340515f54..9ad238768 100644
+index 47bc74a8c7b6..49ff7504646e 100644
 --- a/drivers/android/binder_alloc.c
 +++ b/drivers/android/binder_alloc.c
 @@ -38,7 +38,7 @@ enum {
@@ -63,7 +62,7 @@ index 340515f54..9ad238768 100644
  
  #define binder_alloc_debug(mask, x...) \
 diff --git a/drivers/staging/android/Kconfig b/drivers/staging/android/Kconfig
-index 70498adb1..5c35653ed 100644
+index 70498adb1575..5c35653ed36d 100644
 --- a/drivers/staging/android/Kconfig
 +++ b/drivers/staging/android/Kconfig
 @@ -4,7 +4,7 @@ menu "Android"
@@ -76,7 +75,7 @@ index 70498adb1..5c35653ed 100644
  	help
  	  The ashmem subsystem is a new shared memory allocator, similar to
 diff --git a/drivers/staging/android/Makefile b/drivers/staging/android/Makefile
-index e9a55a5e6..60cb8eacc 100644
+index e9a55a5e6529..60cb8eacc793 100644
 --- a/drivers/staging/android/Makefile
 +++ b/drivers/staging/android/Makefile
 @@ -1,4 +1,5 @@
@@ -87,7 +86,7 @@ index e9a55a5e6..60cb8eacc 100644
 +obj-$(CONFIG_ASHMEM)			+= ashmem_linux.o
 +ashmem_linux-y				+= ashmem.o
 diff --git a/drivers/staging/android/ashmem.c b/drivers/staging/android/ashmem.c
-index ddbde3f84..2a92b0a74 100644
+index ddbde3f8430e..2a92b0a7482f 100644
 --- a/drivers/staging/android/ashmem.c
 +++ b/drivers/staging/android/ashmem.c
 @@ -24,6 +24,7 @@
@@ -105,10 +104,10 @@ index ddbde3f84..2a92b0a74 100644
 +
 +MODULE_LICENSE("GPL v2");
 diff --git a/fs/file.c b/fs/file.c
-index 8627dacfc..cc88d37c4 100644
+index ee9317346702..21194c33efb3 100644
 --- a/fs/file.c
 +++ b/fs/file.c
-@@ -787,6 +787,7 @@ int __close_fd_get_file(unsigned int fd, struct file **res)
+@@ -816,6 +816,7 @@ int __close_fd_get_file(unsigned int fd, struct file **res)
  	*res = NULL;
  	return -ENOENT;
  }
@@ -117,10 +116,10 @@ index 8627dacfc..cc88d37c4 100644
  /*
   * variant of close_fd that gets a ref on the file for later fput.
 diff --git a/kernel/fork.c b/kernel/fork.c
-index 38681ad44..dc956aa09 100644
+index 49144b49a3d1..9ed78847a900 100644
 --- a/kernel/fork.c
 +++ b/kernel/fork.c
-@@ -1153,6 +1153,7 @@ void mmput_async(struct mm_struct *mm)
+@@ -1156,6 +1156,7 @@ void mmput_async(struct mm_struct *mm)
  		schedule_work(&mm->async_put_work);
  	}
  }
@@ -129,10 +128,10 @@ index 38681ad44..dc956aa09 100644
  
  /**
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index f21714ea3..e65fb3674 100644
+index 1eec4925b8c6..a8573bc1eb8d 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -6931,6 +6931,7 @@ int can_nice(const struct task_struct *p, const int nice)
+@@ -6970,6 +6970,7 @@ int can_nice(const struct task_struct *p, const int nice)
  	return (nice_rlim <= task_rlimit(p, RLIMIT_NICE) ||
  		capable(CAP_SYS_NICE));
  }
@@ -141,7 +140,7 @@ index f21714ea3..e65fb3674 100644
  #ifdef __ARCH_WANT_SYS_NICE
  
 diff --git a/kernel/task_work.c b/kernel/task_work.c
-index 1698fbe6f..90000404a 100644
+index 1698fbe6f0e1..90000404af2b 100644
 --- a/kernel/task_work.c
 +++ b/kernel/task_work.c
 @@ -60,6 +60,7 @@ int task_work_add(struct task_struct *task, struct callback_head *work,
@@ -153,10 +152,10 @@ index 1698fbe6f..90000404a 100644
  /**
   * task_work_cancel_match - cancel a pending work added by task_work_add()
 diff --git a/mm/memory.c b/mm/memory.c
-index c52be6d6b..43012ba7e 100644
+index b69afe3dd597..4575af1944aa 100644
 --- a/mm/memory.c
 +++ b/mm/memory.c
-@@ -1655,6 +1655,7 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long start,
+@@ -1686,6 +1686,7 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long start,
  	mmu_notifier_invalidate_range_end(&range);
  	tlb_finish_mmu(&tlb);
  }
@@ -165,10 +164,10 @@ index c52be6d6b..43012ba7e 100644
  /**
   * zap_page_range_single - remove user pages in a given range
 diff --git a/mm/shmem.c b/mm/shmem.c
-index b5860f4a2..c1f352f47 100644
+index a09b29ec2b45..98f73f109f19 100644
 --- a/mm/shmem.c
 +++ b/mm/shmem.c
-@@ -4162,6 +4162,7 @@ int shmem_zero_setup(struct vm_area_struct *vma)
+@@ -4140,6 +4140,7 @@ int shmem_zero_setup(struct vm_area_struct *vma)
  
  	return 0;
  }
@@ -177,7 +176,7 @@ index b5860f4a2..c1f352f47 100644
  /**
   * shmem_read_mapping_page_gfp - read into page cache, using specified page allocation flags.
 diff --git a/security/security.c b/security/security.c
-index 67264cb08..3df62aa37 100644
+index b7cf5cbfdc67..18f508bf3ea3 100644
 --- a/security/security.c
 +++ b/security/security.c
 @@ -751,24 +751,28 @@ int security_binder_set_context_mgr(const struct cred *mgr)
@@ -210,5 +209,5 @@ index 67264cb08..3df62aa37 100644
  int security_ptrace_access_check(struct task_struct *child, unsigned int mode)
  {
 -- 
-2.33.1.711.g9d530dc002
+2.36.0
 
