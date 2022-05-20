@@ -146,7 +146,8 @@ source=(
   "10063-designware-i2c_IRQF_NO_THREAD.patch"
   "10065-background_reclaim_of_hugepages.patch"
   "10066-sched_rt-rr_timeslice_1_jiffy.patch"
-  "linux-cachyos_nspa-rt/patch-5.17.1-rt17.patch"
+  "patch-5.17.1-rt17.patch"
+  "v5.17-winesync.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -665,7 +666,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
-            '0c5b0bc7f49dbf07ecbac0a11ce169ed52b14d69adfed43f2c595749696fe21c'
+            '248c0611e9f3958d91ab4a56443c172c32ea9b84098c710159f36e20c0d46d30'
             '09aa0e17190ee113a352573b2d2386cc04b522641fd277306e8ace9fd7af0037'
             'ddaf45cc72ed743f70c8754505357e94d6dd4133bfde6e9c6afc59f4cc12ee69'
             '6b31e4655e5ff9dbe95fb7db665426dad2bf3e33b5102d040a256f707cc99a23'
@@ -686,5 +687,6 @@ sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
             '669b53108abadfd377617445f6a3f0cb9de74e649b3e62be1168a1c8c579a358'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '157cf8b0e265012685f2e14f5649e3c5121b7df430b5f551fa622639c3592907'
-            '4382974175e32abd2ce6fc47a83b4e0d48f480cb3ec7b04c5251269ba15b9abd')
+            '4382974175e32abd2ce6fc47a83b4e0d48f480cb3ec7b04c5251269ba15b9abd'
+            'eb20460f3c471b8ba5f8afef2f9af70a57f797e419e71d3e00855649e63d5c7d')
 
