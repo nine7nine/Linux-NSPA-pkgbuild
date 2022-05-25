@@ -20,7 +20,7 @@ _cpusched='cfs'
 # Set these variables to ANYTHING that is not null to enable them
 
 ### Tweak kernel options prior to a build via nconfig
-_makenconfig=
+_makemenuconfig=
 
 # NUMA is optimized for multi-socket motherboards.
 # A single multi-core CPU actually runs slower with NUMA enabled.
@@ -72,7 +72,7 @@ _damon=
 _spf_enable=y
 
 ## Enable Linux Random Number Generator
-_lrng_enable=y
+_lrng_enable=
 
 ## Apply Kernel automatic Optimization
 _use_auto_optimization=y
@@ -113,7 +113,7 @@ _srcname=linux-${_stable}
 #_srcname=linux-${_major}
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux CFS scheduler Kernel by CachyOS and with some other patches and other improvements'
-pkgrel=11
+pkgrel=12
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/CachyOS/linux-cachyos"
 license=('GPL2')
@@ -149,6 +149,8 @@ source=(
   "0024-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
   "0025-v5.17-winesync.patch"
   "0026-mm.patch"
+  "0027-mm-MG-Lru-5.17.y-patchset.patch"
+  "0028-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -410,14 +412,14 @@ prepare() {
                        --disable LRU_GEN_STATS
     fi
 
-    if [ -n "$_damon" ]; then
-        echo "Enabling DAMON..."
-        scripts/config --enable DAMON \
-                       --disable DAMON_VADDR \
-                       --disable DAMON_DBGFS \
-                       --enable DAMON_PADDR \
-                       --enable DAMON_RECLAIM
-    fi
+#    if [ -n "$_damon" ]; then
+#        echo "Enabling DAMON..."
+#        scripts/config --enable DAMON \
+#                       --disable DAMON_VADDR \
+#                       --disable DAMON_DBGFS \
+#                       --enable DAMON_PADDR \
+#                       --enable DAMON_RECLAIM
+#    fi
 
     if [ -n "$_lrng_enable" ]; then
         echo "Enabling Linux Random Number Generator ..."
@@ -513,17 +515,17 @@ prepare() {
     fi
 
 
-    ### Optionally load needed modules for the make localmodconfig
-    # See https://aur.archlinux.org/packages/modprobed-db
-    if [ -n "$_localmodcfg" ]; then
-        if [ -e $HOME/.config/modprobed.db ]; then
-            echo "Running Steven Rostedt's make localmodconfig now"
-            make ${BUILD_FLAGS[*]} LSMOD=$HOME/.config/modprobed.db localmodconfig
-        else
-            echo "No modprobed.db data found"
-            exit
-        fi
-    fi
+#    ### Optionally load needed modules for the make localmodconfig
+#    # See https://aur.archlinux.org/packages/modprobed-db
+#    if [ -n "$_localmodcfg" ]; then
+#        if [ -e $HOME/.config/modprobed.db ]; then
+#            echo "Running Steven Rostedt's make localmodconfig now"
+#            make ${BUILD_FLAGS[*]} LSMOD=$HOME/.config/modprobed.db localmodconfig
+#        else
+#            echo "No modprobed.db data found"
+#            exit
+#        fi
+#    fi
 
 
 
@@ -533,7 +535,7 @@ prepare() {
     echo "Prepared $pkgbase version $(<version)"
 
     ### Running make nconfig
-    [[ -z "$_makenconfig" ]] || make ${BUILD_FLAGS[*]} nconfig
+    [[ -z "$_makemenuonfig" ]] || make ${BUILD_FLAGS[*]} menuconfig
 
     ### Save configuration for later reuse
     cp -Tf ./.config "${startdir}/config-${pkgver}-${pkgrel}${pkgbase#linux}"
@@ -667,7 +669,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
-            '248c0611e9f3958d91ab4a56443c172c32ea9b84098c710159f36e20c0d46d30'
+            'dfd00f62eb5073157b35bbb56a06b5594350f134e3a6134e5298968f5a6208d3'
             '09aa0e17190ee113a352573b2d2386cc04b522641fd277306e8ace9fd7af0037'
             'ddaf45cc72ed743f70c8754505357e94d6dd4133bfde6e9c6afc59f4cc12ee69'
             '6b31e4655e5ff9dbe95fb7db665426dad2bf3e33b5102d040a256f707cc99a23'
@@ -690,5 +692,7 @@ sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
             '4382974175e32abd2ce6fc47a83b4e0d48f480cb3ec7b04c5251269ba15b9abd'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             'eb20460f3c471b8ba5f8afef2f9af70a57f797e419e71d3e00855649e63d5c7d'
-            '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee')
+            '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
+            'd3ac929b5a2ecce0a02be5749ca903cca1717a50fa8dd86375d42cafdaf645ac'
+            '5b1a8092837cd06a57becbe8cace02c7da445761e0e6d53ea25d9f966b57ab3b')
 
