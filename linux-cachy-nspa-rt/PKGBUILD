@@ -138,16 +138,17 @@ source=(
   "0010-hwmon.patch"
   "0015-ck-hrtimer.patch"
   "auto-cpu-optimization.sh"
-  "10060-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
-  "10030-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
-  "10001-mm-Support-soft-dirty-flag-reset-for-VA-range.patch"
-  "10002-mm-Support-soft-dirty-flag-read-with-reset.patch"
-  "10062-amd_pinctrl-IRQF_NO_THREAD.patch"
-  "10063-designware-i2c_IRQF_NO_THREAD.patch"
-  "10065-background_reclaim_of_hugepages.patch"
-  "10066-sched_rt-rr_timeslice_1_jiffy.patch"
-  "patch-5.17.1-rt17.patch"
-  "v5.17-winesync.patch"
+  "0016-mm-Support-soft-dirty-flag-reset-for-VA-range.patch"
+  "0017-mm-Support-soft-dirty-flag-read-with-reset.patch"
+  "0018-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
+  "0019-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
+  "0020-amd_pinctrl-IRQF_NO_THREAD.patch"
+  "0021-designware-i2c_IRQF_NO_THREAD.patch"
+  "0022-background_reclaim_of_hugepages.patch"
+  "0023-patch-5.17.1-rt17.patch"
+  "0024-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
+  "0025-v5.17-winesync.patch"
+  "0026-mm.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -679,14 +680,15 @@ sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
             '648063b388a87acc28546677ad5cb85d475204024275ebb44ba4d389862b280b'
             '07e34ca2f03d96837166ff4764503a76ff6f499107716455073e5e081b40a146'
             '65ec9ac5b8b28d5b61df1c72498059be2e7cb1f9b965bac0e4ffed3c05520b2b'
-            'e3c106cfac323c6f677b698b080b48798ea63786a7153f81d9a21f749e73168d'
-            '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             'cee94fce396530325bde74e53cae9108f2804fedb55b7ba56539e94a034ce5c8'
             '28c24f4cd4faac8a5562b4faf1c3b04c93ed0ea0317706b3553e48e26284e7d9'
+            '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
+            'e3c106cfac323c6f677b698b080b48798ea63786a7153f81d9a21f749e73168d'
             '20610d060e4e57762081f66b3a51017047d44e73a778879144c8061b8b3b35d7'
             '669b53108abadfd377617445f6a3f0cb9de74e649b3e62be1168a1c8c579a358'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
-            '157cf8b0e265012685f2e14f5649e3c5121b7df430b5f551fa622639c3592907'
             '4382974175e32abd2ce6fc47a83b4e0d48f480cb3ec7b04c5251269ba15b9abd'
-            'eb20460f3c471b8ba5f8afef2f9af70a57f797e419e71d3e00855649e63d5c7d')
+            '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
+            'eb20460f3c471b8ba5f8afef2f9af70a57f797e419e71d3e00855649e63d5c7d'
+            '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee')
 

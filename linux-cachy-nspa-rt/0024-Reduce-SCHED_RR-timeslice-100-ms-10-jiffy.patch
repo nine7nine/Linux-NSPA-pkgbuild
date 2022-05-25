@@ -1,0 +1,31 @@
+From 5ba05b01b0a68efb4bf5372d6cd50a5d58587a10 Mon Sep 17 00:00:00 2001
+From: Jordan Johnston <johnstonljordan@gmail.com>
+Date: Wed, 25 May 2022 07:48:27 -0500
+Subject: [PATCH] Reduce SCHED_RR timeslice: 100 ms => 10 jiffy
+
+ - previously I was reducing to 1 jiffy, but I think that's extreme.
+
+Signed-off-by: Jordan Johnston <johnstonljordan@gmail.com>
+---
+ include/linux/sched/rt.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/sched/rt.h b/include/linux/sched/rt.h
+index e5af028c08b4..425f99f07876 100644
+--- a/include/linux/sched/rt.h
++++ b/include/linux/sched/rt.h
+@@ -59,9 +59,9 @@ extern void normalize_rt_tasks(void);
+ 
+ 
+ /*
+- * default timeslice is 100 msecs (used only for SCHED_RR tasks).
++ * default timeslice is 1 jiffy (used only for SCHED_RR tasks).
+  * Timeslices get refilled after they expire.
+  */
+-#define RR_TIMESLICE		(100 * HZ / 1000)
++#define RR_TIMESLICE		(10)
+ 
+ #endif /* _LINUX_SCHED_RT_H */
+-- 
+2.36.1
+
