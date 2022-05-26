@@ -1,9 +1,10 @@
 # LINUX-NSPA
 
-This repo contains customized PREEMPT_RT kernel packages.
+![My Image](/images/linux-nspa-banner.png)
 
-I add some misc patches for my own purposes. I include a threadsirq and other fixup for
-amd-pinctrl / i2c related drivers, some misc wine-related stuff, etc.
+This repo contains customized PREEMPT_RT kernel packages that have additional
+patchwork and out-of-tree features added. Patchwork taken from CachyOS, Intel,
+Google annd other sources.
 
 ## My patch list;
 
@@ -34,7 +35,3 @@ amd-pinctrl / i2c related drivers, some misc wine-related stuff, etc.
 
 NOTE: the included kernel config is specifically for my laptop. If
 anyone is using these packages, you will have to generate your own config.
-
-https://wiki.archlinux.org/title/Modprobed-db
-
-
