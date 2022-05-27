@@ -2,6 +2,8 @@
 
 ![My Image](/images/linux-nspa-banner.png)
 
+### Linux-NSPA Archlinux Packages
+
 This repo contains customized PREEMPT_RT kernel packages that have additional
 patchwork and out-of-tree features added. Patchwork taken from CachyOS, Intel,
 Google annd other sources.
@@ -33,5 +35,5 @@ Google annd other sources.
 * 000027-mm-MG-Lru-5.17.y-patchset.patch
 * 000028-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch
 
-NOTE: the included kernel config is specifically for my laptop. If
-anyone is using these packages, you will have to generate your own config.
+SPECIAL NOTE: the included kernel config is specifically for my laptop. If
+anyone is using these packages, you will have to (re-)generate your own config.
