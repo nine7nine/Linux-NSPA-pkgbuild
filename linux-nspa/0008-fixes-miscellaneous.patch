@@ -89,28 +89,6 @@ index 416f382e6874..e74c0e1b5385 100644
  # Prohibit date/time macros, which would make the build non-deterministic
  KBUILD_CFLAGS   += -Werror=date-time
  
-diff --git a/arch/x86/crypto/chacha-avx512vl-x86_64.S b/arch/x86/crypto/chacha-avx512vl-x86_64.S
-index 946f74dd6fba..259383e1ad44 100644
---- a/arch/x86/crypto/chacha-avx512vl-x86_64.S
-+++ b/arch/x86/crypto/chacha-avx512vl-x86_64.S
-@@ -172,7 +172,7 @@ SYM_FUNC_START(chacha_2block_xor_avx512vl)
- 	# xor remaining bytes from partial register into output
- 	mov		%rcx,%rax
- 	and		$0xf,%rcx
--	jz		.Ldone8
-+	jz		.Ldone2
- 	mov		%rax,%r9
- 	and		$~0xf,%r9
- 
-@@ -438,7 +438,7 @@ SYM_FUNC_START(chacha_4block_xor_avx512vl)
- 	# xor remaining bytes from partial register into output
- 	mov		%rcx,%rax
- 	and		$0xf,%rcx
--	jz		.Ldone8
-+	jz		.Ldone4
- 	mov		%rax,%r9
- 	and		$~0xf,%r9
- 
 diff --git a/arch/x86/include/asm/pci.h b/arch/x86/include/asm/pci.h
 index d2c76c8d8cfd..47c3b333f2c6 100644
 --- a/arch/x86/include/asm/pci.h

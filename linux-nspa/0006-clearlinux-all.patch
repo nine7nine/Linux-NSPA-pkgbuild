@@ -581,19 +581,6 @@ index 9ecce435fb3f..796f280eccfe 100644
  
  static void pci_dev_d3_sleep(struct pci_dev *dev)
  {
-diff --git a/drivers/powercap/intel_rapl_common.c b/drivers/powercap/intel_rapl_common.c
-index 07611a00b78f..4031d810def5 100644
---- a/drivers/powercap/intel_rapl_common.c
-+++ b/drivers/powercap/intel_rapl_common.c
-@@ -1512,7 +1512,7 @@ static int __init rapl_init(void)
- 
- 	id = x86_match_cpu(rapl_ids);
- 	if (!id) {
--		pr_err("driver does not support CPU family %d model %d\n",
-+		pr_info("driver does not support CPU family %d model %d\n",
- 		       boot_cpu_data.x86, boot_cpu_data.x86_model);
- 
- 		return -ENODEV;
 diff --git a/drivers/thermal/intel/intel_powerclamp.c b/drivers/thermal/intel/intel_powerclamp.c
 index 14256421d98c..8df2e604ceef 100644
 --- a/drivers/thermal/intel/intel_powerclamp.c

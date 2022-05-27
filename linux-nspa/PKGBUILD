@@ -97,12 +97,12 @@ _thin_lto_cachedir=
 _use_cfi=
 
 if [ -n "$_use_llvm_lto" ]; then
-  pkgbase=linux-cachy-nspa-rt-lto
+  pkgbase=linux-nspa-lto
 else
-  pkgbase=linux-cachy-nspa-rt
+  pkgbase=linux-nspa
 fi
 _major=5.17
-_minor=9
+_minor=11
 #_minorc=$((_minor+1))
 #_rcver=rc8
 pkgver=${_major}.${_minor}
@@ -112,27 +112,26 @@ _stable=${_major}.${_minor}
 _srcname=linux-${_stable}
 #_srcname=linux-${_major}
 arch=(x86_64 x86_64_v3)
-pkgdesc='Linux CFS scheduler Kernel by CachyOS and with some other patches and other improvements'
-pkgrel=12
+pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
+pkgrel=13
 arch=('x86_64' 'x86_64_v3')
-url="https://github.com/CachyOS/linux-cachyos"
+url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 if [ -n "$_use_llvm_lto" ]; then
     makedepends+=(clang llvm lld python)
 fi
-_patchsource="https://raw.githubusercontent.com/ptr1337/kernel-patches/master/${_major}"
 source=(
   "https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/${_srcname}.tar.xz"
   "config"
   "0001-arch.patch"
-  "0002-anbox.patch"
+  "0002-acpi_cppc-amd-pstate.patch"
   "0003-bbr2.patch"
   "0004-cachy.patch"
-  "0005-migrate.patch"
-  "0006-clearlinux.patch"
-  "0007-cpu.patch"
+  "0005-peterz-sched-migrate.patch"
+  "0006-clearlinux-all.patch"
+  "0007-more-uarches-for-kernel-5.17+.patch"
   "0008-fixes-miscellaneous.patch"
   "0009-fs-patches.patch"
   "0010-hwmon.patch"
@@ -148,7 +147,7 @@ source=(
   "0023-patch-5.17.1-rt17.patch"
   "0024-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
   "0025-v5.17-winesync.patch"
-  "0026-mm.patch"
+  "0026-mm-ncrease_max_map_count.patch"
   "0027-mm-MG-Lru-5.17.y-patchset.patch"
   "0028-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
 )
@@ -668,16 +667,16 @@ for _p in "${pkgname[@]}"; do
     }"
 done
 
-sha256sums=('172424bc41ef2df9b19457ceb022b56a51eb9497529b15ce7e9b8d6f90ad5978'
+sha256sums=('5708e656fae734c3a7b27718345b29e2f7bfd06dfb85acdffca0ba4505f81b31'
             'dfd00f62eb5073157b35bbb56a06b5594350f134e3a6134e5298968f5a6208d3'
             '09aa0e17190ee113a352573b2d2386cc04b522641fd277306e8ace9fd7af0037'
-            'ddaf45cc72ed743f70c8754505357e94d6dd4133bfde6e9c6afc59f4cc12ee69'
+            'fa93aace08804d4570b14c59d17fe0451d47030fa40c79b9abd890d5633d9ca2'
             '6b31e4655e5ff9dbe95fb7db665426dad2bf3e33b5102d040a256f707cc99a23'
             '8d327824362a7484bf7a8e4bfbe37e969ee39bbbb1c09c9e1e909b7e5941240d'
             '543209b77159e768a105ac41bd3c760380ef73e97dabd53d958e0bdb024ddf1d'
-            'a13c4f5a688a86c8c67642a4129d2c89efd5f1afd3625e15ce5abe0b983d60d0'
-            'ab87b51fcacd9c7c5bf5d363ac45dab994c2c53d0e80e552390c7cbf752d7dca'
-            '4567a7b51d98643b599a9cd5029c7c433661a3519ecf9816d4557e6bd8174917'
+            '6459c08b26ef7546899e87005a8d8fd518fdbe59425218872846292b78ec4ec3'
+            '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
+            '6bb7e313105f4315d070503f31d1f9a1415f1b92692041c92f5b6aa1eabfe135'
             '12ebabff02f66e1583232591fc4ddf09c6437f11a4c59045d6d50d4be0f3693e'
             '648063b388a87acc28546677ad5cb85d475204024275ebb44ba4d389862b280b'
             '07e34ca2f03d96837166ff4764503a76ff6f499107716455073e5e081b40a146'
