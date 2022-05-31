@@ -1,49 +1,66 @@
-From 04ac47d0fbec56876b0e46ad5cdb53c05d2f792c Mon Sep 17 00:00:00 2001
+From 90c611fd6052aa48d45efb4ca4c658d09021a0e4 Mon Sep 17 00:00:00 2001
 From: Peter Jung <admin@ptr1337.dev>
-Date: Tue, 10 May 2022 14:10:35 +0200
+Date: Sat, 21 May 2022 15:57:20 +0200
 Subject: [PATCH] cachy
 
 Signed-off-by: Peter Jung <admin@ptr1337.dev>
-
-(cherry picked from commit b2eb864e0c5cc7862a1cf2f4c267421a48126ea0)
-Signed-off-by: Peter Jung <admin@ptr1337.dev>
 ---
- .../admin-guide/kernel-parameters.txt         |  6 ++
- Documentation/admin-guide/pm/cpuidle.rst      | 15 +++--
- Makefile                                      |  5 +-
- arch/Kconfig                                  | 10 ++++
+ .../admin-guide/kernel-parameters.txt         | 19 +++++++++
+ Documentation/admin-guide/pm/cpuidle.rst      | 15 ++++---
+ Makefile                                      |  5 ++-
+ arch/Kconfig                                  | 10 +++++
  arch/x86/include/asm/cpufeatures.h            |  2 +-
  arch/x86/include/asm/mwait.h                  |  1 +
- arch/x86/kernel/process.c                     | 39 +++++++++----
+ arch/x86/kernel/process.c                     | 39 ++++++++++++-----
  drivers/cpufreq/Kconfig                       |  2 +-
- drivers/cpufreq/cpufreq_ondemand.c            |  6 +-
- drivers/hid/usbhid/hid-core.c                 |  8 +++
- drivers/input/evdev.c                         | 19 +++---
+ drivers/cpufreq/cpufreq_ondemand.c            |  6 +--
+ drivers/firmware/sysfb.c                      | 18 +++++++-
+ drivers/hid/usbhid/hid-core.c                 |  8 ++++
+ drivers/input/evdev.c                         | 19 +++++----
  include/linux/pageblock-flags.h               |  2 +-
  include/linux/pagemap.h                       |  2 +-
- include/linux/sched.h                         |  1 +
  init/Kconfig                                  |  4 ++
- kernel/Kconfig.hz                             | 24 ++++++++
- kernel/rcu/Kconfig                            | 13 +++++
- kernel/rcu/tree_nocb.h                        | 15 ++++-
- kernel/sched/core.c                           |  5 +-
- kernel/sched/fair.c                           | 58 +++++++++++++++++--
- kernel/sched/features.h                       |  2 +
- mm/compaction.c                               |  6 +-
+ init/version.c                                | 17 ++++++++
+ kernel/Kconfig.hz                             | 24 +++++++++++
+ kernel/rcu/Kconfig                            | 13 ++++++
+ kernel/rcu/tree_nocb.h                        | 15 ++++++-
+ kernel/sched/core.c                           |  5 ++-
+ kernel/sched/fair.c                           | 20 ++++++++-
+ mm/compaction.c                               |  6 ++-
  mm/internal.h                                 |  1 +
- mm/page-writeback.c                           |  8 +++
- mm/page_alloc.c                               | 42 +++++++++++---
+ mm/page-writeback.c                           |  8 ++++
+ mm/page_alloc.c                               | 42 +++++++++++++++----
  mm/vmpressure.c                               |  4 ++
- mm/vmscan.c                                   | 24 ++++++--
+ mm/vmscan.c                                   | 24 ++++++++---
  scripts/Makefile.lib                          |  4 ++
  scripts/Makefile.modfinal                     |  4 ++
- 29 files changed, 275 insertions(+), 57 deletions(-)
+ 29 files changed, 286 insertions(+), 53 deletions(-)
 
 diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
-index 59f881f36779..3bd6a7f809ff 100644
+index 3f1cc5e317ed..d491c096f0a9 100644
 --- a/Documentation/admin-guide/kernel-parameters.txt
 +++ b/Documentation/admin-guide/kernel-parameters.txt
-@@ -3505,6 +3505,9 @@
+@@ -1615,6 +1615,19 @@
+ 			Valid parameters: "on", "off"
+ 			Default: "on"
+ 
++	hostname=	[KNL] Set the hostname (aka UTS nodename).
++			Format: <string>
++			This allows setting the system's hostname during early
++			startup. This sets the name returned by gethostname.
++			Using this parameter to set the hostname makes it
++			possible to ensure the hostname is correctly set before
++			any userspace processes run, avoiding the possibility
++			that a process may call gethostname before the hostname
++			has been explicitly set, resulting in the calling
++			process getting an incorrect result. The string must
++			not exceed the maximum allowed hostname length (usually
++			64 characters) and will be truncated otherwise.
++
+ 	hlt		[BUGS=ARM,SH]
+ 
+ 	hpet=		[X86-32,HPET] option to control HPET usage
+@@ -3572,6 +3585,9 @@
  			just as if they had also been called out in the
  			rcu_nocbs= boot parameter.
  
@@ -53,7 +70,7 @@ index 59f881f36779..3bd6a7f809ff 100644
  	noiotrap	[SH] Disables trapped I/O port accesses.
  
  	noirqdebug	[X86-32] Disables the code which attempts to detect and
-@@ -4397,6 +4400,9 @@
+@@ -4475,6 +4491,9 @@
  			no-callback mode from boot but the mode may be
  			toggled at runtime via cpusets.
  
@@ -97,10 +114,10 @@ index aec2cd2aaea7..19754beb5a4e 100644
  In addition to the architecture-level kernel command line options affecting CPU
  idle time management, there are parameters affecting individual ``CPUIdle``
 diff --git a/Makefile b/Makefile
-index 7ef8dd5ab6f2..f6c9669801a0 100644
+index 5033c0577c6d..284169d5bbcd 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -885,7 +885,8 @@ endif
+@@ -890,7 +890,8 @@ endif
  ifdef CONFIG_LTO_CLANG
  ifdef CONFIG_LTO_CLANG_THIN
  CC_FLAGS_LTO	:= -flto=thin -fsplit-lto-unit
@@ -110,7 +127,7 @@ index 7ef8dd5ab6f2..f6c9669801a0 100644
  else
  CC_FLAGS_LTO	:= -flto
  endif
-@@ -1708,7 +1709,7 @@ PHONY += compile_commands.json
+@@ -1711,7 +1712,7 @@ PHONY += compile_commands.json
  
  clean-dirs := $(KBUILD_EXTMOD)
  clean: rm-files := $(KBUILD_EXTMOD)/Module.symvers $(KBUILD_EXTMOD)/modules.nsdeps \
@@ -120,10 +137,10 @@ index 7ef8dd5ab6f2..f6c9669801a0 100644
  PHONY += prepare
  # now expand this into a simple variable to reduce the cost of shell evaluations
 diff --git a/arch/Kconfig b/arch/Kconfig
-index 5e88237f84d2..032df1abcc10 100644
+index 31c4fdc4a4ba..61b0859be567 100644
 --- a/arch/Kconfig
 +++ b/arch/Kconfig
-@@ -706,6 +706,16 @@ config LTO_CLANG_THIN
+@@ -712,6 +712,16 @@ config LTO_CLANG_THIN
  	    https://clang.llvm.org/docs/ThinLTO.html
  
  	  If unsure, say Y.
@@ -141,7 +158,7 @@ index 5e88237f84d2..032df1abcc10 100644
  
  config ARCH_SUPPORTS_CFI_CLANG
 diff --git a/arch/x86/include/asm/cpufeatures.h b/arch/x86/include/asm/cpufeatures.h
-index 65d147974f8d..691cd4e250d3 100644
+index 73e643ae94b6..6141457cda38 100644
 --- a/arch/x86/include/asm/cpufeatures.h
 +++ b/arch/x86/include/asm/cpufeatures.h
 @@ -219,7 +219,7 @@
@@ -166,10 +183,10 @@ index 29dd27b5a339..3a8fdf881313 100644
  #define CPUID_MWAIT_LEAF		5
  #define CPUID5_ECX_EXTENSIONS_SUPPORTED 0x1
 diff --git a/arch/x86/kernel/process.c b/arch/x86/kernel/process.c
-index 81d8ef036637..c50208b9a2a3 100644
+index b370767f5b19..e26c63615931 100644
 --- a/arch/x86/kernel/process.c
 +++ b/arch/x86/kernel/process.c
-@@ -810,24 +810,43 @@ static void amd_e400_idle(void)
+@@ -813,24 +813,43 @@ static void amd_e400_idle(void)
  }
  
  /*
@@ -237,7 +254,7 @@ index c3038cdc6865..25bf88b571ae 100644
  	select CPU_FREQ_GOV_PERFORMANCE
  	help
 diff --git a/drivers/cpufreq/cpufreq_ondemand.c b/drivers/cpufreq/cpufreq_ondemand.c
-index 6a41ea4729b8..370af073c27f 100644
+index e8fbf970ff07..416e2097753b 100644
 --- a/drivers/cpufreq/cpufreq_ondemand.c
 +++ b/drivers/cpufreq/cpufreq_ondemand.c
 @@ -18,10 +18,10 @@
@@ -254,6 +271,42 @@ index 6a41ea4729b8..370af073c27f 100644
  #define MICRO_FREQUENCY_MIN_SAMPLE_RATE		(10000)
  #define MIN_FREQUENCY_UP_THRESHOLD		(1)
  #define MAX_FREQUENCY_UP_THRESHOLD		(100)
+diff --git a/drivers/firmware/sysfb.c b/drivers/firmware/sysfb.c
+index 2bfbb05f7d89..a504f7234f35 100644
+--- a/drivers/firmware/sysfb.c
++++ b/drivers/firmware/sysfb.c
+@@ -34,6 +34,22 @@
+ #include <linux/screen_info.h>
+ #include <linux/sysfb.h>
+ 
++static int skip_simpledrm;
++
++static int __init simpledrm_disable(char *opt)
++{
++	if (!opt)
++                return -EINVAL;
++
++	get_option(&opt, &skip_simpledrm);
++
++	if (skip_simpledrm)
++		pr_info("The simpledrm driver will not be probed\n");
++
++	return 0;
++}
++early_param("nvidia-drm.modeset", simpledrm_disable);
++
+ static __init int sysfb_init(void)
+ {
+ 	struct screen_info *si = &screen_info;
+@@ -45,7 +61,7 @@ static __init int sysfb_init(void)
+ 
+ 	/* try to create a simple-framebuffer device */
+ 	compatible = sysfb_parse_mode(si, &mode);
+-	if (compatible) {
++	if (compatible && !skip_simpledrm) {
+ 		ret = sysfb_create_simplefb(si, &mode);
+ 		if (!ret)
+ 			return 0;
 diff --git a/drivers/hid/usbhid/hid-core.c b/drivers/hid/usbhid/hid-core.c
 index 54752c85604b..6fa8de3ce7aa 100644
 --- a/drivers/hid/usbhid/hid-core.c
@@ -345,10 +398,10 @@ index 95f90699d2b1..2b10fe29d2c8 100644
  }
  
 diff --git a/include/linux/pageblock-flags.h b/include/linux/pageblock-flags.h
-index 973fd731a520..4fd8f258972a 100644
+index 83c7248053a1..d2b8741eabf7 100644
 --- a/include/linux/pageblock-flags.h
 +++ b/include/linux/pageblock-flags.h
-@@ -45,7 +45,7 @@ extern unsigned int pageblock_order;
+@@ -48,7 +48,7 @@ extern unsigned int pageblock_order;
  #else /* CONFIG_HUGETLB_PAGE */
  
  /* If huge pages are not used, group by MAX_ORDER_NR_PAGES */
@@ -358,10 +411,10 @@ index 973fd731a520..4fd8f258972a 100644
  #endif /* CONFIG_HUGETLB_PAGE */
  
 diff --git a/include/linux/pagemap.h b/include/linux/pagemap.h
-index 270bf5136c34..13207a15b326 100644
+index 993994cd943a..4bf55082d354 100644
 --- a/include/linux/pagemap.h
 +++ b/include/linux/pagemap.h
-@@ -1024,7 +1024,7 @@ struct readahead_control {
+@@ -1153,7 +1153,7 @@ struct readahead_control {
  		._index = i,						\
  	}
  
@@ -371,10 +424,10 @@ index 270bf5136c34..13207a15b326 100644
  void page_cache_ra_unbounded(struct readahead_control *,
  		unsigned long nr_to_read, unsigned long lookahead_count);
 diff --git a/init/Kconfig b/init/Kconfig
-index e9119bf54b1f..fd593d6221b9 100644
+index ddcbefe535e9..6fc6d4c67ae0 100644
 --- a/init/Kconfig
 +++ b/init/Kconfig
-@@ -107,6 +107,10 @@ config THREAD_INFO_IN_TASK
+@@ -111,6 +111,10 @@ config THREAD_INFO_IN_TASK
  
  menu "General setup"
  
@@ -385,6 +438,41 @@ index e9119bf54b1f..fd593d6221b9 100644
  config BROKEN
  	bool
  
+diff --git a/init/version.c b/init/version.c
+index 1a356f5493e8..66d237d5629c 100644
+--- a/init/version.c
++++ b/init/version.c
+@@ -11,6 +11,8 @@
+ #include <linux/build-salt.h>
+ #include <linux/elfnote-lto.h>
+ #include <linux/export.h>
++#include <linux/init.h>
++#include <linux/printk.h>
+ #include <linux/uts.h>
+ #include <linux/utsname.h>
+ #include <generated/utsrelease.h>
+@@ -35,6 +37,21 @@ struct uts_namespace init_uts_ns = {
+ };
+ EXPORT_SYMBOL_GPL(init_uts_ns);
+ 
++static int __init early_hostname(char *arg)
++{
++	size_t bufsize = sizeof(init_uts_ns.name.nodename);
++	size_t maxlen  = bufsize - 1;
++
++	strncpy(init_uts_ns.name.nodename, arg, bufsize);
++	if (strlen(arg) > maxlen) {
++		pr_warn("hostname parameter exceeds %zd characters and will be truncated",
++			maxlen);
++		init_uts_ns.name.nodename[maxlen] = '\0';
++	}
++	return 0;
++}
++early_param("hostname", early_hostname);
++
+ /* FIXED STRINGS! Don't touch! */
+ const char linux_banner[] =
+ 	"Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
 diff --git a/kernel/Kconfig.hz b/kernel/Kconfig.hz
 index 38ef6d06888e..0575979188c9 100644
 --- a/kernel/Kconfig.hz
@@ -452,7 +540,7 @@ index bf8e341e75b4..746a668bf81d 100644
  	bool "Tasks Trace RCU readers use memory barriers in user and idle"
  	depends on RCU_EXPERT
 diff --git a/kernel/rcu/tree_nocb.h b/kernel/rcu/tree_nocb.h
-index eeafb546a7a0..f648f773600a 100644
+index 636d0546a4e9..08aa15d50995 100644
 --- a/kernel/rcu/tree_nocb.h
 +++ b/kernel/rcu/tree_nocb.h
 @@ -1166,11 +1166,21 @@ void __init rcu_init_nohz(void)
@@ -467,11 +555,11 @@ index eeafb546a7a0..f648f773600a 100644
 +		need_rcu_nocb_mask = true;
 +		offload_all = true;
 +	}
-+#endif
++#endif /* #if defined(CONFIG_RCU_NOCB_CPU_DEFAULT_ALL) */
 +
  #if defined(CONFIG_NO_HZ_FULL)
--	if (tick_nohz_full_running && cpumask_weight(tick_nohz_full_mask))
-+	if (tick_nohz_full_running && cpumask_weight(tick_nohz_full_mask)) {
+-	if (tick_nohz_full_running && !cpumask_empty(tick_nohz_full_mask))
++	if (tick_nohz_full_running && !cpumask_empty(tick_nohz_full_mask)) {
  		need_rcu_nocb_mask = true;
 +		offload_all = false; /* NO_HZ_FULL has its own mask. */
 +	}
@@ -489,10 +577,10 @@ index eeafb546a7a0..f648f773600a 100644
  		pr_info("\tNote: kernel parameter 'rcu_nocbs=', 'nohz_full', or 'isolcpus=' contains nonexistent CPUs.\n");
  		cpumask_and(rcu_nocb_mask, cpu_possible_mask,
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 1eec4925b8c6..e12777a3ed4e 100644
+index d58c0389eb23..ed53e51688c5 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -384,8 +384,11 @@ sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags) { }
+@@ -448,8 +448,11 @@ sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags) { }
   * part of the period that we allow rt tasks to run in us.
   * default: 0.95s
   */
@@ -506,10 +594,10 @@ index 1eec4925b8c6..e12777a3ed4e 100644
  /*
   * Serialization rules:
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 2f461f059278..ca48e8b59fd1 100644
+index a68482d66535..f71e0b3fb42a 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -35,9 +35,13 @@
+@@ -67,9 +67,13 @@
   *
   * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
   */
@@ -524,7 +612,7 @@ index 2f461f059278..ca48e8b59fd1 100644
  /*
   * The initial- and re-scaling of tunables is configurable
   *
-@@ -56,8 +60,13 @@ unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
+@@ -88,8 +92,13 @@ unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
   *
   * (default: 0.75 msec * (1 + ilog(ncpus)), units: nanoseconds)
   */
@@ -538,7 +626,7 @@ index 2f461f059278..ca48e8b59fd1 100644
  
  /*
   * Minimal preemption granularity for CPU-bound SCHED_IDLE tasks.
-@@ -87,8 +96,13 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
+@@ -119,8 +128,13 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
   *
   * (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
   */
@@ -552,7 +640,7 @@ index 2f461f059278..ca48e8b59fd1 100644
  
  const_debug unsigned int sysctl_sched_migration_cost	= 500000UL;
  
-@@ -141,8 +155,12 @@ int __weak arch_asym_cpu_priority(int cpu)
+@@ -173,8 +187,12 @@ int __weak arch_asym_cpu_priority(int cpu)
   *
   * (default: 5 msec, units: microseconds)
   */
@@ -566,10 +654,10 @@ index 2f461f059278..ca48e8b59fd1 100644
  static inline void update_load_add(struct load_weight *lw, unsigned long inc)
  {
 diff --git a/mm/compaction.c b/mm/compaction.c
-index b4e94cda3019..16b3f41c07bf 100644
+index fe915db6149b..b124e7ffe8b9 100644
 --- a/mm/compaction.c
 +++ b/mm/compaction.c
-@@ -1699,7 +1699,7 @@ typedef enum {
+@@ -1736,7 +1736,7 @@ typedef enum {
   * Allow userspace to control policy on scanning the unevictable LRU for
   * compactable pages.
   */
@@ -578,7 +666,7 @@ index b4e94cda3019..16b3f41c07bf 100644
  int sysctl_compact_unevictable_allowed __read_mostly = 0;
  #else
  int sysctl_compact_unevictable_allowed __read_mostly = 1;
-@@ -2705,7 +2705,11 @@ static void compact_nodes(void)
+@@ -2739,7 +2739,11 @@ static void compact_nodes(void)
   * aggressively the kernel should compact memory in the
   * background. It takes values in the range [0, 100].
   */
@@ -591,10 +679,10 @@ index b4e94cda3019..16b3f41c07bf 100644
  int compaction_proactiveness_sysctl_handler(struct ctl_table *table, int write,
  		void *buffer, size_t *length, loff_t *ppos)
 diff --git a/mm/internal.h b/mm/internal.h
-index d80300392a19..96aa50e46119 100644
+index cf16280ce132..b9ad231c84fa 100644
 --- a/mm/internal.h
 +++ b/mm/internal.h
-@@ -248,6 +248,7 @@ extern void prep_compound_page(struct page *page, unsigned int order);
+@@ -256,6 +256,7 @@ extern void prep_compound_page(struct page *page, unsigned int order);
  extern void post_alloc_hook(struct page *page, unsigned int order,
  					gfp_t gfp_flags);
  extern int user_min_free_kbytes;
@@ -603,7 +691,7 @@ index d80300392a19..96aa50e46119 100644
  extern void free_unref_page(struct page *page, unsigned int order);
  extern void free_unref_page_list(struct list_head *list);
 diff --git a/mm/page-writeback.c b/mm/page-writeback.c
-index 91d163f8d36b..1b225c38cbf3 100644
+index 7e2da284e427..b1ef020a300d 100644
 --- a/mm/page-writeback.c
 +++ b/mm/page-writeback.c
 @@ -70,7 +70,11 @@ static long ratelimit_pages = 32;
@@ -631,7 +719,7 @@ index 91d163f8d36b..1b225c38cbf3 100644
  EXPORT_SYMBOL_GPL(dirty_writeback_interval);
  
 diff --git a/mm/page_alloc.c b/mm/page_alloc.c
-index e6f211dcf82e..063c5046f5bf 100644
+index 0e42038382c1..fc402712a004 100644
 --- a/mm/page_alloc.c
 +++ b/mm/page_alloc.c
 @@ -121,6 +121,8 @@ typedef int __bitwise fpi_t;
@@ -652,7 +740,7 @@ index e6f211dcf82e..063c5046f5bf 100644
  int watermark_scale_factor = 10;
  
  static unsigned long nr_kernel_pages __initdata;
-@@ -3016,15 +3018,16 @@ __rmqueue(struct zone *zone, unsigned int order, int migratetype,
+@@ -3019,15 +3021,16 @@ __rmqueue(struct zone *zone, unsigned int order, int migratetype,
  }
  
  /*
@@ -673,7 +761,7 @@ index e6f211dcf82e..063c5046f5bf 100644
  
  	/*
  	 * local_lock_irq held so equivalent to spin_lock_irqsave for
-@@ -3037,6 +3040,18 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
+@@ -3040,6 +3043,18 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
  		if (unlikely(page == NULL))
  			break;
  
@@ -689,10 +777,10 @@ index e6f211dcf82e..063c5046f5bf 100644
 +			spin_lock(&zone->lock);
 +		}
 +
- 		if (unlikely(check_pcp_refill(page)))
+ 		if (unlikely(check_pcp_refill(page, order)))
  			continue;
  
-@@ -3063,7 +3078,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
+@@ -3066,7 +3081,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
  	 * on i. Do not confuse with 'allocated' which is the number of
  	 * pages added to the pcp list.
  	 */
@@ -701,7 +789,7 @@ index e6f211dcf82e..063c5046f5bf 100644
  	spin_unlock(&zone->lock);
  	return allocated;
  }
-@@ -4878,6 +4893,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+@@ -4897,6 +4912,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
  	int no_progress_loops;
  	unsigned int cpuset_mems_cookie;
  	int reserve_flags;
@@ -709,7 +797,7 @@ index e6f211dcf82e..063c5046f5bf 100644
  
  	/*
  	 * We also sanity check to catch abuse of atomic reserves being used by
-@@ -4924,8 +4940,13 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+@@ -4943,8 +4959,13 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
  			goto nopage;
  	}
  
@@ -724,7 +812,7 @@ index e6f211dcf82e..063c5046f5bf 100644
  
  	/*
  	 * The adjusted alloc_flags might result in immediate success, so try
-@@ -5130,9 +5151,12 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+@@ -5149,9 +5170,12 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
  		goto retry;
  	}
  fail:
@@ -756,10 +844,10 @@ index b52644771cc4..11a4b0e3b583 100644
  
  /*
 diff --git a/mm/vmscan.c b/mm/vmscan.c
-index 59b14e0d696c..a2c4f025cab1 100644
+index 1678802e03e7..217576cba357 100644
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -174,7 +174,11 @@ struct scan_control {
+@@ -175,7 +175,11 @@ struct scan_control {
  /*
   * From 0 .. 200.  Higher means more swappy.
   */
@@ -771,7 +859,7 @@ index 59b14e0d696c..a2c4f025cab1 100644
  
  static void set_task_reclaim_state(struct task_struct *task,
  				   struct reclaim_state *rs)
-@@ -3658,7 +3662,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
+@@ -3584,7 +3588,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
  	return 0;
  }
  
@@ -780,7 +868,7 @@ index 59b14e0d696c..a2c4f025cab1 100644
  {
  	struct zone *zone;
  	unsigned long pfmemalloc_reserve = 0;
-@@ -3687,6 +3691,10 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
+@@ -3613,6 +3617,10 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
  
  	wmark_ok = free_pages > pfmemalloc_reserve / 2;
  
@@ -791,7 +879,7 @@ index 59b14e0d696c..a2c4f025cab1 100644
  	/* kswapd must be awake if processes are being throttled */
  	if (!wmark_ok && waitqueue_active(&pgdat->kswapd_wait)) {
  		if (READ_ONCE(pgdat->kswapd_highest_zoneidx) > ZONE_NORMAL)
-@@ -3752,7 +3760,7 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
+@@ -3678,7 +3686,7 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
  
  		/* Throttle based on the first usable node */
  		pgdat = zone->zone_pgdat;
@@ -800,7 +888,7 @@ index 59b14e0d696c..a2c4f025cab1 100644
  			goto out;
  		break;
  	}
-@@ -3774,11 +3782,14 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
+@@ -3700,11 +3708,14 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
  	 */
  	if (!(gfp_mask & __GFP_FS))
  		wait_event_interruptible_timeout(pgdat->pfmemalloc_wait,
@@ -817,7 +905,7 @@ index 59b14e0d696c..a2c4f025cab1 100644
  
  	if (fatal_signal_pending(current))
  		return true;
-@@ -4268,14 +4279,15 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int highest_zoneidx)
+@@ -4197,14 +4208,15 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int highest_zoneidx)
  		 * able to safely make forward progress. Wake them
  		 */
  		if (waitqueue_active(&pgdat->pfmemalloc_wait) &&
@@ -836,10 +924,10 @@ index 59b14e0d696c..a2c4f025cab1 100644
  
  		/*
 diff --git a/scripts/Makefile.lib b/scripts/Makefile.lib
-index 79be57fdd32a..291845c6d1c4 100644
+index 9f69ecdd7977..4eaeb2867b03 100644
 --- a/scripts/Makefile.lib
 +++ b/scripts/Makefile.lib
-@@ -202,6 +202,10 @@ endif
+@@ -197,6 +197,10 @@ endif
  part-of-module = $(if $(filter $(basename $@).o, $(real-obj-m)),y)
  quiet_modtag = $(if $(part-of-module),[M],   )
  
