@@ -127,30 +127,31 @@ source=(
   "config"
   "auto-cpu-optimization.sh"
   "0001-amd-perf.patch"
-  "0003-bbr2.patch"
-  "0004-cachy.patch"
-  "0005-clearlinux.patch"
-  "0006-Extend-DAMOS-for-Proactive-LRU-lists-Sorting.patch"
-  "0007-fixes.patch"
-  "0008-futex-winesync.patch"
-  "0009-hwmon.patch"
-  "0010-kbuild.patch"
-  "0011-ksm.patch"
-  "0012-lrng.patch"
-  "0013-MG-lru-5.18.patch"
-  "0014-zram-entropy-calculation.patch"
-  "0015-more-uarches-for-kernel-5.17+.patch"
-  "0016-mm-Support-soft-dirty-flag-reset-for-VA-range.patch"
-  "0017-mm-Support-soft-dirty-flag-read-with-reset.patch"
-  "0018-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
-  "0019-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
-  "0020-amd_pinctrl-IRQF_NO_THREAD.patch"
-  "0021-designware-i2c_IRQF_NO_THREAD.patch"
-  "0022-background_reclaim_of_hugepages.patch"
-  "0023-patch-5.18-rt11.patch"
-  "0024-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
-  "0026-mm-ncrease_max_map_count.patch"
-  "0028-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
+  "0002-bbr2.patch"
+  "0003-cachy.patch"
+  "0004-clearlinux.patch"
+  "0005-Extend-DAMOS-for-Proactive-LRU-lists-Sorting.patch"
+  "0006-fixes.patch"
+  "0007-futex-winesync.patch"
+  "0008-hwmon.patch"
+  "0009-kbuild.patch"
+  "0010-ksm.patch"
+  "0011-lrng.patch"
+  "0012-MG-lru-5.18.patch"
+  "0013-zram-entropy-calculation.patch"
+  "0014-more-uarches-for-kernel-5.17+.patch"
+  "0015-mm-Support-soft-dirty-flag-reset-for-VA-range.patch"
+  "0016-mm-Support-soft-dirty-flag-read-with-reset.patch"
+  "0017-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
+  "0018-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
+  "0019-amd_pinctrl-IRQF_NO_THREAD.patch"
+  "0020-designware-i2c_IRQF_NO_THREAD.patch"
+  "0021-background_reclaim_of_hugepages.patch"
+  "0022-patch-5.18-rt11.patch"
+  "0023-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
+  "0024-mm-ncrease_max_map_count.patch"
+  "0025-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
+  "0026-mm-lru_cache_disable-use-synchronize_rcu_expedited.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -679,7 +680,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('83d14126c660186a7a1774a4a5c29d38e170fa5e52cfd2d08fd344dcf1f57d22'
-            '56b5bb54c5d4bb25774f4777c951a08156ad295d747700692719b6a0aa0d1860'
+            '10aa97a84f53e8a8e21bb0fe96fe842b6ebd536f77fb7e2b91fc36960fc80d69'
             '65ec9ac5b8b28d5b61df1c72498059be2e7cb1f9b965bac0e4ffed3c05520b2b'
             '9824cd3a41db040bf28d6538aa4805f869333139cbcf43e0422e1b42f5401270'
             '56f58801a73e6d930d7680806dc734b50b69617a0eef96244627d7a946b62efd'
@@ -705,5 +706,6 @@ sha256sums=('83d14126c660186a7a1774a4a5c29d38e170fa5e52cfd2d08fd344dcf1f57d22'
             '2583ef57b52cc782c20fc491e91a0c843f4d3b98d9ca7b3e5e763bb1a217b5f0'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
-            '5b1a8092837cd06a57becbe8cace02c7da445761e0e6d53ea25d9f966b57ab3b')
+            '5b1a8092837cd06a57becbe8cace02c7da445761e0e6d53ea25d9f966b57ab3b'
+            'e3e055b92ab8455c8d27f2033db23c32e3914465a7e7077743097dd9e1beb62c')
 
