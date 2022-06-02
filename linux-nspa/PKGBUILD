@@ -113,7 +113,7 @@ _srcname=linux-${_stable}
 #_srcname=linux-${_major}
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=13
+pkgrel=14
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -152,6 +152,7 @@ source=(
   "0024-mm-ncrease_max_map_count.patch"
   "0025-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
   "0026-mm-lru_cache_disable-use-synchronize_rcu_expedited.patch"
+  "0027-rtw88-patches.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -707,5 +708,6 @@ sha256sums=('83d14126c660186a7a1774a4a5c29d38e170fa5e52cfd2d08fd344dcf1f57d22'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
             '5b1a8092837cd06a57becbe8cace02c7da445761e0e6d53ea25d9f966b57ab3b'
-            'e3e055b92ab8455c8d27f2033db23c32e3914465a7e7077743097dd9e1beb62c')
+            'e3e055b92ab8455c8d27f2033db23c32e3914465a7e7077743097dd9e1beb62c'
+            '7e896d6a9d3e6de9bf826597be146862683457344201ffd977d4625c9a361d41')
 
