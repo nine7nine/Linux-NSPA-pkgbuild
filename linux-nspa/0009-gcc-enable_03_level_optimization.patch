@@ -1,0 +1,24 @@
+--- a/Makefile
++++ b/Makefile
+@@ -756,6 +756,7 @@ ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+ KBUILD_CFLAGS += -O2
+ else ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
+ KBUILD_CFLAGS += -O3
++KBUILD_CFLAGS += $(call cc-option, -fno-tree-loop-vectorize)
+ else ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
+ KBUILD_CFLAGS += -Os
+ endif
+
+diff --git a/init/Kconfig b/init/Kconfig
+index c9407452a5de..523b2332c802 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1386,7 +1386,6 @@ config CC_OPTIMIZE_FOR_PERFORMANCE
+ 
+ config CC_OPTIMIZE_FOR_PERFORMANCE_O3
+ 	bool "Optimize more for performance (-O3)"
+-	depends on ARC
+ 	help
+ 	  Choosing this option will pass "-O3" to your compiler to optimize
+ 	  the kernel yet more for performance.
+
