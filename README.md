@@ -22,6 +22,10 @@ Google annd other sources.
 * Misc fixes
 
 SPECIAL NOTE: the included kernel config is specifically for my laptop. If
-anyone is using these packages, you will have to (re-)generate your own config.
+anyone is using these packages, you will need to have a look at the 
+'config_generic_nspa' config file included. -- you can use it directly, use it as a 
+reference OR use it in combination with modprobed-db + make localmodconfig.
+
+see commit: https://github.com/nine7nine/Linux-NSPA-pkgbuild/commit/10b12669a7086c3ed9634569171e9b4fa448000b
 
 Linux-NSPA kernel sources can be found here: https://github.com/nine7nine/Linux-NSPA
