@@ -125,6 +125,7 @@ fi
 source=(
   "https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/${_srcname}.tar.xz"
   "config"
+  "config_generic_nspa"
   "auto-cpu-optimization.sh"
   "0001-amd-perf.patch"
   "0002-net-bbr-netfilter.patch"
@@ -681,7 +682,8 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('83d14126c660186a7a1774a4a5c29d38e170fa5e52cfd2d08fd344dcf1f57d22'
-            'cade179e64f14b137eac5a7451901ce7c095c379360bd55531bce026aca88aab'
+            '25b81232fea6dc58d751813c64fe02db2921714cb8341e80b1c410dcdcf6fd73'
+            '9abdc6c5f40b81c044f5549e8f29d474dc51e2765ee2b5e9a5fba9e62499dd9e'
             '65ec9ac5b8b28d5b61df1c72498059be2e7cb1f9b965bac0e4ffed3c05520b2b'
             '9824cd3a41db040bf28d6538aa4805f869333139cbcf43e0422e1b42f5401270'
             'd20be9d0cf4eb7e740c0e6a3a6fbb536f19fa0ba6ecce8dac7daa139de9f06bb'
