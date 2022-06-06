@@ -1,61 +1,15 @@
-This patch adds the option CONFIG_ZRAM_ENTROPY which calculates
-the information entropy for each page. If the entropy is higher
-than the CONFIG_ZRAM_ENTROPY_THRESHOLD parameter, then
-the page is stored uncompressed.
+From d7004c57e79a5f90ec9cabeabbc5af5670c8b65f Mon Sep 17 00:00:00 2001
+From: Jordan Johnston <johnstonljordan@gmail.com>
+Date: Thu, 2 Jun 2022 00:35:53 -0500
+Subject: [PATCH 203/228] zram entropy calculation
 
-This is some attempt to strike a balance between page processing
-time and compression. This might be relevant for systems that can
-lose a bit in compression and gain a lot in performance effort.
-
-I did some experiments (writing different files directly to /dev/zram0)
-and got this:
-
-+---------+-----------+------------+--------+--------------+------------+
-| entropy | orig_size | compr_size |  time  | instructions | branches   |
-+---------+-----------+------------+--------+--------------+------------+
-|    Y    | 407003136 | 406052541  | 0.572s | 4641658347   | 784918702  |
-+---------+-----------+------------+--------+--------------+------------+
-|    N    | 407003136 | 405371829  | 2.098s | 17187405320  | 2027130210 |
-+---------+-----------+------------+--------+--------------+------------+
-
-apk file (~430MB):
-
-+---------+-----------+------------+--------+--------------+------------+
-| entropy | orig_size | compr_size |  time  | instructions | branches   |
-+---------+-----------+------------+--------+--------------+------------+
-|    Y    | 431452160 | 335864766  | 1.632s | 13055231312  | 1747341252 |
-+---------+-----------+------------+--------+--------------+------------+
-|    N    | 431452160 | 289107700  | 3.196s | 24345720313  | 2846272508 |
-+---------+-----------+------------+--------+--------------+------------+
-
-folder with various files as .tar (but not compressed) (~5GB):
-
-+---------+-----------+------------+--------+--------------+------------+
-| entropy | orig_size | compr_size |  time  | instructions | branches   |
-+---------+-----------+------------+--------+--------------+------------+
-|    Y    | 5277380608| 4230903173 | 7.066s | 35039839769  | 5636707902 |
-+---------+-----------+------------+--------+--------------+------------+
-|    N    | 5277380608| 4216479361 | 11.955s| 76763123464  | 9497319788 |
-+---------+-----------+------------+--------+--------------+------------+
-
-Page processing time is noticeably accelerated, while compression loss
-is not very critical.
-
-I guess the CONFIG_ZRAM_ENTROPY_THRESHOLD setting should be
-different for each of the compression algorithms. At the moment,
-I have configured it only for the zstd algorithm, but in the future
-I plan to configure and test it for all remaining compression algorithms.
-
-Comments are welcome.
-
-Signed-off-by: Alexey Romanov <avromanov@sberdevices.ru>
 ---
  drivers/block/zram/Kconfig    | 18 ++++++++++++++++
  drivers/block/zram/zram_drv.c | 39 +++++++++++++++++++++++++++++++++++
  2 files changed, 57 insertions(+)
 
 diff --git a/drivers/block/zram/Kconfig b/drivers/block/zram/Kconfig
-index 668c6bf25..d873d631a 100644
+index 668c6bf2554d..d873d631ac0e 100644
 --- a/drivers/block/zram/Kconfig
 +++ b/drivers/block/zram/Kconfig
 @@ -77,3 +77,21 @@ config ZRAM_MEMORY_TRACKING
@@ -81,10 +35,10 @@ index 668c6bf25..d873d631a 100644
 +	  uncompressed. The default value was chosen as a result a lot of
 +	  experiments. You can try set your own value.
 diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
-index cb253d80d..483b219a4 100644
+index e9474b02012d..c1369462fc2e 100644
 --- a/drivers/block/zram/zram_drv.c
 +++ b/drivers/block/zram/zram_drv.c
-@@ -1350,6 +1350,35 @@ static int zram_bvec_read(struct zram *zram, struct bio_vec *bvec,
+@@ -1343,6 +1343,35 @@ static int zram_bvec_read(struct zram *zram, struct bio_vec *bvec,
  	return ret;
  }
  
@@ -120,7 +74,7 @@ index cb253d80d..483b219a4 100644
  static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
  				u32 index, struct bio *bio)
  {
-@@ -1376,7 +1405,17 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
+@@ -1369,7 +1398,17 @@ static int __zram_bvec_write(struct zram *zram, struct bio_vec *bvec,
  compress_again:
  	zstrm = zcomp_stream_get(zram->comp);
  	src = kmap_atomic(page);
@@ -139,4 +93,5 @@ index cb253d80d..483b219a4 100644
  
  	if (unlikely(ret)) {
 -- 
-2.30.2
+2.36.1
+

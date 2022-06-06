@@ -1,8 +1,9 @@
-From 9c85113cf4019e7b277a44e72bda8b78347aa72f Mon Sep 17 00:00:00 2001
+From 60b0d63eb3d99336f3fb4f92ebf23439bceb29aa Mon Sep 17 00:00:00 2001
 From: Paul Gofman <pgofman@codeweavers.com>
 Date: Thu, 7 May 2020 14:05:31 +0300
-Subject: [PATCH 2/2] mm: Support soft dirty flag read with reset.
+Subject: [PATCH 206/228] mm: Support soft dirty flag read with reset.
 
+Signed-off-by: Jordan Johnston <johnstonljordan@gmail.com>
 ---
  fs/proc/base.c     |   3 +
  fs/proc/internal.h |   1 +
@@ -10,10 +11,10 @@ Subject: [PATCH 2/2] mm: Support soft dirty flag read with reset.
  3 files changed, 130 insertions(+), 18 deletions(-)
 
 diff --git a/fs/proc/base.c b/fs/proc/base.c
-index b3422cda2a91..8199ae2411ca 100644
+index c1031843cc6a..a7be720af08e 100644
 --- a/fs/proc/base.c
 +++ b/fs/proc/base.c
-@@ -3221,6 +3221,9 @@ static const struct pid_entry tgid_base_
+@@ -3221,6 +3221,9 @@ static const struct pid_entry tgid_base_stuff[] = {
  	REG("smaps",      S_IRUGO, proc_pid_smaps_operations),
  	REG("smaps_rollup", S_IRUGO, proc_pid_smaps_rollup_operations),
  	REG("pagemap",    S_IRUSR, proc_pagemap_operations),
@@ -24,10 +25,10 @@ index b3422cda2a91..8199ae2411ca 100644
  #ifdef CONFIG_SECURITY
  	DIR("attr",       S_IRUGO|S_IXUGO, proc_attr_dir_inode_operations, proc_attr_dir_operations),
 diff --git a/fs/proc/internal.h b/fs/proc/internal.h
-index f60b379dcdc7..36a901cf0e7f 100644
+index 06a80f78433d..4794d54d5fb7 100644
 --- a/fs/proc/internal.h
 +++ b/fs/proc/internal.h
-@@ -300,6 +300,7 @@ extern const struct file_operations proc
+@@ -300,6 +300,7 @@ extern const struct file_operations proc_pid_smaps_operations;
  extern const struct file_operations proc_pid_smaps_rollup_operations;
  extern const struct file_operations proc_clear_refs_operations;
  extern const struct file_operations proc_pagemap_operations;
@@ -36,10 +37,10 @@ index f60b379dcdc7..36a901cf0e7f 100644
  extern unsigned long task_vsize(struct mm_struct *);
  extern unsigned long task_statm(struct mm_struct *,
 diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
-index 7c7865028f10..a21694967915 100644
+index 83c7dd6891c7..52d4bf778010 100644
 --- a/fs/proc/task_mmu.c
 +++ b/fs/proc/task_mmu.c
-@@ -1085,8 +1085,8 @@ static inline bool pte_is_pinned(struct
+@@ -1085,8 +1085,8 @@ static inline bool pte_is_pinned(struct vm_area_struct *vma, unsigned long addr,
  	return page_maybe_dma_pinned(page);
  }
  
@@ -50,7 +51,7 @@ index 7c7865028f10..a21694967915 100644
  {
  	/*
  	 * The soft-dirty tracker uses #PF-s to catch writes
-@@ -1095,37 +1095,46 @@ static inline void clear_soft_dirty(stru
+@@ -1095,37 +1095,46 @@ static inline void clear_soft_dirty(struct vm_area_struct *vma,
  	 * of how soft-dirty works.
  	 */
  	pte_t ptent = *pte;
@@ -100,7 +101,7 @@ index 7c7865028f10..a21694967915 100644
  		if (pmd_dirty(old))
  			pmd = pmd_mkdirty(pmd);
  		if (pmd_young(old))
-@@ -1136,14 +1145,17 @@ static inline void clear_soft_dirty_pmd(
+@@ -1136,14 +1145,17 @@ static inline void clear_soft_dirty_pmd(struct vm_area_struct *vma,
  
  		set_pmd_at(vma->vm_mm, addr, pmdp, pmd);
  	} else if (is_migration_entry(pmd_to_swp_entry(pmd))) {
@@ -127,7 +128,7 @@ index 7c7865028f10..a21694967915 100644
  };
  
  #define PAGEMAP_WALK_SIZE	(PMD_SIZE)
-@@ -1428,6 +1441,14 @@ static int add_to_pagemap(unsigned long
+@@ -1428,6 +1441,14 @@ static int add_to_pagemap(unsigned long addr, pagemap_entry_t *pme,
  	return 0;
  }
  
@@ -142,7 +143,7 @@ index 7c7865028f10..a21694967915 100644
  static int pagemap_pte_hole(unsigned long start, unsigned long end,
  			    __always_unused int depth, struct mm_walk *walk)
  {
-@@ -1435,6 +1456,9 @@ static int pagemap_pte_hole(unsigned lon
+@@ -1435,6 +1456,9 @@ static int pagemap_pte_hole(unsigned long start, unsigned long end,
  	unsigned long addr = start;
  	int err = 0;
  
@@ -152,7 +153,7 @@ index 7c7865028f10..a21694967915 100644
  	while (addr < end) {
  		struct vm_area_struct *vma = find_vma(walk->mm, addr);
  		pagemap_entry_t pme = make_pme(0, 0);
-@@ -1469,8 +1493,9 @@ out:
+@@ -1469,8 +1493,9 @@ static int pagemap_pte_hole(unsigned long start, unsigned long end,
  }
  
  static pagemap_entry_t pte_to_pagemap_entry(struct pagemapread *pm,
@@ -163,7 +164,7 @@ index 7c7865028f10..a21694967915 100644
  	u64 frame = 0, flags = 0;
  	struct page *page = NULL;
  	bool migration = false;
-@@ -1527,6 +1552,20 @@ static int pagemap_pmd_range(pmd_t *pmdp
+@@ -1527,6 +1552,20 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
  		pmd_t pmd = *pmdp;
  		struct page *page = NULL;
  
@@ -184,7 +185,7 @@ index 7c7865028f10..a21694967915 100644
  		if (vma->vm_flags & VM_SOFTDIRTY)
  			flags |= PM_SOFT_DIRTY;
  
-@@ -1580,6 +1619,7 @@ static int pagemap_pmd_range(pmd_t *pmdp
+@@ -1580,6 +1619,7 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
  					frame += (1 << MAX_SWAPFILES_SHIFT);
  			}
  		}
@@ -192,7 +193,7 @@ index 7c7865028f10..a21694967915 100644
  		spin_unlock(ptl);
  		return err;
  	}
-@@ -1594,10 +1634,18 @@ static int pagemap_pmd_range(pmd_t *pmdp
+@@ -1594,10 +1634,18 @@ static int pagemap_pmd_range(pmd_t *pmdp, unsigned long addr, unsigned long end,
  	 */
  	orig_pte = pte = pte_offset_map_lock(walk->mm, pmdp, addr, &ptl);
  	for (; addr < end; pte++, addr += PAGE_SIZE) {
@@ -214,7 +215,7 @@ index 7c7865028f10..a21694967915 100644
  		if (err)
  			break;
  	}
-@@ -1690,8 +1738,8 @@ static const struct mm_walk_ops pagemap_
+@@ -1690,8 +1738,8 @@ static const struct mm_walk_ops pagemap_ops = {
   * determine which areas of memory are actually mapped and llseek to
   * skip over unmapped regions.
   */
@@ -225,7 +226,7 @@ index 7c7865028f10..a21694967915 100644
  {
  	struct mm_struct *mm = file->private_data;
  	struct pagemapread pm;
-@@ -1700,6 +1748,8 @@ static ssize_t pagemap_read(struct file
+@@ -1700,6 +1748,8 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  	unsigned long start_vaddr;
  	unsigned long end_vaddr;
  	int ret = 0, copied = 0;
@@ -234,7 +235,7 @@ index 7c7865028f10..a21694967915 100644
  
  	if (!mm || !mmget_not_zero(mm))
  		goto out;
-@@ -1715,19 +1765,38 @@ static ssize_t pagemap_read(struct file
+@@ -1715,19 +1765,38 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  
  	/* do not disclose physical addresses: attack vector */
  	pm.show_pfn = file_ns_capable(file, &init_user_ns, CAP_SYS_ADMIN);
@@ -277,7 +278,7 @@ index 7c7865028f10..a21694967915 100644
  	if (svpfn <= (ULONG_MAX >> PAGE_SHIFT))
  		start_vaddr = untagged_addr(svpfn << PAGE_SHIFT);
  
-@@ -1747,18 +1816,35 @@ static ssize_t pagemap_read(struct file
+@@ -1747,18 +1816,35 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  		unsigned long end;
  
  		pm.pos = 0;
@@ -315,7 +316,7 @@ index 7c7865028f10..a21694967915 100644
  		if (copy_to_user(buf, pm.buffer, len)) {
  			ret = -EFAULT;
  			goto out_free;
-@@ -1766,6 +1852,8 @@ static ssize_t pagemap_read(struct file
+@@ -1766,6 +1852,8 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  		copied += len;
  		buf += len;
  		count -= len;
@@ -324,7 +325,7 @@ index 7c7865028f10..a21694967915 100644
  	}
  	*ppos += copied;
  	if (!ret || ret == PM_END_OF_BUFFER)
-@@ -1779,6 +1867,18 @@ out:
+@@ -1779,6 +1867,18 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  	return ret;
  }
  
@@ -343,7 +344,7 @@ index 7c7865028f10..a21694967915 100644
  static int pagemap_open(struct inode *inode, struct file *file)
  {
  	struct mm_struct *mm;
-@@ -1805,6 +1905,14 @@ const struct file_operations proc_pagema
+@@ -1805,6 +1905,14 @@ const struct file_operations proc_pagemap_operations = {
  	.open		= pagemap_open,
  	.release	= pagemap_release,
  };
@@ -359,6 +360,5 @@ index 7c7865028f10..a21694967915 100644
  
  #ifdef CONFIG_NUMA
 -- 
-2.30.2
-
+2.36.1
 
