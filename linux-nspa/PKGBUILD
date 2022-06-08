@@ -135,7 +135,6 @@ source=(
   "0006-misc-fixes.patch"
   "0007-futex-winesync.patch"
   "0008-kbuild-dev-squashed.patch"
-  "0009-gcc-enable_03_level_optimization.patch"
   "0010-ksm-patchwork.patch"
   "0011-lrng-patchwork.patch"
   "0012-MG-lru-5.18-patchwork.patch"
@@ -153,7 +152,6 @@ source=(
   "0024-mm-ncrease_max_map_count.patch"
   "0025-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
   "0026-mm-lru_cache_disable-use-synchronize_rcu_expedited.patch"
-  "0027-rtw88-patches.patch"
   "0028-sched_migrate-peterz.patch"
 )
 
@@ -683,7 +681,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
-            '25b81232fea6dc58d751813c64fe02db2921714cb8341e80b1c410dcdcf6fd73'
+            'c40e654acda79419987567cb9f13b8623db6e822a2e333870f147f0d80c4506d'
             '9abdc6c5f40b81c044f5549e8f29d474dc51e2765ee2b5e9a5fba9e62499dd9e'
             '65ec9ac5b8b28d5b61df1c72498059be2e7cb1f9b965bac0e4ffed3c05520b2b'
             '9824cd3a41db040bf28d6538aa4805f869333139cbcf43e0422e1b42f5401270'
@@ -694,7 +692,6 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             '36c0731e1dd73098a059de0fdfedfc1099f07ec15c1475abbb3e331d26f3cbc8'
             'fa8beb48c2e78f5337c6b08d1b6b6575bd01e2f34673d4056f35a1b28165d1ce'
             '17e8ec78d3df7a1965d3b1667c3323479e94c15a6d3fe59ba17cd73f06a21394'
-            'a98c705ab8910e6e4cb3a85c04a85cc8083a1851129e033262685a6013277335'
             '8edf9b9b1a9c26cc4d6dfaf5f14c06b197a04c5bbb8459dd292c033aa2534d19'
             '65a1a31af7923f5f99b11fe45305f176d75904e05addff168d09517c403e45e1'
             '97d8b95e9f8880e9ec0d31b62263cac21f29c89e4ac2c2c4bedbe5989d5a9847'
@@ -712,6 +709,5 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
             '5b1a8092837cd06a57becbe8cace02c7da445761e0e6d53ea25d9f966b57ab3b'
             'e3e055b92ab8455c8d27f2033db23c32e3914465a7e7077743097dd9e1beb62c'
-            '7e896d6a9d3e6de9bf826597be146862683457344201ffd977d4625c9a361d41'
             '059dc136634bce808574fae3992d4168104d66c2dc95dacf7cf82c3ae7049af8')
 
