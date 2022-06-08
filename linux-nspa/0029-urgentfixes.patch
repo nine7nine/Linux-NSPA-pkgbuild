@@ -1,0 +1,166 @@
+From ff47dbd18b8db251fe1fd013a8fa067d381ecd5b Mon Sep 17 00:00:00 2001
+From: Damien Le Moal <damien.lemoal@opensource.wdc.com>
+Date: Thu, 2 Jun 2022 16:51:59 +0900
+Subject: [PATCH] block: remove useless BUG_ON() in blk_mq_put_tag()
+
+Since the if condition in blk_mq_put_tag() checks that the tag to put is
+not a reserved one, the BUG_ON() check in the else branch checking if
+the tag is indeed a reserved one is useless. Remove it.
+
+Signed-off-by: Damien Le Moal <damien.lemoal@opensource.wdc.com>
+Link: https://lore.kernel.org/r/20220602075159.1273366-1-damien.lemoal@opensource.wdc.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq-tag.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/block/blk-mq-tag.c b/block/blk-mq-tag.c
+index 68ac23d0b6406..2dcd738c69523 100644
+--- a/block/blk-mq-tag.c
++++ b/block/blk-mq-tag.c
+@@ -228,7 +228,6 @@ void blk_mq_put_tag(struct blk_mq_tags *tags, struct blk_mq_ctx *ctx,
+ 		BUG_ON(real_tag >= tags->nr_tags);
+ 		sbitmap_queue_clear(&tags->bitmap_tags, real_tag, ctx->cpu);
+ 	} else {
+-		BUG_ON(tag >= tags->nr_reserved_tags);
+ 		sbitmap_queue_clear(&tags->breserved_tags, tag, ctx->cpu);
+ 	}
+ }
+
+From aacae8c469f9ce4b303a2eb61593ff522c1420bc Mon Sep 17 00:00:00 2001
+From: Damien Le Moal <damien.lemoal@opensource.wdc.com>
+Date: Thu, 2 Jun 2022 21:03:44 +0900
+Subject: [PATCH] block: null_blk: Fix null_zone_write()
+
+The bio and rq fields of struct nullb_cmd are now overlapping in a
+union. So we cannot use a test on ->bio being non-NULL to detect the
+NULL_Q_BIO queue mode. null_zone_write() use such broken test to set the
+sector position of a zone append write in the command bio or request.
+When the null_blk device uses the NULL_Q_MQ queue mode,
+null_zone_write() wrongly end up setting the bio sector position,
+resulting in the command request to be broken and random crashes
+following.
+
+Fix this by testing the device queue mode directly.
+
+Fixes: 8ba816b23abd ("null-blk: save memory footprint for struct nullb_cmd")
+Signed-off-by: Damien Le Moal <damien.lemoal@opensource.wdc.com>
+Reviewed-by: Johannes Thumshirn <johannes.thumshirn@wdc.com>
+Link: https://lore.kernel.org/r/20220602120344.1365329-1-damien.lemoal@opensource.wdc.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/block/null_blk/main.c     | 6 ------
+ drivers/block/null_blk/null_blk.h | 7 +++++++
+ drivers/block/null_blk/zoned.c    | 6 +++---
+ 3 files changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/block/null_blk/main.c b/drivers/block/null_blk/main.c
+index 539cfeac263db..6b67088f4ea71 100644
+--- a/drivers/block/null_blk/main.c
++++ b/drivers/block/null_blk/main.c
+@@ -77,12 +77,6 @@ enum {
+ 	NULL_IRQ_TIMER		= 2,
+ };
+ 
+-enum {
+-	NULL_Q_BIO		= 0,
+-	NULL_Q_RQ		= 1,
+-	NULL_Q_MQ		= 2,
+-};
+-
+ static bool g_virt_boundary = false;
+ module_param_named(virt_boundary, g_virt_boundary, bool, 0444);
+ MODULE_PARM_DESC(virt_boundary, "Require a virtual boundary for the device. Default: False");
+diff --git a/drivers/block/null_blk/null_blk.h b/drivers/block/null_blk/null_blk.h
+index 4525a65e1b23d..8359b43842f2f 100644
+--- a/drivers/block/null_blk/null_blk.h
++++ b/drivers/block/null_blk/null_blk.h
+@@ -60,6 +60,13 @@ struct nullb_zone {
+ 	unsigned int capacity;
+ };
+ 
++/* Queue modes */
++enum {
++	NULL_Q_BIO	= 0,
++	NULL_Q_RQ	= 1,
++	NULL_Q_MQ	= 2,
++};
++
+ struct nullb_device {
+ 	struct nullb *nullb;
+ 	struct config_item item;
+diff --git a/drivers/block/null_blk/zoned.c b/drivers/block/null_blk/zoned.c
+index ed158ea4fdd1a..2fdd7b20c224e 100644
+--- a/drivers/block/null_blk/zoned.c
++++ b/drivers/block/null_blk/zoned.c
+@@ -398,10 +398,10 @@ static blk_status_t null_zone_write(struct nullb_cmd *cmd, sector_t sector,
+ 	 */
+ 	if (append) {
+ 		sector = zone->wp;
+-		if (cmd->bio)
+-			cmd->bio->bi_iter.bi_sector = sector;
+-		else
++		if (dev->queue_mode == NULL_Q_MQ)
+ 			cmd->rq->__sector = sector;
++		else
++			cmd->bio->bi_iter.bi_sector = sector;
+ 	} else if (sector != zone->wp) {
+ 		ret = BLK_STS_IOERR;
+ 		goto unlock;
+
+From 41e46b3c2aa24f755b2ae9ec4ce931ba5f0d8532 Mon Sep 17 00:00:00 2001
+From: Damien Le Moal <damien.lemoal@opensource.wdc.com>
+Date: Fri, 3 Jun 2022 11:19:05 +0900
+Subject: [PATCH] block: Fix potential deadlock in blk_ia_range_sysfs_show()
+
+When being read, a sysfs attribute is already protected against removal
+with the kobject node active reference counter. As a result, in
+blk_ia_range_sysfs_show(), there is no need to take the queue sysfs
+lock when reading the value of a range attribute. Using the queue sysfs
+lock in this function creates a potential deadlock situation with the
+disk removal, something that a lockdep signals with a splat when the
+device is removed:
+
+[  760.703551]  Possible unsafe locking scenario:
+[  760.703551]
+[  760.703554]        CPU0                    CPU1
+[  760.703556]        ----                    ----
+[  760.703558]   lock(&q->sysfs_lock);
+[  760.703565]                                lock(kn->active#385);
+[  760.703573]                                lock(&q->sysfs_lock);
+[  760.703579]   lock(kn->active#385);
+[  760.703587]
+[  760.703587]  *** DEADLOCK ***
+
+Solve this by removing the mutex_lock()/mutex_unlock() calls from
+blk_ia_range_sysfs_show().
+
+Fixes: a2247f19ee1c ("block: Add independent access ranges support")
+Cc: stable@vger.kernel.org
+Signed-off-by: Damien Le Moal <damien.lemoal@opensource.wdc.com>
+Link: https://lore.kernel.org/r/20220603021905.1441419-1-damien.lemoal@opensource.wdc.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-ia-ranges.c | 7 +------
+ 1 file changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/block/blk-ia-ranges.c b/block/blk-ia-ranges.c
+index 18c68d8b9138e..56ed48d2954e6 100644
+--- a/block/blk-ia-ranges.c
++++ b/block/blk-ia-ranges.c
+@@ -54,13 +54,8 @@ static ssize_t blk_ia_range_sysfs_show(struct kobject *kobj,
+ 		container_of(attr, struct blk_ia_range_sysfs_entry, attr);
+ 	struct blk_independent_access_range *iar =
+ 		container_of(kobj, struct blk_independent_access_range, kobj);
+-	ssize_t ret;
+ 
+-	mutex_lock(&iar->queue->sysfs_lock);
+-	ret = entry->show(iar, buf);
+-	mutex_unlock(&iar->queue->sysfs_lock);
+-
+-	return ret;
++	return entry->show(iar, buf);
+ }
+ 
+ static const struct sysfs_ops blk_ia_range_sysfs_ops = {
+
