@@ -148,6 +148,8 @@ source=(
   "0030-rcu-gp-workers.patch"
   "0031-smp-migrate_disable.patch"
   "0032-ck-hrtimer-5.18.patch"
+  "0033-rtmutex-no-rcu-lock-while-spinning.patch"
+  "0034-tk-timekeeping-suspend-fixes.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -659,5 +661,7 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             '85105c454392a9cc2262036fb97ac96a6e38bcb3af6ea278007a179bd224d61d'
             '113aa7bf02c3f04ddfc221a5c4b38ac36cd83fbed8bbd6c9c9deaf0a1cf35780'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
-            '40b64437a72105b2afeab873614fa93e5ab6b6c05d3b0d1981dd9dec935745a4')
+            '40b64437a72105b2afeab873614fa93e5ab6b6c05d3b0d1981dd9dec935745a4'
+            '0070044800a43bed29ed423236147254d9598507e5d005c3d4139e67b8733041'
+            '48e1e5bda462acdf775343c1235023ba1b7f4811358407752cf3fb88028d2225')
 
