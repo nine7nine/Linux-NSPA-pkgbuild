@@ -1,0 +1,1100 @@
+From 70ce3ea9aa4ed901c8a90de667df5ef307766e71 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@techsingularity.net>
+Date: Fri, 20 May 2022 11:35:16 +0100
+Subject: sched/numa: Initialise numa_migrate_retry
+
+On clone, numa_migrate_retry is inherited from the parent which means
+that the first NUMA placement of a task is non-deterministic. This
+affects when load balancing recognises numa tasks and whether to
+migrate "regular", "remote" or "all" tasks between NUMA scheduler
+domains.
+
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Link: https://lore.kernel.org/r/20220520103519.1863-2-mgorman@techsingularity.net
+---
+ kernel/sched/fair.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 77b2048a93262..51836efe5931d 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -2885,6 +2885,7 @@ void init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
+ 	p->node_stamp			= 0;
+ 	p->numa_scan_seq		= mm ? mm->numa_scan_seq : 0;
+ 	p->numa_scan_period		= sysctl_numa_balancing_scan_delay;
++	p->numa_migrate_retry		= 0;
+ 	/* Protect against double add, see task_tick_numa and task_numa_work */
+ 	p->numa_work.next		= &p->numa_work;
+ 	p->numa_faults			= NULL;
+-- 
+cgit 1.2.3-1.el7
+
+From 13ede33150877d44756171e33570076882b17b0b Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@techsingularity.net>
+Date: Fri, 20 May 2022 11:35:17 +0100
+Subject: sched/numa: Do not swap tasks between nodes when spare capacity is
+ available
+
+If a destination node has spare capacity but there is an imbalance then
+two tasks are selected for swapping. If the tasks have no numa group
+or are within the same NUMA group, it's simply shuffling tasks around
+without having any impact on the compute imbalance. Instead, it's just
+punishing one task to help another.
+
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Link: https://lore.kernel.org/r/20220520103519.1863-3-mgorman@techsingularity.net
+---
+ kernel/sched/fair.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 51836efe5931d..23da36c9cacb8 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1790,6 +1790,15 @@ static bool task_numa_compare(struct task_numa_env *env,
+ 	 */
+ 	cur_ng = rcu_dereference(cur->numa_group);
+ 	if (cur_ng == p_ng) {
++		/*
++		 * Do not swap within a group or between tasks that have
++		 * no group if there is spare capacity. Swapping does
++		 * not address the load imbalance and helps one task at
++		 * the cost of punishing another.
++		 */
++		if (env->dst_stats.node_type == node_has_spare)
++			goto unlock;
++
+ 		imp = taskimp + task_weight(cur, env->src_nid, dist) -
+ 		      task_weight(cur, env->dst_nid, dist);
+ 		/*
+-- 
+cgit 1.2.3-1.el7
+
+From cb29a5c19d2d68afc641fb1949e1a1c565b582ea Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@techsingularity.net>
+Date: Fri, 20 May 2022 11:35:18 +0100
+Subject: sched/numa: Apply imbalance limitations consistently
+
+The imbalance limitations are applied inconsistently at fork time
+and at runtime. At fork, a new task can remain local until there are
+too many running tasks even if the degree of imbalance is larger than
+NUMA_IMBALANCE_MIN which is different to runtime. Secondly, the imbalance
+figure used during load balancing is different to the one used at NUMA
+placement. Load balancing uses the number of tasks that must move to
+restore imbalance where as NUMA balancing uses the total imbalance.
+
+In combination, it is possible for a parallel workload that uses a small
+number of CPUs without applying scheduler policies to have very variable
+run-to-run performance.
+
+[lkp@intel.com: Fix build breakage for arc-allyesconfig]
+
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Link: https://lore.kernel.org/r/20220520103519.1863-4-mgorman@techsingularity.net
+---
+ kernel/sched/fair.c | 81 +++++++++++++++++++++++++++++------------------------
+ 1 file changed, 45 insertions(+), 36 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 23da36c9cacb8..166f5f9bdb4fa 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1055,6 +1055,33 @@ update_stats_curr_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
+  * Scheduling class queueing methods:
+  */
+ 
++#ifdef CONFIG_NUMA
++#define NUMA_IMBALANCE_MIN 2
++
++static inline long
++adjust_numa_imbalance(int imbalance, int dst_running, int imb_numa_nr)
++{
++	/*
++	 * Allow a NUMA imbalance if busy CPUs is less than the maximum
++	 * threshold. Above this threshold, individual tasks may be contending
++	 * for both memory bandwidth and any shared HT resources.  This is an
++	 * approximation as the number of running tasks may not be related to
++	 * the number of busy CPUs due to sched_setaffinity.
++	 */
++	if (dst_running > imb_numa_nr)
++		return imbalance;
++
++	/*
++	 * Allow a small imbalance based on a simple pair of communicating
++	 * tasks that remain local when the destination is lightly loaded.
++	 */
++	if (imbalance <= NUMA_IMBALANCE_MIN)
++		return 0;
++
++	return imbalance;
++}
++#endif /* CONFIG_NUMA */
++
+ #ifdef CONFIG_NUMA_BALANCING
+ /*
+  * Approximate time to scan a full NUMA task in ms. The task scan period is
+@@ -1548,8 +1575,6 @@ struct task_numa_env {
+ 
+ static unsigned long cpu_load(struct rq *rq);
+ static unsigned long cpu_runnable(struct rq *rq);
+-static inline long adjust_numa_imbalance(int imbalance,
+-					int dst_running, int imb_numa_nr);
+ 
+ static inline enum
+ numa_type numa_classify(unsigned int imbalance_pct,
+@@ -9067,16 +9092,6 @@ static bool update_pick_idlest(struct sched_group *idlest,
+ 	return true;
+ }
+ 
+-/*
+- * Allow a NUMA imbalance if busy CPUs is less than 25% of the domain.
+- * This is an approximation as the number of running tasks may not be
+- * related to the number of busy CPUs due to sched_setaffinity.
+- */
+-static inline bool allow_numa_imbalance(int running, int imb_numa_nr)
+-{
+-	return running <= imb_numa_nr;
+-}
+-
+ /*
+  * find_idlest_group() finds and returns the least busy CPU group within the
+  * domain.
+@@ -9193,6 +9208,7 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
+ 		break;
+ 
+ 	case group_has_spare:
++#ifdef CONFIG_NUMA
+ 		if (sd->flags & SD_NUMA) {
+ #ifdef CONFIG_NUMA_BALANCING
+ 			int idlest_cpu;
+@@ -9206,7 +9222,7 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
+ 			idlest_cpu = cpumask_first(sched_group_span(idlest));
+ 			if (cpu_to_node(idlest_cpu) == p->numa_preferred_nid)
+ 				return idlest;
+-#endif
++#endif /* CONFIG_NUMA_BALANCING */
+ 			/*
+ 			 * Otherwise, keep the task close to the wakeup source
+ 			 * and improve locality if the number of running tasks
+@@ -9214,9 +9230,14 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
+ 			 * allowed. If there is a real need of migration,
+ 			 * periodic load balance will take care of it.
+ 			 */
+-			if (allow_numa_imbalance(local_sgs.sum_nr_running + 1, sd->imb_numa_nr))
++			imbalance = abs(local_sgs.idle_cpus - idlest_sgs.idle_cpus);
++			if (!adjust_numa_imbalance(imbalance,
++						   local_sgs.sum_nr_running + 1,
++						   sd->imb_numa_nr)) {
+ 				return NULL;
++			}
+ 		}
++#endif /* CONFIG_NUMA */
+ 
+ 		/*
+ 		 * Select group with highest number of idle CPUs. We could also
+@@ -9303,24 +9324,6 @@ next_group:
+ 	}
+ }
+ 
+-#define NUMA_IMBALANCE_MIN 2
+-
+-static inline long adjust_numa_imbalance(int imbalance,
+-				int dst_running, int imb_numa_nr)
+-{
+-	if (!allow_numa_imbalance(dst_running, imb_numa_nr))
+-		return imbalance;
+-
+-	/*
+-	 * Allow a small imbalance based on a simple pair of communicating
+-	 * tasks that remain local when the destination is lightly loaded.
+-	 */
+-	if (imbalance <= NUMA_IMBALANCE_MIN)
+-		return 0;
+-
+-	return imbalance;
+-}
+-
+ /**
+  * calculate_imbalance - Calculate the amount of imbalance present within the
+  *			 groups of a given sched_domain during load balance.
+@@ -9405,7 +9408,7 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
+ 			 */
+ 			env->migration_type = migrate_task;
+ 			lsub_positive(&nr_diff, local->sum_nr_running);
+-			env->imbalance = nr_diff >> 1;
++			env->imbalance = nr_diff;
+ 		} else {
+ 
+ 			/*
+@@ -9413,15 +9416,21 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
+ 			 * idle cpus.
+ 			 */
+ 			env->migration_type = migrate_task;
+-			env->imbalance = max_t(long, 0, (local->idle_cpus -
+-						 busiest->idle_cpus) >> 1);
++			env->imbalance = max_t(long, 0,
++					       (local->idle_cpus - busiest->idle_cpus));
+ 		}
+ 
++#ifdef CONFIG_NUMA
+ 		/* Consider allowing a small imbalance between NUMA groups */
+ 		if (env->sd->flags & SD_NUMA) {
+ 			env->imbalance = adjust_numa_imbalance(env->imbalance,
+-				local->sum_nr_running + 1, env->sd->imb_numa_nr);
++							       local->sum_nr_running + 1,
++							       env->sd->imb_numa_nr);
+ 		}
++#endif
++
++		/* Number of tasks to move to restore balance */
++		env->imbalance >>= 1;
+ 
+ 		return;
+ 	}
+-- 
+cgit 1.2.3-1.el7
+
+From 026b98a93bbdbefb37ab8008df84e38e2fedaf92 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@techsingularity.net>
+Date: Fri, 20 May 2022 11:35:19 +0100
+Subject: sched/numa: Adjust imb_numa_nr to a better approximation of memory
+ channels
+
+For a single LLC per node, a NUMA imbalance is allowed up until 25%
+of CPUs sharing a node could be active. One intent of the cut-off is
+to avoid an imbalance of memory channels but there is no topological
+information based on active memory channels. Furthermore, there can
+be differences between nodes depending on the number of populated
+DIMMs.
+
+A cut-off of 25% was arbitrary but generally worked. It does have a severe
+corner cases though when an parallel workload is using 25% of all available
+CPUs over-saturates memory channels. This can happen due to the initial
+forking of tasks that get pulled more to one node after early wakeups
+(e.g. a barrier synchronisation) that is not quickly corrected by the
+load balancer. The LB may fail to act quickly as the parallel tasks are
+considered to be poor migrate candidates due to locality or cache hotness.
+
+On a range of modern Intel CPUs, 12.5% appears to be a better cut-off
+assuming all memory channels are populated and is used as the new cut-off
+point. A minimum of 1 is specified to allow a communicating pair to
+remain local even for CPUs with low numbers of cores. For modern AMDs,
+there are multiple LLCs and are not affected.
+
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Link: https://lore.kernel.org/r/20220520103519.1863-5-mgorman@techsingularity.net
+---
+ kernel/sched/topology.c | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
+index 05b6c2ad90b9c..8739c2a5a54ea 100644
+--- a/kernel/sched/topology.c
++++ b/kernel/sched/topology.c
+@@ -2316,23 +2316,30 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
+ 
+ 				/*
+ 				 * For a single LLC per node, allow an
+-				 * imbalance up to 25% of the node. This is an
+-				 * arbitrary cutoff based on SMT-2 to balance
+-				 * between memory bandwidth and avoiding
+-				 * premature sharing of HT resources and SMT-4
+-				 * or SMT-8 *may* benefit from a different
+-				 * cutoff.
++				 * imbalance up to 12.5% of the node. This is
++				 * arbitrary cutoff based two factors -- SMT and
++				 * memory channels. For SMT-2, the intent is to
++				 * avoid premature sharing of HT resources but
++				 * SMT-4 or SMT-8 *may* benefit from a different
++				 * cutoff. For memory channels, this is a very
++				 * rough estimate of how many channels may be
++				 * active and is based on recent CPUs with
++				 * many cores.
+ 				 *
+ 				 * For multiple LLCs, allow an imbalance
+ 				 * until multiple tasks would share an LLC
+ 				 * on one node while LLCs on another node
+-				 * remain idle.
++				 * remain idle. This assumes that there are
++				 * enough logical CPUs per LLC to avoid SMT
++				 * factors and that there is a correlation
++				 * between LLCs and memory channels.
+ 				 */
+ 				nr_llcs = sd->span_weight / child->span_weight;
+ 				if (nr_llcs == 1)
+-					imb = sd->span_weight >> 2;
++					imb = sd->span_weight >> 3;
+ 				else
+ 					imb = nr_llcs;
++				imb = max(1U, imb);
+ 				sd->imb_numa_nr = imb;
+ 
+ 				/* Set span based on the first NUMA domain. */
+-- 
+cgit 1.2.3-1.el7
+
+From f5b2eeb49991047f8f64785e7a7857d6f219d574 Mon Sep 17 00:00:00 2001
+From: K Prateek Nayak <kprateek.nayak@amd.com>
+Date: Thu, 7 Apr 2022 16:42:22 +0530
+Subject: sched/fair: Consider CPU affinity when allowing NUMA imbalance in
+ find_idlest_group()
+
+In the case of systems containing multiple LLCs per socket, like
+AMD Zen systems, users want to spread bandwidth hungry applications
+across multiple LLCs. Stream is one such representative workload where
+the best performance is obtained by limiting one stream thread per LLC.
+To ensure this, users are known to pin the tasks to a specify a subset
+of the CPUs consisting of one CPU per LLC while running such bandwidth
+hungry tasks.
+
+Suppose we kickstart a multi-threaded task like stream with 8 threads
+using taskset or numactl to run on a subset of CPUs on a 2 socket Zen3
+server where each socket contains 128 CPUs
+(0-63,128-191 in one socket, 64-127,192-255 in another socket)
+
+Eg: numactl -C 0,16,32,48,64,80,96,112 ./stream8
+
+Here each CPU in the list is from a different LLC and 4 of those LLCs
+are on one socket, while the other 4 are on another socket.
+
+Ideally we would prefer that each stream thread runs on a different
+CPU from the allowed list of CPUs. However, the current heuristics in
+find_idlest_group() do not allow this during the initial placement.
+
+Suppose the first socket (0-63,128-191) is our local group from which
+we are kickstarting the stream tasks. The first four stream threads
+will be placed in this socket. When it comes to placing the 5th
+thread, all the allowed CPUs are from the local group (0,16,32,48)
+would have been taken.
+
+However, the current scheduler code simply checks if the number of
+tasks in the local group is fewer than the allowed numa-imbalance
+threshold. This threshold was previously 25% of the NUMA domain span
+(in this case threshold = 32) but after the v6 of Mel's patchset
+"Adjust NUMA imbalance for multiple LLCs", got merged in sched-tip,
+Commit: e496132ebedd ("sched/fair: Adjust the allowed NUMA imbalance
+when SD_NUMA spans multiple LLCs") it is now equal to number of LLCs
+in the NUMA domain, for processors with multiple LLCs.
+(in this case threshold = 8).
+
+For this example, the number of tasks will always be within threshold
+and thus all the 8 stream threads will be woken up on the first socket
+thereby resulting in sub-optimal performance.
+
+The following sched_wakeup_new tracepoint output shows the initial
+placement of tasks in the current tip/sched/core on the Zen3 machine:
+
+stream-5313    [016] d..2.   627.005036: sched_wakeup_new: comm=stream pid=5315 prio=120 target_cpu=032
+stream-5313    [016] d..2.   627.005086: sched_wakeup_new: comm=stream pid=5316 prio=120 target_cpu=048
+stream-5313    [016] d..2.   627.005141: sched_wakeup_new: comm=stream pid=5317 prio=120 target_cpu=000
+stream-5313    [016] d..2.   627.005183: sched_wakeup_new: comm=stream pid=5318 prio=120 target_cpu=016
+stream-5313    [016] d..2.   627.005218: sched_wakeup_new: comm=stream pid=5319 prio=120 target_cpu=016
+stream-5313    [016] d..2.   627.005256: sched_wakeup_new: comm=stream pid=5320 prio=120 target_cpu=016
+stream-5313    [016] d..2.   627.005295: sched_wakeup_new: comm=stream pid=5321 prio=120 target_cpu=016
+
+Once the first four threads are distributed among the allowed CPUs of
+socket one, the rest of the treads start piling on these same CPUs
+when clearly there are CPUs on the second socket that can be used.
+
+Following the initial pile up on a small number of CPUs, though the
+load-balancer eventually kicks in, it takes a while to get to {4}{4}
+and even {4}{4} isn't stable as we observe a bunch of ping ponging
+between {4}{4} to {5}{3} and back before a stable state is reached
+much later (1 Stream thread per allowed CPU) and no more migration is
+required.
+
+We can detect this piling and avoid it by checking if the number of
+allowed CPUs in the local group are fewer than the number of tasks
+running in the local group and use this information to spread the
+5th task out into the next socket (after all, the goal in this
+slowpath is to find the idlest group and the idlest CPU during the
+initial placement!).
+
+The following sched_wakeup_new tracepoint output shows the initial
+placement of tasks after adding this fix on the Zen3 machine:
+
+stream-4485    [016] d..2.   230.784046: sched_wakeup_new: comm=stream pid=4487 prio=120 target_cpu=032
+stream-4485    [016] d..2.   230.784123: sched_wakeup_new: comm=stream pid=4488 prio=120 target_cpu=048
+stream-4485    [016] d..2.   230.784167: sched_wakeup_new: comm=stream pid=4489 prio=120 target_cpu=000
+stream-4485    [016] d..2.   230.784222: sched_wakeup_new: comm=stream pid=4490 prio=120 target_cpu=112
+stream-4485    [016] d..2.   230.784271: sched_wakeup_new: comm=stream pid=4491 prio=120 target_cpu=096
+stream-4485    [016] d..2.   230.784322: sched_wakeup_new: comm=stream pid=4492 prio=120 target_cpu=080
+stream-4485    [016] d..2.   230.784368: sched_wakeup_new: comm=stream pid=4493 prio=120 target_cpu=064
+
+We see that threads are using all of the allowed CPUs and there is
+no pileup.
+
+No output is generated for tracepoint sched_migrate_task with this
+patch due to a perfect initial placement which removes the need
+for balancing later on - both across NUMA boundaries and within
+NUMA boundaries for stream.
+
+Following are the results from running 8 Stream threads with and
+without pinning on a dual socket Zen3 Machine (2 x 64C/128T):
+
+During the testing of this patch, the tip sched/core was at
+commit: 089c02ae2771 "ftrace: Use preemption model accessors for trace
+header printout"
+
+Pinning is done using: numactl -C 0,16,32,48,64,80,96,112 ./stream8
+
+	           5.18.0-rc1               5.18.0-rc1                5.18.0-rc1
+               tip sched/core           tip sched/core            tip sched/core
+                 (no pinning)                + pinning              + this-patch
+								       + pinning
+
+ Copy:   109364.74 (0.00 pct)     94220.50 (-13.84 pct)    158301.28 (44.74 pct)
+Scale:   109670.26 (0.00 pct)     90210.59 (-17.74 pct)    149525.64 (36.34 pct)
+  Add:   129029.01 (0.00 pct)    101906.00 (-21.02 pct)    186658.17 (44.66 pct)
+Triad:   127260.05 (0.00 pct)    106051.36 (-16.66 pct)    184327.30 (44.84 pct)
+
+Pinning currently hurts the performance compared to unbound case on
+tip/sched/core. With the addition of this patch, we are able to
+outperform tip/sched/core by a good margin with pinning.
+
+Following are the results from running 16 Stream threads with and
+without pinning on a dual socket IceLake Machine (2 x 32C/64T):
+
+NUMA Topology of Intel Skylake machine:
+Node 1: 0,2,4,6 ... 126 (Even numbers)
+Node 2: 1,3,5,7 ... 127 (Odd numbers)
+
+Pinning is done using: numactl -C 0-15 ./stream16
+
+	           5.18.0-rc1               5.18.0-rc1                5.18.0-rc1
+               tip sched/core           tip sched/core            tip sched/core
+                 (no pinning)                 +pinning              + this-patch
+								       + pinning
+
+ Copy:    85815.31 (0.00 pct)     149819.21 (74.58 pct)    156807.48 (82.72 pct)
+Scale:    64795.60 (0.00 pct)      97595.07 (50.61 pct)     99871.96 (54.13 pct)
+  Add:    71340.68 (0.00 pct)     111549.10 (56.36 pct)    114598.33 (60.63 pct)
+Triad:    68890.97 (0.00 pct)     111635.16 (62.04 pct)    114589.24 (66.33 pct)
+
+In case of Icelake machine, with single LLC per socket, pinning across
+the two sockets reduces cache contention, thus showing great
+improvement in pinned case which is further benefited by this patch.
+
+Signed-off-by: K Prateek Nayak <kprateek.nayak@amd.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Reviewed-by: Srikar Dronamraju <srikar@linux.vnet.ibm.com>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Link: https://lkml.kernel.org/r/20220407111222.22649-1-kprateek.nayak@amd.com
+---
+ kernel/sched/fair.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 166f5f9bdb4fa..1b2cac76b35d1 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -9210,6 +9210,7 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
+ 	case group_has_spare:
+ #ifdef CONFIG_NUMA
+ 		if (sd->flags & SD_NUMA) {
++			int imb_numa_nr = sd->imb_numa_nr;
+ #ifdef CONFIG_NUMA_BALANCING
+ 			int idlest_cpu;
+ 			/*
+@@ -9227,13 +9228,22 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
+ 			 * Otherwise, keep the task close to the wakeup source
+ 			 * and improve locality if the number of running tasks
+ 			 * would remain below threshold where an imbalance is
+-			 * allowed. If there is a real need of migration,
+-			 * periodic load balance will take care of it.
++			 * allowed while accounting for the possibility the
++			 * task is pinned to a subset of CPUs. If there is a
++			 * real need of migration, periodic load balance will
++			 * take care of it.
+ 			 */
++			if (p->nr_cpus_allowed != NR_CPUS) {
++				struct cpumask *cpus = this_cpu_cpumask_var_ptr(select_idle_mask);
++
++				cpumask_and(cpus, sched_group_span(local), p->cpus_ptr);
++				imb_numa_nr = min(cpumask_weight(cpus), sd->imb_numa_nr);
++			}
++
+ 			imbalance = abs(local_sgs.idle_cpus - idlest_sgs.idle_cpus);
+ 			if (!adjust_numa_imbalance(imbalance,
+ 						   local_sgs.sum_nr_running + 1,
+-						   sd->imb_numa_nr)) {
++						   imb_numa_nr)) {
+ 				return NULL;
+ 			}
+ 		}
+-- 
+cgit 1.2.3-1.el7
+
+From 51bf903b64bdde4e4c9009a9e2b4a589845d9d81 Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Wed, 1 Jun 2022 10:18:48 +0800
+Subject: sched/fair: Optimize and simplify rq leaf_cfs_rq_list
+
+We notice the rq leaf_cfs_rq_list has two problems when do bugfix
+backports and some test profiling.
+
+1. cfs_rqs under throttled subtree could be added to the list, and
+   make their fully decayed ancestors on the list, even though not needed.
+
+2. #1 also make the leaf_cfs_rq_list management complex and error prone,
+   this is the list of related bugfix so far:
+
+   commit 31bc6aeaab1d ("sched/fair: Optimize update_blocked_averages()")
+   commit fe61468b2cbc ("sched/fair: Fix enqueue_task_fair warning")
+   commit b34cb07dde7c ("sched/fair: Fix enqueue_task_fair() warning some more")
+   commit 39f23ce07b93 ("sched/fair: Fix unthrottle_cfs_rq() for leaf_cfs_rq list")
+   commit 0258bdfaff5b ("sched/fair: Fix unfairness caused by missing load decay")
+   commit a7b359fc6a37 ("sched/fair: Correctly insert cfs_rq's to list on unthrottle")
+   commit fdaba61ef8a2 ("sched/fair: Ensure that the CFS parent is added after unthrottling")
+   commit 2630cde26711 ("sched/fair: Add ancestors of unthrottled undecayed cfs_rq")
+
+commit 31bc6aeaab1d ("sched/fair: Optimize update_blocked_averages()")
+delete every cfs_rq under throttled subtree from rq->leaf_cfs_rq_list,
+and delete the throttled_hierarchy() test in update_blocked_averages(),
+which optimized update_blocked_averages().
+
+But those later bugfix add cfs_rqs under throttled subtree back to
+rq->leaf_cfs_rq_list again, with their fully decayed ancestors, for
+the integrity of rq->leaf_cfs_rq_list.
+
+This patch takes another method, skip all cfs_rqs under throttled
+hierarchy when list_add_leaf_cfs_rq(), to completely make cfs_rqs
+under throttled subtree off the leaf_cfs_rq_list.
+
+So we don't need to consider throttled related things in
+enqueue_entity(), unthrottle_cfs_rq() and enqueue_task_fair(),
+which simplify the code a lot. Also optimize update_blocked_averages()
+since cfs_rqs under throttled hierarchy and their ancestors
+won't be on the leaf_cfs_rq_list.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220601021848.76943-1-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 92 ++++++++++++++++-------------------------------------
+ 1 file changed, 28 insertions(+), 64 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 1b2cac76b35d1..7d8ef01669a53 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3179,6 +3179,8 @@ void reweight_task(struct task_struct *p, int prio)
+ 	load->inv_weight = sched_prio_to_wmult[prio];
+ }
+ 
++static inline int throttled_hierarchy(struct cfs_rq *cfs_rq);
++
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ #ifdef CONFIG_SMP
+ /*
+@@ -3289,8 +3291,6 @@ static long calc_group_shares(struct cfs_rq *cfs_rq)
+ }
+ #endif /* CONFIG_SMP */
+ 
+-static inline int throttled_hierarchy(struct cfs_rq *cfs_rq);
+-
+ /*
+  * Recomputes the group entity based on the current state of its group
+  * runqueue.
+@@ -4403,16 +4403,11 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 		__enqueue_entity(cfs_rq, se);
+ 	se->on_rq = 1;
+ 
+-	/*
+-	 * When bandwidth control is enabled, cfs might have been removed
+-	 * because of a parent been throttled but cfs->nr_running > 1. Try to
+-	 * add it unconditionally.
+-	 */
+-	if (cfs_rq->nr_running == 1 || cfs_bandwidth_used())
+-		list_add_leaf_cfs_rq(cfs_rq);
+-
+-	if (cfs_rq->nr_running == 1)
++	if (cfs_rq->nr_running == 1) {
+ 		check_enqueue_throttle(cfs_rq);
++		if (!throttled_hierarchy(cfs_rq))
++			list_add_leaf_cfs_rq(cfs_rq);
++	}
+ }
+ 
+ static void __clear_buddies_last(struct sched_entity *se)
+@@ -5027,11 +5022,18 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
+ 	/* update hierarchical throttle state */
+ 	walk_tg_tree_from(cfs_rq->tg, tg_nop, tg_unthrottle_up, (void *)rq);
+ 
+-	/* Nothing to run but something to decay (on_list)? Complete the branch */
+ 	if (!cfs_rq->load.weight) {
+-		if (cfs_rq->on_list)
+-			goto unthrottle_throttle;
+-		return;
++		if (!cfs_rq->on_list)
++			return;
++		/*
++		 * Nothing to run but something to decay (on_list)?
++		 * Complete the branch.
++		 */
++		for_each_sched_entity(se) {
++			if (list_add_leaf_cfs_rq(cfs_rq_of(se)))
++				break;
++		}
++		goto unthrottle_throttle;
+ 	}
+ 
+ 	task_delta = cfs_rq->h_nr_running;
+@@ -5069,31 +5071,12 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
+ 		/* end evaluation on encountering a throttled cfs_rq */
+ 		if (cfs_rq_throttled(qcfs_rq))
+ 			goto unthrottle_throttle;
+-
+-		/*
+-		 * One parent has been throttled and cfs_rq removed from the
+-		 * list. Add it back to not break the leaf list.
+-		 */
+-		if (throttled_hierarchy(qcfs_rq))
+-			list_add_leaf_cfs_rq(qcfs_rq);
+ 	}
+ 
+ 	/* At this point se is NULL and we are at root level*/
+ 	add_nr_running(rq, task_delta);
+ 
+ unthrottle_throttle:
+-	/*
+-	 * The cfs_rq_throttled() breaks in the above iteration can result in
+-	 * incomplete leaf list maintenance, resulting in triggering the
+-	 * assertion below.
+-	 */
+-	for_each_sched_entity(se) {
+-		struct cfs_rq *qcfs_rq = cfs_rq_of(se);
+-
+-		if (list_add_leaf_cfs_rq(qcfs_rq))
+-			break;
+-	}
+-
+ 	assert_list_leaf_cfs_rq(rq);
+ 
+ 	/* Determine whether we need to wake up potentially idle CPU: */
+@@ -5748,13 +5731,6 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		/* end evaluation on encountering a throttled cfs_rq */
+ 		if (cfs_rq_throttled(cfs_rq))
+ 			goto enqueue_throttle;
+-
+-               /*
+-                * One parent has been throttled and cfs_rq removed from the
+-                * list. Add it back to not break the leaf list.
+-                */
+-               if (throttled_hierarchy(cfs_rq))
+-                       list_add_leaf_cfs_rq(cfs_rq);
+ 	}
+ 
+ 	/* At this point se is NULL and we are at root level*/
+@@ -5778,21 +5754,6 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 		update_overutilized_status(rq);
+ 
+ enqueue_throttle:
+-	if (cfs_bandwidth_used()) {
+-		/*
+-		 * When bandwidth control is enabled; the cfs_rq_throttled()
+-		 * breaks in the above iteration can result in incomplete
+-		 * leaf list maintenance, resulting in triggering the assertion
+-		 * below.
+-		 */
+-		for_each_sched_entity(se) {
+-			cfs_rq = cfs_rq_of(se);
+-
+-			if (list_add_leaf_cfs_rq(cfs_rq))
+-				break;
+-		}
+-	}
+-
+ 	assert_list_leaf_cfs_rq(rq);
+ 
+ 	hrtick_update(rq);
+@@ -11316,9 +11277,13 @@ static inline bool vruntime_normalized(struct task_struct *p)
+  */
+ static void propagate_entity_cfs_rq(struct sched_entity *se)
+ {
+-	struct cfs_rq *cfs_rq;
++	struct cfs_rq *cfs_rq = cfs_rq_of(se);
++
++	if (cfs_rq_throttled(cfs_rq))
++		return;
+ 
+-	list_add_leaf_cfs_rq(cfs_rq_of(se));
++	if (!throttled_hierarchy(cfs_rq))
++		list_add_leaf_cfs_rq(cfs_rq);
+ 
+ 	/* Start to propagate at parent */
+ 	se = se->parent;
+@@ -11326,14 +11291,13 @@ static void propagate_entity_cfs_rq(struct sched_entity *se)
+ 	for_each_sched_entity(se) {
+ 		cfs_rq = cfs_rq_of(se);
+ 
+-		if (!cfs_rq_throttled(cfs_rq)){
+-			update_load_avg(cfs_rq, se, UPDATE_TG);
+-			list_add_leaf_cfs_rq(cfs_rq);
+-			continue;
+-		}
++		update_load_avg(cfs_rq, se, UPDATE_TG);
+ 
+-		if (list_add_leaf_cfs_rq(cfs_rq))
++		if (cfs_rq_throttled(cfs_rq))
+ 			break;
++
++		if (!throttled_hierarchy(cfs_rq))
++			list_add_leaf_cfs_rq(cfs_rq);
+ 	}
+ }
+ #else
+-- 
+cgit 1.2.3-1.el7
+
+From 792b9f65a568f48c50b3175536db9cde5a1edcc0 Mon Sep 17 00:00:00 2001
+From: Josh Don <joshdon@google.com>
+Date: Wed, 8 Jun 2022 19:55:15 -0700
+Subject: sched: Allow newidle balancing to bail out of load_balance
+
+While doing newidle load balancing, it is possible for new tasks to
+arrive, such as with pending wakeups. newidle_balance() already accounts
+for this by exiting the sched_domain load_balance() iteration if it
+detects these cases. This is very important for minimizing wakeup
+latency.
+
+However, if we are already in load_balance(), we may stay there for a
+while before returning back to newidle_balance(). This is most
+exacerbated if we enter a 'goto redo' loop in the LBF_ALL_PINNED case. A
+very straightforward workaround to this is to adjust should_we_balance()
+to bail out if we're doing a CPU_NEWLY_IDLE balance and new tasks are
+detected.
+
+This was tested with the following reproduction:
+- two threads that take turns sleeping and waking each other up are
+  affined to two cores
+- a large number of threads with 100% utilization are pinned to all
+  other cores
+
+Without this patch, wakeup latency was ~120us for the pair of threads,
+almost entirely spent in load_balance(). With this patch, wakeup latency
+is ~6us.
+
+Signed-off-by: Josh Don <joshdon@google.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220609025515.2086253-1-joshdon@google.com
+---
+ kernel/sched/fair.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 7d8ef01669a53..8bed75757e659 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -9824,9 +9824,15 @@ static int should_we_balance(struct lb_env *env)
+ 	/*
+ 	 * In the newly idle case, we will allow all the CPUs
+ 	 * to do the newly idle load balance.
++	 *
++	 * However, we bail out if we already have tasks or a wakeup pending,
++	 * to optimize wakeup latency.
+ 	 */
+-	if (env->idle == CPU_NEWLY_IDLE)
++	if (env->idle == CPU_NEWLY_IDLE) {
++		if (env->dst_rq->nr_running > 0 || env->dst_rq->ttwu_pending)
++			return 0;
+ 		return 1;
++	}
+ 
+ 	/* Try to find first idle CPU */
+ 	for_each_cpu_and(cpu, group_balance_mask(sg), env->cpus) {
+-- 
+cgit 1.2.3-1.el7
+
+From 28156108fecb1f808b21d216e8ea8f0d205a530c Mon Sep 17 00:00:00 2001
+From: Tianchen Ding <dtcccc@linux.alibaba.com>
+Date: Thu, 9 Jun 2022 07:34:11 +0800
+Subject: sched: Fix the check of nr_running at queue wakelist
+
+The commit 2ebb17717550 ("sched/core: Offload wakee task activation if it
+the wakee is descheduling") checked rq->nr_running <= 1 to avoid task
+stacking when WF_ON_CPU.
+
+Per the ordering of writes to p->on_rq and p->on_cpu, observing p->on_cpu
+(WF_ON_CPU) in ttwu_queue_cond() implies !p->on_rq, IOW p has gone through
+the deactivate_task() in __schedule(), thus p has been accounted out of
+rq->nr_running. As such, the task being the only runnable task on the rq
+implies reading rq->nr_running == 0 at that point.
+
+The benchmark result is in [1].
+
+[1] https://lore.kernel.org/all/e34de686-4e85-bde1-9f3c-9bbc86b38627@linux.alibaba.com/
+
+Suggested-by: Valentin Schneider <vschneid@redhat.com>
+Signed-off-by: Tianchen Ding <dtcccc@linux.alibaba.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Valentin Schneider <vschneid@redhat.com>
+Link: https://lore.kernel.org/r/20220608233412.327341-2-dtcccc@linux.alibaba.com
+---
+ kernel/sched/core.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index bfa7452ca92e7..294b9184dfe1a 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -3829,8 +3829,12 @@ static inline bool ttwu_queue_cond(int cpu, int wake_flags)
+ 	 * CPU then use the wakelist to offload the task activation to
+ 	 * the soon-to-be-idle CPU as the current CPU is likely busy.
+ 	 * nr_running is checked to avoid unnecessary task stacking.
++	 *
++	 * Note that we can only get here with (wakee) p->on_rq=0,
++	 * p->on_cpu can be whatever, we've done the dequeue, so
++	 * the wakee has been accounted out of ->nr_running.
+ 	 */
+-	if ((wake_flags & WF_ON_CPU) && cpu_rq(cpu)->nr_running <= 1)
++	if ((wake_flags & WF_ON_CPU) && !cpu_rq(cpu)->nr_running)
+ 		return true;
+ 
+ 	return false;
+-- 
+cgit 1.2.3-1.el7
+
+From f3dd3f674555bd9455c5ae7fafce0696bd9931b3 Mon Sep 17 00:00:00 2001
+From: Tianchen Ding <dtcccc@linux.alibaba.com>
+Date: Thu, 9 Jun 2022 07:34:12 +0800
+Subject: sched: Remove the limitation of WF_ON_CPU on wakelist if wakee cpu is
+ idle
+
+Wakelist can help avoid cache bouncing and offload the overhead of waker
+cpu. So far, using wakelist within the same llc only happens on
+WF_ON_CPU, and this limitation could be removed to further improve
+wakeup performance.
+
+The commit 518cd6234178 ("sched: Only queue remote wakeups when
+crossing cache boundaries") disabled queuing tasks on wakelist when
+the cpus share llc. This is because, at that time, the scheduler must
+send IPIs to do ttwu_queue_wakelist. Nowadays, ttwu_queue_wakelist also
+supports TIF_POLLING, so this is not a problem now when the wakee cpu is
+in idle polling.
+
+Benefits:
+  Queuing the task on idle cpu can help improving performance on waker cpu
+  and utilization on wakee cpu, and further improve locality because
+  the wakee cpu can handle its own rq. This patch helps improving rt on
+  our real java workloads where wakeup happens frequently.
+
+  Consider the normal condition (CPU0 and CPU1 share same llc)
+  Before this patch:
+
+         CPU0                                       CPU1
+
+    select_task_rq()                                idle
+    rq_lock(CPU1->rq)
+    enqueue_task(CPU1->rq)
+    notify CPU1 (by sending IPI or CPU1 polling)
+
+                                                    resched()
+
+  After this patch:
+
+         CPU0                                       CPU1
+
+    select_task_rq()                                idle
+    add to wakelist of CPU1
+    notify CPU1 (by sending IPI or CPU1 polling)
+
+                                                    rq_lock(CPU1->rq)
+                                                    enqueue_task(CPU1->rq)
+                                                    resched()
+
+  We see CPU0 can finish its work earlier. It only needs to put task to
+  wakelist and return.
+  While CPU1 is idle, so let itself handle its own runqueue data.
+
+This patch brings no difference about IPI.
+  This patch only takes effect when the wakee cpu is:
+  1) idle polling
+  2) idle not polling
+
+  For 1), there will be no IPI with or without this patch.
+
+  For 2), there will always be an IPI before or after this patch.
+  Before this patch: waker cpu will enqueue task and check preempt. Since
+  "idle" will be sure to be preempted, waker cpu must send a resched IPI.
+  After this patch: waker cpu will put the task to the wakelist of wakee
+  cpu, and send an IPI.
+
+Benchmark:
+We've tested schbench, unixbench, and hachbench on both x86 and arm64.
+
+On x86 (Intel Xeon Platinum 8269CY):
+  schbench -m 2 -t 8
+
+    Latency percentiles (usec)              before        after
+        50.0000th:                             8            6
+        75.0000th:                            10            7
+        90.0000th:                            11            8
+        95.0000th:                            12            8
+        *99.0000th:                           13           10
+        99.5000th:                            15           11
+        99.9000th:                            18           14
+
+  Unixbench with full threads (104)
+                                            before        after
+    Dhrystone 2 using register variables  3011862938    3009935994  -0.06%
+    Double-Precision Whetstone              617119.3      617298.5   0.03%
+    Execl Throughput                         27667.3       27627.3  -0.14%
+    File Copy 1024 bufsize 2000 maxblocks   785871.4      784906.2  -0.12%
+    File Copy 256 bufsize 500 maxblocks     210113.6      212635.4   1.20%
+    File Copy 4096 bufsize 8000 maxblocks  2328862.2     2320529.1  -0.36%
+    Pipe Throughput                      145535622.8   145323033.2  -0.15%
+    Pipe-based Context Switching           3221686.4     3583975.4  11.25%
+    Process Creation                        101347.1      103345.4   1.97%
+    Shell Scripts (1 concurrent)            120193.5      123977.8   3.15%
+    Shell Scripts (8 concurrent)             17233.4       17138.4  -0.55%
+    System Call Overhead                   5300604.8     5312213.6   0.22%
+
+  hackbench -g 1 -l 100000
+                                            before        after
+    Time                                     3.246        2.251
+
+On arm64 (Ampere Altra):
+  schbench -m 2 -t 8
+
+    Latency percentiles (usec)              before        after
+        50.0000th:                            14           10
+        75.0000th:                            19           14
+        90.0000th:                            22           16
+        95.0000th:                            23           16
+        *99.0000th:                           24           17
+        99.5000th:                            24           17
+        99.9000th:                            28           25
+
+  Unixbench with full threads (80)
+                                            before        after
+    Dhrystone 2 using register variables  3536194249    3537019613   0.02%
+    Double-Precision Whetstone              629383.6      629431.6   0.01%
+    Execl Throughput                         65920.5       65846.2  -0.11%
+    File Copy 1024 bufsize 2000 maxblocks  1063722.8     1064026.8   0.03%
+    File Copy 256 bufsize 500 maxblocks     322684.5      318724.5  -1.23%
+    File Copy 4096 bufsize 8000 maxblocks  2348285.3     2328804.8  -0.83%
+    Pipe Throughput                      133542875.3   131619389.8  -1.44%
+    Pipe-based Context Switching           3215356.1     3576945.1  11.25%
+    Process Creation                        108520.5      120184.6  10.75%
+    Shell Scripts (1 concurrent)            122636.3        121888  -0.61%
+    Shell Scripts (8 concurrent)             17462.1       17381.4  -0.46%
+    System Call Overhead                   4429998.9     4435006.7   0.11%
+
+  hackbench -g 1 -l 100000
+                                            before        after
+    Time                                     4.217        2.916
+
+Our patch has improvement on schbench, hackbench
+and Pipe-based Context Switching of unixbench
+when there exists idle cpus,
+and no obvious regression on other tests of unixbench.
+This can help improve rt in scenes where wakeup happens frequently.
+
+Signed-off-by: Tianchen Ding <dtcccc@linux.alibaba.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Valentin Schneider <vschneid@redhat.com>
+Link: https://lore.kernel.org/r/20220608233412.327341-3-dtcccc@linux.alibaba.com
+---
+ kernel/sched/core.c  | 26 ++++++++++++++------------
+ kernel/sched/sched.h |  1 -
+ 2 files changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 294b9184dfe1a..723452608bed5 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -3808,7 +3808,7 @@ bool cpus_share_cache(int this_cpu, int that_cpu)
+ 	return per_cpu(sd_llc_id, this_cpu) == per_cpu(sd_llc_id, that_cpu);
+ }
+ 
+-static inline bool ttwu_queue_cond(int cpu, int wake_flags)
++static inline bool ttwu_queue_cond(int cpu)
+ {
+ 	/*
+ 	 * Do not complicate things with the async wake_list while the CPU is
+@@ -3824,17 +3824,21 @@ static inline bool ttwu_queue_cond(int cpu, int wake_flags)
+ 	if (!cpus_share_cache(smp_processor_id(), cpu))
+ 		return true;
+ 
++	if (cpu == smp_processor_id())
++		return false;
++
+ 	/*
+-	 * If the task is descheduling and the only running task on the
+-	 * CPU then use the wakelist to offload the task activation to
+-	 * the soon-to-be-idle CPU as the current CPU is likely busy.
+-	 * nr_running is checked to avoid unnecessary task stacking.
++	 * If the wakee cpu is idle, or the task is descheduling and the
++	 * only running task on the CPU, then use the wakelist to offload
++	 * the task activation to the idle (or soon-to-be-idle) CPU as
++	 * the current CPU is likely busy. nr_running is checked to
++	 * avoid unnecessary task stacking.
+ 	 *
+ 	 * Note that we can only get here with (wakee) p->on_rq=0,
+ 	 * p->on_cpu can be whatever, we've done the dequeue, so
+ 	 * the wakee has been accounted out of ->nr_running.
+ 	 */
+-	if ((wake_flags & WF_ON_CPU) && !cpu_rq(cpu)->nr_running)
++	if (!cpu_rq(cpu)->nr_running)
+ 		return true;
+ 
+ 	return false;
+@@ -3842,10 +3846,7 @@ static inline bool ttwu_queue_cond(int cpu, int wake_flags)
+ 
+ static bool ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
+ {
+-	if (sched_feat(TTWU_QUEUE) && ttwu_queue_cond(cpu, wake_flags)) {
+-		if (WARN_ON_ONCE(cpu == smp_processor_id()))
+-			return false;
+-
++	if (sched_feat(TTWU_QUEUE) && ttwu_queue_cond(cpu)) {
+ 		sched_clock_cpu(cpu); /* Sync clocks across CPUs */
+ 		__ttwu_queue_wakelist(p, cpu, wake_flags);
+ 		return true;
+@@ -4167,7 +4168,7 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
+ 	 * scheduling.
+ 	 */
+ 	if (smp_load_acquire(&p->on_cpu) &&
+-	    ttwu_queue_wakelist(p, task_cpu(p), wake_flags | WF_ON_CPU))
++	    ttwu_queue_wakelist(p, task_cpu(p), wake_flags))
+ 		goto unlock;
+ 
+ 	/*
+@@ -4757,7 +4758,8 @@ static inline void prepare_task(struct task_struct *next)
+ 	 * Claim the task as running, we do this before switching to it
+ 	 * such that any running task will have this set.
+ 	 *
+-	 * See the ttwu() WF_ON_CPU case and its ordering comment.
++	 * See the smp_load_acquire(&p->on_cpu) case in ttwu() and
++	 * its ordering comment.
+ 	 */
+ 	WRITE_ONCE(next->on_cpu, 1);
+ #endif
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 01259611beb94..1e34bb4527fd2 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2039,7 +2039,6 @@ static inline int task_on_rq_migrating(struct task_struct *p)
+ 
+ #define WF_SYNC     0x10 /* Waker goes to sleep after wakeup */
+ #define WF_MIGRATED 0x20 /* Internal use, task got migrated */
+-#define WF_ON_CPU   0x40 /* Wakee is on_cpu */
+ 
+ #ifdef CONFIG_SMP
+ static_assert(WF_EXEC == SD_BALANCE_EXEC);
+-- 
+cgit 1.2.3-1.el7
+
+

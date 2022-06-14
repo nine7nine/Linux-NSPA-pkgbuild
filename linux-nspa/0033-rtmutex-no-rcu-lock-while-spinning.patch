@@ -9,6 +9,8 @@ optimistically spinning on the rtmutex lock owner. This can needlessly
 delay RCU grace periods, slowing down anything waiting for a grace period
 to elapse.
 
+ --modified/rebased to apply over 5.18-nspa
+
 Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
 ---
  kernel/locking/rtmutex.c | 26 ++++++++++++++++++--------
