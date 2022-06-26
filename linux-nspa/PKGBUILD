@@ -156,6 +156,7 @@ source=(
   "0038-5.19.x-xhci-fixes.patch"
   "0039-5.19.x-locking-sched-fixes.patch"
   "0040-5.19.x-misc-fixes.patch"
+  "0041-block-ioprio_patchwork.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -675,5 +676,6 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             'ab460430430dca2f87aff6dfc66f20956002faad6f95110059a765632ddbc2d4'
             'ebcb4e55f35c2739148c1cd8948d53d8d9a7c0c45826a0aacb26990b308e1fb8'
             '92c5f9485f8064c47c5b0112c5c0bb9f7307ad67354cc9c10f5acc349427d86f'
-            'dabe773f76ee0c380e7dd80c34f7280cc8c7466f0807cbbf6559a1c6e7600650')
+            'dabe773f76ee0c380e7dd80c34f7280cc8c7466f0807cbbf6559a1c6e7600650'
+            '9fc8327573f20bdbb6dbd7b4c5e34475233f9c9d3260c83462da83029b4ba98e')
 
