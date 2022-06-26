@@ -177,20 +177,19 @@ index c9da2f439994..0a5e25a20864 100644
 -	pm_wakeup_clear(0);
  	pr_info("Freezing user space processes ... ");
  	pm_freezing = true;
- 	error = try_to_freeze_tasks(true)
+ 	error = try_to_freeze_tasks(true);
 diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
 index 4732ea41fdfa..79b6b710bd3c 100644
 --- a/kernel/power/suspend.c
 +++ b/kernel/power/suspend.c
-@@ -607,6 +607,7 @@ static int enter_state(suspend_state_t state)
- 	if (!mutex_trylock(&pm_mutex))
+@@ -560,6 +560,7 @@ static int enter_state(suspend_state_t s
+ 	if (!mutex_trylock(&system_transition_mutex))
  		return -EBUSY;
  
 +	pm_wakeup_clear(0);
  	if (state == PM_SUSPEND_TO_IDLE)
  		s2idle_begin();
  
-
 From ffd7943b5013cb63143106063f451212f83ddfe2 Mon Sep 17 00:00:00 2001
 From: Sultan Alsawaf <sultan@kerneltoast.com>
 Date: Wed, 4 May 2022 09:28:34 -0700

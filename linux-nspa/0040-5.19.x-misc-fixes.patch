@@ -1,0 +1,223 @@
+From 668a9fe5c6a1bcac6b65d5e9b91a9eca86f782a3 Mon Sep 17 00:00:00 2001
+From: Marc Zyngier <maz@kernel.org>
+Date: Wed, 8 Jun 2022 14:45:35 +0100
+Subject: [PATCH 01/11] genirq: PM: Use runtime PM for chained interrupts
+
+When requesting an interrupt, we correctly call into the runtime
+PM framework to guarantee that the underlying interrupt controller
+is up and running.
+
+However, we fail to do so for chained interrupt controllers, as
+the mux interrupt is not requested along the same path.
+
+Augment __irq_do_set_handler() to call into the runtime PM code
+in this case, making sure the PM flow is the same for all interrupts.
+
+Reported-by: Lucas Stach <l.stach@pengutronix.de>
+Tested-by: Liu Ying <victor.liu@nxp.com>
+Signed-off-by: Marc Zyngier <maz@kernel.org>
+Link: https://lore.kernel.org/r/26973cddee5f527ea17184c0f3fccb70bc8969a0.camel@pengutronix.de
+---
+ kernel/irq/chip.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/irq/chip.c b/kernel/irq/chip.c
+index e6b8e564b37f0..886789dcee435 100644
+--- a/kernel/irq/chip.c
++++ b/kernel/irq/chip.c
+@@ -1006,8 +1006,10 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
+ 		if (desc->irq_data.chip != &no_irq_chip)
+ 			mask_ack_irq(desc);
+ 		irq_state_set_disabled(desc);
+-		if (is_chained)
++		if (is_chained) {
+ 			desc->action = NULL;
++			WARN_ON(irq_chip_pm_put(irq_desc_get_irq_data(desc)));
++		}
+ 		desc->depth = 1;
+ 	}
+ 	desc->handle_irq = handle;
+@@ -1033,6 +1035,7 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
+ 		irq_settings_set_norequest(desc);
+ 		irq_settings_set_nothread(desc);
+ 		desc->action = &chained_action;
++		WARN_ON(irq_chip_pm_get(irq_desc_get_irq_data(desc)));
+ 		irq_activate_and_startup(desc, IRQ_RESEND);
+ 	}
+ }
+
+From 27071b5cbca59d8e8f8750c199a6cbf8c9799963 Mon Sep 17 00:00:00 2001
+From: Serge Semin <Sergey.Semin@baikalelectronics.ru>
+Date: Fri, 10 Jun 2022 10:42:33 +0300
+Subject: [PATCH 5/6] i2c: designware: Use standard optional ref clock
+ implementation
+
+Even though the DW I2C controller reference clock source is requested by
+the method devm_clk_get() with non-optional clock requirement the way the
+clock handler is used afterwards has a pure optional clock semantic
+(though in some circumstances we can get a warning about the clock missing
+printed in the system console). There is no point in reimplementing that
+functionality seeing the kernel clock framework already supports the
+optional interface from scratch. Thus let's convert the platform driver to
+using it.
+
+Note by providing this commit we get to fix two problems. The first one
+was introduced in commit c62ebb3d5f0d ("i2c: designware: Add support for
+an interface clock"). It causes not having the interface clock (pclk)
+enabled/disabled in case if the reference clock isn't provided. The second
+problem was first introduced in commit b33af11de236 ("i2c: designware: Do
+not require clock when SSCN and FFCN are provided"). Since that
+modification the deferred probe procedure has been unsupported in case if
+the interface clock isn't ready.
+
+Fixes: c62ebb3d5f0d ("i2c: designware: Add support for an interface clock")
+Fixes: b33af11de236 ("i2c: designware: Do not require clock when SSCN and FFCN are provided")
+Signed-off-by: Serge Semin <Sergey.Semin@baikalelectronics.ru>
+Reviewed-by: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+Acked-by: Jarkko Nikula <jarkko.nikula@linux.intel.com>
+Signed-off-by: Wolfram Sang <wsa@kernel.org>
+---
+ drivers/i2c/busses/i2c-designware-common.c  |  3 ---
+ drivers/i2c/busses/i2c-designware-platdrv.c | 13 +++++++++++--
+ 2 files changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-designware-common.c b/drivers/i2c/busses/i2c-designware-common.c
+index e7d316b1401a1..c023b691441ea 100644
+--- a/drivers/i2c/busses/i2c-designware-common.c
++++ b/drivers/i2c/busses/i2c-designware-common.c
+@@ -477,9 +477,6 @@ int i2c_dw_prepare_clk(struct dw_i2c_dev *dev, bool prepare)
+ {
+ 	int ret;
+ 
+-	if (IS_ERR(dev->clk))
+-		return PTR_ERR(dev->clk);
+-
+ 	if (prepare) {
+ 		/* Optional interface clock */
+ 		ret = clk_prepare_enable(dev->pclk);
+diff --git a/drivers/i2c/busses/i2c-designware-platdrv.c b/drivers/i2c/busses/i2c-designware-platdrv.c
+index 70ade5306e458..ba043b5473936 100644
+--- a/drivers/i2c/busses/i2c-designware-platdrv.c
++++ b/drivers/i2c/busses/i2c-designware-platdrv.c
+@@ -320,8 +320,17 @@ static int dw_i2c_plat_probe(struct platform_device *pdev)
+ 		goto exit_reset;
+ 	}
+ 
+-	dev->clk = devm_clk_get(&pdev->dev, NULL);
+-	if (!i2c_dw_prepare_clk(dev, true)) {
++	dev->clk = devm_clk_get_optional(&pdev->dev, NULL);
++	if (IS_ERR(dev->clk)) {
++		ret = PTR_ERR(dev->clk);
++		goto exit_reset;
++	}
++
++	ret = i2c_dw_prepare_clk(dev, true);
++	if (ret)
++		goto exit_reset;
++
++	if (dev->clk) {
+ 		u64 clk_khz;
+ 
+ 		dev->get_clk_rate_khz = i2c_dw_get_clk_rate_khz;
+ 		
+From b653db77350c7307a513b81856fe53e94cf42446 Mon Sep 17 00:00:00 2001
+From: "Matthew Wilcox (Oracle)" <willy@infradead.org>
+Date: Sun, 19 Jun 2022 10:37:32 -0400
+Subject: [PATCH] mm: Clear page->private when splitting or migrating a page
+
+In our efforts to remove uses of PG_private, we have found folios with
+the private flag clear and folio->private not-NULL.  That is the root
+cause behind 642d51fb0775 ("ceph: check folio PG_private bit instead
+of folio->private").  It can also affect a few other filesystems that
+haven't yet reported a problem.
+
+compaction_alloc() can return a page with uninitialised page->private,
+and rather than checking all the callers of migrate_pages(), just zero
+page->private after calling get_new_page().  Similarly, the tail pages
+from split_huge_page() may also have an uninitialised page->private.
+
+Reported-by: Xiubo Li <xiubli@redhat.com>
+Tested-by: Xiubo Li <xiubli@redhat.com>
+Signed-off-by: Matthew Wilcox (Oracle) <willy@infradead.org>
+---
+ mm/huge_memory.c | 1 +
+ mm/migrate.c     | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index f7248002dad98..834f288b37690 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -2377,6 +2377,7 @@ static void __split_huge_page_tail(struct page *head, int tail,
+ 			page_tail);
+ 	page_tail->mapping = head->mapping;
+ 	page_tail->index = head->index + tail;
++	page_tail->private = 0;
+ 
+ 	/* Page flags must be visible before we make the page non-compound. */
+ 	smp_wmb();
+diff --git a/mm/migrate.c b/mm/migrate.c
+index e51588e95f573..6c1ea61f39d80 100644
+--- a/mm/migrate.c
++++ b/mm/migrate.c
+@@ -1106,6 +1106,7 @@ static int unmap_and_move(new_page_t get_new_page,
+ 	if (!newpage)
+ 		return -ENOMEM;
+ 
++	newpage->private = 0;
+ 	rc = __unmap_and_move(page, newpage, force, mode);
+ 	if (rc == MIGRATEPAGE_SUCCESS)
+ 		set_page_owner_migrate_reason(newpage, reason);
+
+From 00fa15e0d56482e32d8ca1f51d76b0ee00afb16b Mon Sep 17 00:00:00 2001
+From: Alistair Popple <apopple@nvidia.com>
+Date: Mon, 20 Jun 2022 19:05:36 +1000
+Subject: [PATCH] filemap: Fix serialization adding transparent huge pages to
+ page cache
+
+Commit 793917d997df ("mm/readahead: Add large folio readahead")
+introduced support for using large folios for filebacked pages if the
+filesystem supports it.
+
+page_cache_ra_order() was introduced to allocate and add these large
+folios to the page cache. However adding pages to the page cache should
+be serialized against truncation and hole punching by taking
+invalidate_lock. Not doing so can lead to data races resulting in stale
+data getting added to the page cache and marked up-to-date. See commit
+730633f0b7f9 ("mm: Protect operations adding pages to page cache with
+invalidate_lock") for more details.
+
+This issue was found by inspection but a testcase revealed it was
+possible to observe in practice on XFS. Fix this by taking
+invalidate_lock in page_cache_ra_order(), to mirror what is done for the
+non-thp case in page_cache_ra_unbounded().
+
+Signed-off-by: Alistair Popple <apopple@nvidia.com>
+Fixes: 793917d997df ("mm/readahead: Add large folio readahead")
+Reviewed-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Matthew Wilcox (Oracle) <willy@infradead.org>
+---
+ mm/readahead.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mm/readahead.c b/mm/readahead.c
+index 57a0151082543..fdcd28cbd92de 100644
+--- a/mm/readahead.c
++++ b/mm/readahead.c
+@@ -510,6 +510,7 @@ void page_cache_ra_order(struct readahead_control *ractl,
+ 			new_order--;
+ 	}
+ 
++	filemap_invalidate_lock_shared(mapping);
+ 	while (index <= limit) {
+ 		unsigned int order = new_order;
+ 
+@@ -536,6 +537,7 @@ void page_cache_ra_order(struct readahead_control *ractl,
+ 	}
+ 
+ 	read_pages(ractl);
++	filemap_invalidate_unlock_shared(mapping);
+ 
+ 	/*
+ 	 * If there were already pages in the page cache, then we may have
+
