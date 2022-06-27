@@ -1,0 +1,601 @@
+From 31733463372e8d88ea54bfa1e35178aad9b2ffd2 Mon Sep 17 00:00:00 2001
+From: Marcelo Tosatti <mtosatti@redhat.com>
+Date: Mon, 30 May 2022 12:51:56 -0300
+Subject: [PATCH 02/16] mm: lru_cache_disable: use synchronize_rcu_expedited
+
+commit ff042f4a9b050 ("mm: lru_cache_disable: replace work queue
+synchronization with synchronize_rcu") replaced lru_cache_disable's usage
+of work queues with synchronize_rcu.
+
+Some users reported large performance regressions due to this commit, for
+example:
+https://lore.kernel.org/all/20220521234616.GO1790663@paulmck-ThinkPad-P17-Gen-1/T/
+
+Switching to synchronize_rcu_expedited fixes the problem.
+
+Link: https://lkml.kernel.org/r/YpToHCmnx/HEcVyR@fuller.cnet
+Fixes: ff042f4a9b050 ("mm: lru_cache_disable: replace work queue synchronization with synchronize_rcu")
+Signed-off-by: Marcelo Tosatti <mtosatti@redhat.com>
+Tested-by: Stefan Wahren <stefan.wahren@i2se.com>
+Tested-by: Michael Larabel <Michael@MichaelLarabel.com>
+Cc: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Cc: Nicolas Saenz Julienne <nsaenzju@redhat.com>
+Cc: Borislav Petkov <bp@alien8.de>
+Cc: Minchan Kim <minchan@kernel.org>
+Cc: Matthew Wilcox <willy@infradead.org>
+Cc: Mel Gorman <mgorman@techsingularity.net>
+Cc: Juri Lelli <juri.lelli@redhat.com>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Paul E. McKenney <paulmck@kernel.org>
+Cc: Phil Elwell <phil@raspberrypi.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/swap.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/swap.c b/mm/swap.c
+index f3922a96b2e9e6..034bb24879a3b2 100644
+--- a/mm/swap.c
++++ b/mm/swap.c
+@@ -881,7 +881,7 @@ void lru_cache_disable(void)
+ 	 * lru_disable_count = 0 will have exited the critical
+ 	 * section when synchronize_rcu() returns.
+ 	 */
+-	synchronize_rcu();
++	synchronize_rcu_expedited();
+ #ifdef CONFIG_SMP
+ 	__lru_add_drain_all(true);
+ #else
+
+From d25c83c6606ffc3abdf0868136ad3399f648ad70 Mon Sep 17 00:00:00 2001
+From: Petr Mladek <pmladek@suse.com>
+Date: Tue, 15 Mar 2022 11:24:44 +0100
+Subject: [PATCH 03/16] kthread: make it clear that kthread_create_on_node()
+ might be terminated by any fatal signal
+
+The comments in kernel/kthread.c create a feeling that only SIGKILL is
+able to terminate the creation of kernel kthreads by
+kthread_create()/_on_node()/_on_cpu() APIs.
+
+In reality, wait_for_completion_killable() might be killed by any fatal
+signal that does not have a custom handler:
+
+	(!siginmask(signr, SIG_KERNEL_IGNORE_MASK|SIG_KERNEL_STOP_MASK) && \
+	 (t)->sighand->action[(signr)-1].sa.sa_handler == SIG_DFL)
+
+static inline void signal_wake_up(struct task_struct *t, bool resume)
+{
+	signal_wake_up_state(t, resume ? TASK_WAKEKILL : 0);
+}
+
+static void complete_signal(int sig, struct task_struct *p, enum pid_type type)
+{
+[...]
+	/*
+	 * Found a killable thread.  If the signal will be fatal,
+	 * then start taking the whole group down immediately.
+	 */
+	if (sig_fatal(p, sig) ...) {
+		if (!sig_kernel_coredump(sig)) {
+		[...]
+			do {
+				task_clear_jobctl_pending(t, JOBCTL_PENDING_MASK);
+				sigaddset(&t->pending.signal, SIGKILL);
+				signal_wake_up(t, 1);
+			} while_each_thread(p, t);
+			return;
+		}
+	}
+}
+
+Update the comments in kernel/kthread.c to make this more obvious.
+
+The motivation for this change was debugging why a module initialization
+failed.  The module was being loaded from initrd.  It "magically" failed
+when systemd was switching to the real root.  The clean up operations sent
+SIGTERM to various pending processed that were started from initrd.
+
+Link: https://lkml.kernel.org/r/20220315102444.2380-1-pmladek@suse.com
+Signed-off-by: Petr Mladek <pmladek@suse.com>
+Reviewed-by: "Eric W. Biederman" <ebiederm@xmission.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Mathieu Desnoyers <mathieu.desnoyers@polymtl.ca>
+Cc: Kees Cook <keescook@chromium.org>
+Cc: Marco Elver <elver@google.com>
+Cc: Jens Axboe <axboe@kernel.dk>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ kernel/kthread.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/kthread.c b/kernel/kthread.c
+index 544fd409740689..3c677918d8f2fe 100644
+--- a/kernel/kthread.c
++++ b/kernel/kthread.c
+@@ -340,7 +340,7 @@ static int kthread(void *_create)
+ 
+ 	self = to_kthread(current);
+ 
+-	/* If user was SIGKILLed, I release the structure. */
++	/* Release the structure when caller killed by a fatal signal. */
+ 	done = xchg(&create->done, NULL);
+ 	if (!done) {
+ 		kfree(create);
+@@ -398,7 +398,7 @@ static void create_kthread(struct kthread_create_info *create)
+ 	/* We want our own signal handler (we take no signals by default). */
+ 	pid = kernel_thread(kthread, create, CLONE_FS | CLONE_FILES | SIGCHLD);
+ 	if (pid < 0) {
+-		/* If user was SIGKILLed, I release the structure. */
++		/* Release the structure when caller killed by a fatal signal. */
+ 		struct completion *done = xchg(&create->done, NULL);
+ 
+ 		if (!done) {
+@@ -440,9 +440,9 @@ struct task_struct *__kthread_create_on_node(int (*threadfn)(void *data),
+ 	 */
+ 	if (unlikely(wait_for_completion_killable(&done))) {
+ 		/*
+-		 * If I was SIGKILLed before kthreadd (or new kernel thread)
+-		 * calls complete(), leave the cleanup of this structure to
+-		 * that thread.
++		 * If I was killed by a fatal signal before kthreadd (or new
++		 * kernel thread) calls complete(), leave the cleanup of this
++		 * structure to that thread.
+ 		 */
+ 		if (xchg(&create->done, NULL))
+ 			return ERR_PTR(-EINTR);
+@@ -876,7 +876,7 @@ __kthread_create_worker(int cpu, unsigned int flags,
+  *
+  * Returns a pointer to the allocated worker on success, ERR_PTR(-ENOMEM)
+  * when the needed structures could not get allocated, and ERR_PTR(-EINTR)
+- * when the worker was SIGKILLed.
++ * when the caller was killed by a fatal signal.
+  */
+ struct kthread_worker *
+ kthread_create_worker(unsigned int flags, const char namefmt[], ...)
+@@ -925,7 +925,7 @@ EXPORT_SYMBOL(kthread_create_worker);
+  * Return:
+  * The pointer to the allocated worker on success, ERR_PTR(-ENOMEM)
+  * when the needed structures could not get allocated, and ERR_PTR(-EINTR)
+- * when the worker was SIGKILLed.
++ * when the caller was killed by a fatal signal.
+  */
+ struct kthread_worker *
+ kthread_create_worker_on_cpu(int cpu, unsigned int flags,
+
+From 327b18b7aaed5de3b548212e3ab75133bf323759 Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Thu, 9 Jun 2022 14:33:19 +0200
+Subject: [PATCH 11/16] mm/kfence: select random number before taking raw lock
+
+The RNG uses vanilla spinlocks, not raw spinlocks, so kfence should pick
+its random numbers before taking its raw spinlocks.  This also has the
+nice effect of doing less work inside the lock.  It should fix a splat
+that Geert saw with CONFIG_PROVE_RAW_LOCK_NESTING:
+
+     dump_backtrace.part.0+0x98/0xc0
+     show_stack+0x14/0x28
+     dump_stack_lvl+0xac/0xec
+     dump_stack+0x14/0x2c
+     __lock_acquire+0x388/0x10a0
+     lock_acquire+0x190/0x2c0
+     _raw_spin_lock_irqsave+0x6c/0x94
+     crng_make_state+0x148/0x1e4
+     _get_random_bytes.part.0+0x4c/0xe8
+     get_random_u32+0x4c/0x140
+     __kfence_alloc+0x460/0x5c4
+     kmem_cache_alloc_trace+0x194/0x1dc
+     __kthread_create_on_node+0x5c/0x1a8
+     kthread_create_on_node+0x58/0x7c
+     printk_start_kthread.part.0+0x34/0xa8
+     printk_activate_kthreads+0x4c/0x54
+     do_one_initcall+0xec/0x278
+     kernel_init_freeable+0x11c/0x214
+     kernel_init+0x24/0x124
+     ret_from_fork+0x10/0x20
+
+Link: https://lkml.kernel.org/r/20220609123319.17576-1-Jason@zx2c4.com
+Fixes: d4150779e60f ("random32: use real rng for non-deterministic randomness")
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+Reported-by: Geert Uytterhoeven <geert@linux-m68k.org>
+Tested-by: Geert Uytterhoeven <geert+renesas@glider.be>
+Reviewed-by: Marco Elver <elver@google.com>
+Reviewed-by: Petr Mladek <pmladek@suse.com>
+Cc: John Ogness <john.ogness@linutronix.de>
+Cc: Alexander Potapenko <glider@google.com>
+Cc: Dmitry Vyukov <dvyukov@google.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/kfence/core.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/mm/kfence/core.c b/mm/kfence/core.c
+index 4e7cd4c8e687ef..4b5e5a3d3a6388 100644
+--- a/mm/kfence/core.c
++++ b/mm/kfence/core.c
+@@ -360,6 +360,9 @@ static void *kfence_guarded_alloc(struct kmem_cache *cache, size_t size, gfp_t g
+ 	unsigned long flags;
+ 	struct slab *slab;
+ 	void *addr;
++	const bool random_right_allocate = prandom_u32_max(2);
++	const bool random_fault = CONFIG_KFENCE_STRESS_TEST_FAULTS &&
++				  !prandom_u32_max(CONFIG_KFENCE_STRESS_TEST_FAULTS);
+ 
+ 	/* Try to obtain a free object. */
+ 	raw_spin_lock_irqsave(&kfence_freelist_lock, flags);
+@@ -404,7 +407,7 @@ static void *kfence_guarded_alloc(struct kmem_cache *cache, size_t size, gfp_t g
+ 	 * is that the out-of-bounds accesses detected are deterministic for
+ 	 * such allocations.
+ 	 */
+-	if (prandom_u32_max(2)) {
++	if (random_right_allocate) {
+ 		/* Allocate on the "right" side, re-calculate address. */
+ 		meta->addr += PAGE_SIZE - size;
+ 		meta->addr = ALIGN_DOWN(meta->addr, cache->align);
+@@ -444,7 +447,7 @@ static void *kfence_guarded_alloc(struct kmem_cache *cache, size_t size, gfp_t g
+ 	if (cache->ctor)
+ 		cache->ctor(addr);
+ 
+-	if (CONFIG_KFENCE_STRESS_TEST_FAULTS && !prandom_u32_max(CONFIG_KFENCE_STRESS_TEST_FAULTS))
++	if (random_fault)
+ 		kfence_protect(meta->addr); /* Random "faults" by protecting the object. */
+ 
+ 	atomic_long_inc(&counters[KFENCE_COUNTER_ALLOCATED]);
+
+From df4ae285a3d5ce99d69efe81b21c4fed9bbc51b9 Mon Sep 17 00:00:00 2001
+From: Yang Yang <yang.yang29@zte.com.cn>
+Date: Fri, 10 Jun 2022 02:44:52 +0000
+Subject: [PATCH 13/16] mm: memcontrol: reference to
+ tools/cgroup/memcg_slabinfo.py
+
+There is no slabinfo.py in tools/cgroup, but has memcg_slabinfo.py instead.
+
+Link: https://lkml.kernel.org/r/20220610024451.744135-1-yang.yang29@zte.com.cn
+Signed-off-by: Yang Yang <yang.yang29@zte.com.cn>
+Reviewed-by: Muchun Song <songmuchun@bytedance.com>
+Acked-by: Roman Gushchin <roman.gushchin@linux.dev>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/memcontrol.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/memcontrol.c b/mm/memcontrol.c
+index abec50f31fe641..618c366a2f074d 100644
+--- a/mm/memcontrol.c
++++ b/mm/memcontrol.c
+@@ -4859,7 +4859,7 @@ static int mem_cgroup_slab_show(struct seq_file *m, void *p)
+ {
+ 	/*
+ 	 * Deprecated.
+-	 * Please, take a look at tools/cgroup/slabinfo.py .
++	 * Please, take a look at tools/cgroup/memcg_slabinfo.py .
+ 	 */
+ 	return 0;
+ }
+
+From 68d32527d340b0d13c8cf6495d6ab4332adca09a Mon Sep 17 00:00:00 2001
+From: Mike Kravetz <mike.kravetz@oracle.com>
+Date: Mon, 13 Jun 2022 13:36:48 -0700
+Subject: [PATCH 14/16] hugetlbfs: zero partial pages during fallocate hole
+ punch
+
+hugetlbfs fallocate support was originally added with commit 70c3547e36f5
+("hugetlbfs: add hugetlbfs_fallocate()").  Initial support only operated
+on whole hugetlb pages.  This makes sense for populating files as other
+interfaces such as mmap and truncate require hugetlb page size alignment.
+Only operating on whole hugetlb pages for the hole punch case was a
+simplification and there was no compelling use case to zero partial pages.
+
+In a recent discussion[1] it was assumed that hugetlbfs hole punch would
+zero partial hugetlb pages as that is in line with the man page
+description saying 'partial filesystem blocks are zeroed'.  However, the
+hugetlbfs hole punch code actually does this:
+
+        hole_start = round_up(offset, hpage_size);
+        hole_end = round_down(offset + len, hpage_size);
+
+Modify code to zero partial hugetlb pages in hole punch range.  It is
+possible that application code could note a change in behavior.  However,
+that would imply the code is passing in an unaligned range and expecting
+only whole pages be removed.  This is unlikely as the fallocate
+documentation states the opposite.
+
+The current hugetlbfs fallocate hole punch behavior is tested with the
+libhugetlbfs test fallocate_align[2].  This test will be updated to
+validate partial page zeroing.
+
+[1] https://lore.kernel.org/linux-mm/20571829-9d3d-0b48-817c-b6b15565f651@redhat.com/
+[2] https://github.com/libhugetlbfs/libhugetlbfs/blob/master/tests/fallocate_align.c
+
+Link: https://lkml.kernel.org/r/YqeiMlZDKI1Kabfe@monkey
+Signed-off-by: Mike Kravetz <mike.kravetz@oracle.com>
+Reviewed-by: Muchun Song <songmuchun@bytedance.com>
+Cc: David Hildenbrand <david@redhat.com>
+Cc: Naoya Horiguchi <naoya.horiguchi@linux.dev>
+Cc: Axel Rasmussen <axelrasmussen@google.com>
+Cc: Dave Hansen <dave.hansen@intel.com>
+Cc: Michal Hocko <mhocko@suse.com>
+Cc: Matthew Wilcox <willy@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ fs/hugetlbfs/inode.c | 68 ++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 53 insertions(+), 15 deletions(-)
+
+diff --git a/fs/hugetlbfs/inode.c b/fs/hugetlbfs/inode.c
+index 62408047e8d7bf..02eb72351b15be 100644
+--- a/fs/hugetlbfs/inode.c
++++ b/fs/hugetlbfs/inode.c
+@@ -588,40 +588,77 @@ static void hugetlb_vmtruncate(struct in
+ 	remove_inode_hugepages(inode, offset, LLONG_MAX);
+ }
+ 
++static void hugetlbfs_zero_partial_page(struct hstate *h,
++					struct address_space *mapping,
++					loff_t start,
++					loff_t end)
++{
++	pgoff_t idx = start >> huge_page_shift(h);
++	struct folio *folio;
++
++	folio = filemap_lock_folio(mapping, idx);
++	if (!folio)
++		return;
++
++	start = start & ~huge_page_mask(h);
++	end = end & ~huge_page_mask(h);
++	if (!end)
++		end = huge_page_size(h);
++
++	folio_zero_segment(folio, (size_t)start, (size_t)end);
++
++	folio_unlock(folio);
++	folio_put(folio);
++}
++
+ static long hugetlbfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ {
++	struct hugetlbfs_inode_info *info = HUGETLBFS_I(inode);
++	struct address_space *mapping = inode->i_mapping;
+ 	struct hstate *h = hstate_inode(inode);
+ 	loff_t hpage_size = huge_page_size(h);
+ 	loff_t hole_start, hole_end;
+ 
+ 	/*
+-	 * For hole punch round up the beginning offset of the hole and
+-	 * round down the end.
++	 * hole_start and hole_end indicate the full pages within the hole.
+ 	 */
+ 	hole_start = round_up(offset, hpage_size);
+ 	hole_end = round_down(offset + len, hpage_size);
+ 
+-	if (hole_end > hole_start) {
+-		struct address_space *mapping = inode->i_mapping;
+-		struct hugetlbfs_inode_info *info = HUGETLBFS_I(inode);
++	inode_lock(inode);
+ 
+-		inode_lock(inode);
++	/* protected by i_rwsem */
++	if (info->seals & (F_SEAL_WRITE | F_SEAL_FUTURE_WRITE)) {
++		inode_unlock(inode);
++		return -EPERM;
++	}
+ 
+-		/* protected by i_rwsem */
+-		if (info->seals & (F_SEAL_WRITE | F_SEAL_FUTURE_WRITE)) {
+-			inode_unlock(inode);
+-			return -EPERM;
+-		}
++	i_mmap_lock_write(mapping);
+ 
+-		i_mmap_lock_write(mapping);
++	/* If range starts before first full page, zero partial page. */
++	if (offset < hole_start)
++		hugetlbfs_zero_partial_page(h, mapping,
++				offset, min(offset + len, hole_start));
++
++	/* Unmap users of full pages in the hole. */
++	if (hole_end > hole_start) {
+ 		if (!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root))
+ 			hugetlb_vmdelete_list(&mapping->i_mmap,
+ 						hole_start >> PAGE_SHIFT,
+ 						hole_end  >> PAGE_SHIFT);
+-		i_mmap_unlock_write(mapping);
+-		remove_inode_hugepages(inode, hole_start, hole_end);
+-		inode_unlock(inode);
+ 	}
++	/* If range extends beyond last full page, zero partial page. */
++	if ((offset + len) > hole_end && (offset + len) > hole_start)
++		hugetlbfs_zero_partial_page(h, mapping,
++				hole_end, offset + len);
++
++	i_mmap_unlock_write(mapping);
++
++	/* Remove full pages from the file. */
++	if (hole_end > hole_start)
++		remove_inode_hugepages(inode, hole_start, hole_end);
++
++	inode_unlock(inode);
+ 
+ 	return 0;
+ }
+ 
+
+From 67f22ba7750f940bcd7e1b12720896c505c2d63f Mon Sep 17 00:00:00 2001
+From: zhenwei pi <pizhenwei@bytedance.com>
+Date: Wed, 15 Jun 2022 17:32:09 +0800
+Subject: [PATCH 15/16] mm/memory-failure: disable unpoison once hw error
+ happens
+
+Currently unpoison_memory(unsigned long pfn) is designed for soft
+poison(hwpoison-inject) only.  Since 17fae1294ad9d, the KPTE gets cleared
+on a x86 platform once hardware memory corrupts.
+
+Unpoisoning a hardware corrupted page puts page back buddy only, the
+kernel has a chance to access the page with *NOT PRESENT* KPTE.  This
+leads BUG during accessing on the corrupted KPTE.
+
+Suggested by David&Naoya, disable unpoison mechanism when a real HW error
+happens to avoid BUG like this:
+
+ Unpoison: Software-unpoisoned page 0x61234
+ BUG: unable to handle page fault for address: ffff888061234000
+ #PF: supervisor write access in kernel mode
+ #PF: error_code(0x0002) - not-present page
+ PGD 2c01067 P4D 2c01067 PUD 107267063 PMD 10382b063 PTE 800fffff9edcb062
+ Oops: 0002 [#1] PREEMPT SMP NOPTI
+ CPU: 4 PID: 26551 Comm: stress Kdump: loaded Tainted: G   M       OE     5.18.0.bm.1-amd64 #7
+ Hardware name: QEMU Standard PC (i440FX + PIIX, 1996) ...
+ RIP: 0010:clear_page_erms+0x7/0x10
+ Code: ...
+ RSP: 0000:ffffc90001107bc8 EFLAGS: 00010246
+ RAX: 0000000000000000 RBX: 0000000000000901 RCX: 0000000000001000
+ RDX: ffffea0001848d00 RSI: ffffea0001848d40 RDI: ffff888061234000
+ RBP: ffffea0001848d00 R08: 0000000000000901 R09: 0000000000001276
+ R10: 0000000000000003 R11: 0000000000000000 R12: 0000000000000001
+ R13: 0000000000000000 R14: 0000000000140dca R15: 0000000000000001
+ FS:  00007fd8b2333740(0000) GS:ffff88813fd00000(0000) knlGS:0000000000000000
+ CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+ CR2: ffff888061234000 CR3: 00000001023d2005 CR4: 0000000000770ee0
+ DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+ DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+ PKRU: 55555554
+ Call Trace:
+  <TASK>
+  prep_new_page+0x151/0x170
+  get_page_from_freelist+0xca0/0xe20
+  ? sysvec_apic_timer_interrupt+0xab/0xc0
+  ? asm_sysvec_apic_timer_interrupt+0x1b/0x20
+  __alloc_pages+0x17e/0x340
+  __folio_alloc+0x17/0x40
+  vma_alloc_folio+0x84/0x280
+  __handle_mm_fault+0x8d4/0xeb0
+  handle_mm_fault+0xd5/0x2a0
+  do_user_addr_fault+0x1d0/0x680
+  ? kvm_read_and_reset_apf_flags+0x3b/0x50
+  exc_page_fault+0x78/0x170
+  asm_exc_page_fault+0x27/0x30
+
+Link: https://lkml.kernel.org/r/20220615093209.259374-2-pizhenwei@bytedance.com
+Fixes: 847ce401df392 ("HWPOISON: Add unpoisoning support")
+Fixes: 17fae1294ad9d ("x86/{mce,mm}: Unmap the entire page if the whole page is affected and poisoned")
+Signed-off-by: zhenwei pi <pizhenwei@bytedance.com>
+Acked-by: David Hildenbrand <david@redhat.com>
+Acked-by: Naoya Horiguchi <naoya.horiguchi@nec.com>
+Reviewed-by: Miaohe Lin <linmiaohe@huawei.com>
+Reviewed-by: Oscar Salvador <osalvador@suse.de>
+Cc: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+Cc: <stable@vger.kernel.org>	[5.8+]
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ Documentation/vm/hwpoison.rst |  3 ++-
+ drivers/base/memory.c         |  2 +-
+ include/linux/mm.h            |  1 +
+ mm/hwpoison-inject.c          |  2 +-
+ mm/madvise.c                  |  2 +-
+ mm/memory-failure.c           | 12 ++++++++++++
+ 6 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/vm/hwpoison.rst b/Documentation/vm/hwpoison.rst
+index c742de1769d18d..b9d5253c130576 100644
+--- a/Documentation/vm/hwpoison.rst
++++ b/Documentation/vm/hwpoison.rst
+@@ -120,7 +120,8 @@ Testing
+   unpoison-pfn
+ 	Software-unpoison page at PFN echoed into this file. This way
+ 	a page can be reused again.  This only works for Linux
+-	injected failures, not for real memory failures.
++	injected failures, not for real memory failures. Once any hardware
++	memory failure happens, this feature is disabled.
+ 
+   Note these injection interfaces are not stable and might change between
+   kernel versions
+diff --git a/drivers/base/memory.c b/drivers/base/memory.c
+index 084d67fd55cc8c..bc60c9cd323082 100644
+--- a/drivers/base/memory.c
++++ b/drivers/base/memory.c
+@@ -558,7 +558,7 @@ static ssize_t hard_offline_page_store(struct device *dev,
+ 	if (kstrtoull(buf, 0, &pfn) < 0)
+ 		return -EINVAL;
+ 	pfn >>= PAGE_SHIFT;
+-	ret = memory_failure(pfn, 0);
++	ret = memory_failure(pfn, MF_SW_SIMULATED);
+ 	if (ret == -EOPNOTSUPP)
+ 		ret = 0;
+ 	return ret ? ret : count;
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index 781fae17177d1c..cf3d0d673f6be6 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -3232,6 +3232,7 @@ enum mf_flags {
+ 	MF_MUST_KILL = 1 << 2,
+ 	MF_SOFT_OFFLINE = 1 << 3,
+ 	MF_UNPOISON = 1 << 4,
++	MF_SW_SIMULATED = 1 << 5,
+ };
+ extern int memory_failure(unsigned long pfn, int flags);
+ extern void memory_failure_queue(unsigned long pfn, int flags);
+diff --git a/mm/hwpoison-inject.c b/mm/hwpoison-inject.c
+index 5c0cddd8150599..65e242b5a43271 100644
+--- a/mm/hwpoison-inject.c
++++ b/mm/hwpoison-inject.c
+@@ -48,7 +48,7 @@ static int hwpoison_inject(void *data, u64 val)
+ 
+ inject:
+ 	pr_info("Injecting memory failure at pfn %#lx\n", pfn);
+-	err = memory_failure(pfn, 0);
++	err = memory_failure(pfn, MF_SW_SIMULATED);
+ 	return (err == -EOPNOTSUPP) ? 0 : err;
+ }
+ 
+diff --git a/mm/madvise.c b/mm/madvise.c
+index d7b4f260294910..0316bbc6441b2b 100644
+--- a/mm/madvise.c
++++ b/mm/madvise.c
+@@ -1112,7 +1112,7 @@ static int madvise_inject_error(int behavior,
+ 		} else {
+ 			pr_info("Injecting memory failure for pfn %#lx at process virtual address %#lx\n",
+ 				 pfn, start);
+-			ret = memory_failure(pfn, MF_COUNT_INCREASED);
++			ret = memory_failure(pfn, MF_COUNT_INCREASED | MF_SW_SIMULATED);
+ 			if (ret == -EOPNOTSUPP)
+ 				ret = 0;
+ 		}
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index b85661cbdc4aa0..da39ec8afca858 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -69,6 +69,8 @@ int sysctl_memory_failure_recovery __read_mostly = 1;
+ 
+ atomic_long_t num_poisoned_pages __read_mostly = ATOMIC_LONG_INIT(0);
+ 
++static bool hw_memory_failure __read_mostly = false;
++
+ static bool __page_handle_poison(struct page *page)
+ {
+ 	int ret;
+@@ -1768,6 +1770,9 @@ int memory_failure(unsigned long pfn, int flags)
+ 
+ 	mutex_lock(&mf_mutex);
+ 
++	if (!(flags & MF_SW_SIMULATED))
++		hw_memory_failure = true;
++
+ 	p = pfn_to_online_page(pfn);
+ 	if (!p) {
+ 		res = arch_memory_failure(pfn, flags);
+@@ -2103,6 +2108,13 @@ int unpoison_memory(unsigned long pfn)
+ 
+ 	mutex_lock(&mf_mutex);
+ 
++	if (hw_memory_failure) {
++		unpoison_pr_info("Unpoison: Disabled after HW memory failure %#lx\n",
++				 pfn, &unpoison_rs);
++		ret = -EOPNOTSUPP;
++		goto unlock_mutex;
++	}
++
+ 	if (!PageHWPoison(p)) {
+ 		unpoison_pr_info("Unpoison: Page was already unpoisoned %#lx\n",
+ 				 pfn, &unpoison_rs);
+
