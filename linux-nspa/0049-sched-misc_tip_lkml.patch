@@ -1,0 +1,455 @@
+From 774d3f35d5fd39cc07a0d621a3e7299310969b5c Mon Sep 17 00:00:00 2001
+From: Jordan Johnston <johnstonljordan@gmail.com>
+Date: Wed, 29 Jun 2022 17:14:08 -0500
+Subject: [PATCH] sched: tip, lkml and misc patchwork
+
+ - sched/fair: combine detach into dequeue when migrating task
+ - sched: Remove unused function group_first_cpu()
+ - sched: only perform capability check on privileged operation
+ - sched/core: Fix the bug that task won't enqueue into core tree when update cookie
+ - sched/core: Introduce nr_running percpu for each cookie
+ - sched/core: Make tasks with the same cookie pairs on SMT siblings
+ - sched/core: Use try_cmpxchg in set_nr_{and_not,if}_polling
+
+---
+ kernel/sched/core.c       | 169 ++++++++++++++++++++++----------------
+ kernel/sched/core_sched.c |  18 ++--
+ kernel/sched/fair.c       |  30 ++++---
+ kernel/sched/sched.h      |  18 ++--
+ 4 files changed, 134 insertions(+), 101 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 7ba09c942c8f..5eaa6cd45d15 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -241,21 +241,28 @@ static inline int rb_sched_core_cmp(const void *key, const struct rb_node *node)
+ 
+ void sched_core_enqueue(struct rq *rq, struct task_struct *p)
+ {
++	struct sched_core_cookie *ck = (struct sched_core_cookie *)p->core_cookie;
++
+ 	rq->core->core_task_seq++;
+ 
+ 	if (!p->core_cookie)
+ 		return;
+ 
+ 	rb_add(&p->core_node, &rq->core_tree, rb_sched_core_less);
++
++	*per_cpu_ptr(ck->nr_running, rq->cpu) += 1;
+ }
+ 
+ void sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags)
+ {
++	struct sched_core_cookie *ck = (struct sched_core_cookie *)p->core_cookie;
++
+ 	rq->core->core_task_seq++;
+ 
+ 	if (sched_core_enqueued(p)) {
+ 		rb_erase(&p->core_node, &rq->core_tree);
+ 		RB_CLEAR_NODE(&p->core_node);
++		*per_cpu_ptr(ck->nr_running, rq->cpu) -= 1;
+ 	}
+ 
+ 	/*
+@@ -889,15 +896,11 @@ static inline void hrtick_rq_init(struct rq *rq)
+ 	({								\
+ 		typeof(ptr) _ptr = (ptr);				\
+ 		typeof(mask) _mask = (mask);				\
+-		typeof(*_ptr) _old, _val = *_ptr;			\
++		typeof(*_ptr) _val = *_ptr;				\
+ 									\
+-		for (;;) {						\
+-			_old = cmpxchg(_ptr, _val, _val | _mask);	\
+-			if (_old == _val)				\
+-				break;					\
+-			_val = _old;					\
+-		}							\
+-	_old;								\
++		do {							\
++		} while (!try_cmpxchg(_ptr, &_val, _val | _mask));	\
++	_val;								\
+ })
+ 
+ #if defined(CONFIG_SMP) && defined(TIF_POLLING_NRFLAG)
+@@ -906,7 +909,7 @@ static inline void hrtick_rq_init(struct rq *rq)
+  * this avoids any races wrt polling state changes and thereby avoids
+  * spurious IPIs.
+  */
+-static bool set_nr_and_not_polling(struct task_struct *p)
++static inline bool set_nr_and_not_polling(struct task_struct *p)
+ {
+ 	struct thread_info *ti = task_thread_info(p);
+ 	return !(fetch_or(&ti->flags, _TIF_NEED_RESCHED) & _TIF_POLLING_NRFLAG);
+@@ -921,30 +924,28 @@ static bool set_nr_and_not_polling(struct task_struct *p)
+ static bool set_nr_if_polling(struct task_struct *p)
+ {
+ 	struct thread_info *ti = task_thread_info(p);
+-	typeof(ti->flags) old, val = READ_ONCE(ti->flags);
++	typeof(ti->flags) val = READ_ONCE(ti->flags);
+ 
+ 	for (;;) {
+ 		if (!(val & _TIF_POLLING_NRFLAG))
+ 			return false;
+ 		if (val & _TIF_NEED_RESCHED)
+ 			return true;
+-		old = cmpxchg(&ti->flags, val, val | _TIF_NEED_RESCHED);
+-		if (old == val)
++		if (try_cmpxchg(&ti->flags, &val, val | _TIF_NEED_RESCHED))
+ 			break;
+-		val = old;
+ 	}
+ 	return true;
+ }
+ 
+ #else
+-static bool set_nr_and_not_polling(struct task_struct *p)
++static inline bool set_nr_and_not_polling(struct task_struct *p)
+ {
+ 	set_tsk_need_resched(p);
+ 	return true;
+ }
+ 
+ #ifdef CONFIG_SMP
+-static bool set_nr_if_polling(struct task_struct *p)
++static inline bool set_nr_if_polling(struct task_struct *p)
+ {
+ 	return false;
+ }
+@@ -7079,17 +7080,29 @@ void set_user_nice(struct task_struct *p, long nice)
+ EXPORT_SYMBOL(set_user_nice);
+ 
+ /*
+- * can_nice - check if a task can reduce its nice value
++ * is_nice_reduction - check if nice value is an actual reduction
++ *
++ * Similar to can_nice() but does not perform a capability check.
++ *
+  * @p: task
+  * @nice: nice value
+  */
+-int can_nice(const struct task_struct *p, const int nice)
++static bool is_nice_reduction(const struct task_struct *p, const int nice)
+ {
+ 	/* Convert nice value [19,-20] to rlimit style value [1,40]: */
+ 	int nice_rlim = nice_to_rlimit(nice);
+ 
+-	return (nice_rlim <= task_rlimit(p, RLIMIT_NICE) ||
+-		capable(CAP_SYS_NICE));
++	return (nice_rlim <= task_rlimit(p, RLIMIT_NICE));
++}
++
++/*
++ * can_nice - check if a task can reduce its nice value
++ * @p: task
++ * @nice: nice value
++ */
++int can_nice(const struct task_struct *p, const int nice)
++{
++	return is_nice_reduction(p, nice) || capable(CAP_SYS_NICE);
+ }
+ 
+ #ifdef __ARCH_WANT_SYS_NICE
+@@ -7368,6 +7381,69 @@ static bool check_same_owner(struct task_struct *p)
+ 	return match;
+ }
+ 
++/*
++ * Allow unprivileged RT tasks to decrease priority.
++ * Only issue a capable test if needed and only once to avoid an audit
++ * event on permitted non-privileged operations:
++ */
++static int user_check_sched_setscheduler(struct task_struct *p,
++					 const struct sched_attr *attr,
++					 int policy, int reset_on_fork)
++{
++	if (fair_policy(policy)) {
++		if (attr->sched_nice < task_nice(p) &&
++		    !is_nice_reduction(p, attr->sched_nice))
++			goto req_priv;
++	}
++
++	if (rt_policy(policy)) {
++		unsigned long rlim_rtprio = task_rlimit(p, RLIMIT_RTPRIO);
++
++		/* Can't set/change the rt policy: */
++		if (policy != p->policy && !rlim_rtprio)
++			goto req_priv;
++
++		/* Can't increase priority: */
++		if (attr->sched_priority > p->rt_priority &&
++		    attr->sched_priority > rlim_rtprio)
++			goto req_priv;
++	}
++
++	/*
++	 * Can't set/change SCHED_DEADLINE policy at all for now
++	 * (safest behavior); in the future we would like to allow
++	 * unprivileged DL tasks to increase their relative deadline
++	 * or reduce their runtime (both ways reducing utilization)
++	 */
++	if (dl_policy(policy))
++		goto req_priv;
++
++	/*
++	 * Treat SCHED_IDLE as nice 20. Only allow a switch to
++	 * SCHED_NORMAL if the RLIMIT_NICE would normally permit it.
++	 */
++	if (task_has_idle_policy(p) && !idle_policy(policy)) {
++		if (!is_nice_reduction(p, task_nice(p)))
++			goto req_priv;
++	}
++
++	/* Can't change other user's priorities: */
++	if (!check_same_owner(p))
++		goto req_priv;
++
++	/* Normal users shall not reset the sched_reset_on_fork flag: */
++	if (p->sched_reset_on_fork && !reset_on_fork)
++		goto req_priv;
++
++	return 0;
++
++req_priv:
++	if (!capable(CAP_SYS_NICE))
++		return -EPERM;
++
++	return 0;
++}
++
+ static int __sched_setscheduler(struct task_struct *p,
+ 				const struct sched_attr *attr,
+ 				bool user, bool pi)
+@@ -7409,58 +7485,11 @@ static int __sched_setscheduler(struct task_struct *p,
+ 	    (rt_policy(policy) != (attr->sched_priority != 0)))
+ 		return -EINVAL;
+ 
+-	/*
+-	 * Allow unprivileged RT tasks to decrease priority:
+-	 */
+-	if (user && !capable(CAP_SYS_NICE)) {
+-		if (fair_policy(policy)) {
+-			if (attr->sched_nice < task_nice(p) &&
+-			    !can_nice(p, attr->sched_nice))
+-				return -EPERM;
+-		}
+-
+-		if (rt_policy(policy)) {
+-			unsigned long rlim_rtprio =
+-					task_rlimit(p, RLIMIT_RTPRIO);
+-
+-			/* Can't set/change the rt policy: */
+-			if (policy != p->policy && !rlim_rtprio)
+-				return -EPERM;
+-
+-			/* Can't increase priority: */
+-			if (attr->sched_priority > p->rt_priority &&
+-			    attr->sched_priority > rlim_rtprio)
+-				return -EPERM;
+-		}
+-
+-		 /*
+-		  * Can't set/change SCHED_DEADLINE policy at all for now
+-		  * (safest behavior); in the future we would like to allow
+-		  * unprivileged DL tasks to increase their relative deadline
+-		  * or reduce their runtime (both ways reducing utilization)
+-		  */
+-		if (dl_policy(policy))
+-			return -EPERM;
+-
+-		/*
+-		 * Treat SCHED_IDLE as nice 20. Only allow a switch to
+-		 * SCHED_NORMAL if the RLIMIT_NICE would normally permit it.
+-		 */
+-		if (task_has_idle_policy(p) && !idle_policy(policy)) {
+-			if (!can_nice(p, task_nice(p)))
+-				return -EPERM;
+-		}
+-
+-		/* Can't change other user's priorities: */
+-		if (!check_same_owner(p))
+-			return -EPERM;
+-
+-		/* Normal users shall not reset the sched_reset_on_fork flag: */
+-		if (p->sched_reset_on_fork && !reset_on_fork)
+-			return -EPERM;
+-	}
+-
+ 	if (user) {
++		retval = user_check_sched_setscheduler(p, attr, policy, reset_on_fork);
++		if (retval)
++			return retval;
++
+ 		if (attr->sched_flags & SCHED_FLAG_SUGOV)
+ 			return -EINVAL;
+ 
+diff --git a/kernel/sched/core_sched.c b/kernel/sched/core_sched.c
+index 38a2cec21014..65ab9fcbeed2 100644
+--- a/kernel/sched/core_sched.c
++++ b/kernel/sched/core_sched.c
+@@ -1,20 +1,19 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ 
+-/*
+- * A simple wrapper around refcount. An allocated sched_core_cookie's
+- * address is used to compute the cookie of the task.
+- */
+-struct sched_core_cookie {
+-	refcount_t refcnt;
+-};
+-
+ static unsigned long sched_core_alloc_cookie(void)
+ {
+ 	struct sched_core_cookie *ck = kmalloc(sizeof(*ck), GFP_KERNEL);
++	int cpu;
++
+ 	if (!ck)
+ 		return 0;
+ 
+ 	refcount_set(&ck->refcnt, 1);
++
++	ck->nr_running = alloc_percpu(unsigned int);
++	for_each_possible_cpu(cpu)
++		*per_cpu_ptr(ck->nr_running, cpu) = 0;
++
+ 	sched_core_get();
+ 
+ 	return (unsigned long)ck;
+@@ -25,6 +24,7 @@ static void sched_core_put_cookie(unsigned long cookie)
+ 	struct sched_core_cookie *ptr = (void *)cookie;
+ 
+ 	if (ptr && refcount_dec_and_test(&ptr->refcnt)) {
++		free_percpu(ptr->nr_running);
+ 		kfree(ptr);
+ 		sched_core_put();
+ 	}
+@@ -75,7 +75,7 @@ static unsigned long sched_core_update_cookie(struct task_struct *p,
+ 	old_cookie = p->core_cookie;
+ 	p->core_cookie = cookie;
+ 
+-	if (enqueued)
++	if (task_on_rq_queued(p))
+ 		sched_core_enqueue(rq, p);
+ 
+ 	/*
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 842bce37dcd9..31dc2203a26c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3958,6 +3958,7 @@ static void detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
+ #define UPDATE_TG	0x1
+ #define SKIP_AGE_LOAD	0x2
+ #define DO_ATTACH	0x4
++#define DO_DETACH	0x8
+ 
+ /* Update task and its cfs_rq load average */
+ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -3975,7 +3976,14 @@ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
+ 	decayed  = update_cfs_rq_load_avg(now, cfs_rq);
+ 	decayed |= propagate_entity_load_avg(se);
+ 
+-	if (!se->avg.last_update_time && (flags & DO_ATTACH)) {
++	if (flags & DO_DETACH) {
++		/*
++		 * DO_DETACH means we're here from dequeue_entity()
++		 * and we are migrating task out of the CPU.
++		 */
++		detach_entity_load_avg(cfs_rq, se);
++		update_tg_load_avg(cfs_rq);
++	} else if (!se->avg.last_update_time && (flags & DO_ATTACH)) {
+ 
+ 		/*
+ 		 * DO_ATTACH means we're here from enqueue_entity().
+@@ -4268,6 +4276,7 @@ static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
+ #define UPDATE_TG	0x0
+ #define SKIP_AGE_LOAD	0x0
+ #define DO_ATTACH	0x0
++#define DO_DETACH	0x0
+ 
+ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se, int not_used1)
+ {
+@@ -4503,6 +4512,11 @@ static __always_inline void return_cfs_rq_runtime(struct cfs_rq *cfs_rq);
+ static void
+ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ {
++	int action = UPDATE_TG;
++
++	if (entity_is_task(se) && task_on_rq_migrating(task_of(se)))
++		action |= DO_DETACH;
++
+ 	/*
+ 	 * Update run-time statistics of the 'current'.
+ 	 */
+@@ -4516,7 +4530,7 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	 *   - For group entity, update its weight to reflect the new share
+ 	 *     of its group cfs_rq.
+ 	 */
+-	update_load_avg(cfs_rq, se, UPDATE_TG);
++	update_load_avg(cfs_rq, se, action);
+ 	se_update_runnable(se);
+ 
+ 	update_stats_dequeue_fair(cfs_rq, se, flags);
+@@ -7036,8 +7050,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 	return new_cpu;
+ }
+ 
+-static void detach_entity_cfs_rq(struct sched_entity *se);
+-
+ /*
+  * Called immediately before a task is migrated to a new CPU; task_cpu(p) and
+  * cfs_rq_of(p) references at time of call are still valid and identify the
+@@ -7047,15 +7059,7 @@ static void migrate_task_rq_fair(struct task_struct *p, int new_cpu)
+ {
+ 	struct sched_entity *se = &p->se;
+ 
+-	if (p->on_rq == TASK_ON_RQ_MIGRATING) {
+-		/*
+-		 * In case of TASK_ON_RQ_MIGRATING we in fact hold the 'old'
+-		 * rq->lock and can modify state directly.
+-		 */
+-		lockdep_assert_rq_held(task_rq(p));
+-		detach_entity_cfs_rq(se);
+-
+-	} else {
++	if (!task_on_rq_migrating(p)) {
+ 		/*
+ 		 * We are supposed to update the task to "current" time, then
+ 		 * its up to date and ready to go to new CPU/cfs_rq. But we
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index d0bc34eb0955..748c867e5aaf 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1173,6 +1173,15 @@ static inline raw_spinlock_t *__rq_lockp(struct rq *rq)
+ 
+ bool cfs_prio_less(struct task_struct *a, struct task_struct *b, bool fi);
+ 
++/*
++ * A simple wrapper around refcount. An allocated sched_core_cookie's
++ * address is used to compute the cookie of the task.
++ */
++struct sched_core_cookie {
++	refcount_t refcnt;
++	unsigned int __percpu *nr_running;
++};
++
+ /*
+  * Helpers to check if the CPU's core cookie matches with the task's cookie
+  * when core scheduling is enabled.
+@@ -1804,15 +1813,6 @@ static inline struct cpumask *group_balance_mask(struct sched_group *sg)
+ 	return to_cpumask(sg->sgc->cpumask);
+ }
+ 
+-/**
+- * group_first_cpu - Returns the first CPU in the cpumask of a sched_group.
+- * @group: The group whose first CPU is to be returned.
+- */
+-static inline unsigned int group_first_cpu(struct sched_group *group)
+-{
+-	return cpumask_first(sched_group_span(group));
+-}
+-
+ extern int group_balance_cpu(struct sched_group *sg);
+ 
+ #ifdef CONFIG_SCHED_DEBUG
+-- 
+2.37.0
+
