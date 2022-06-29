@@ -1,0 +1,2924 @@
+From d91d37a55f3c523052093e807abefe1289407639 Mon Sep 17 00:00:00 2001
+From: Jordan Johnston <johnstonljordan@gmail.com>
+Date: Tue, 28 Jun 2022 19:27:18 -0500
+Subject: [PATCH] dma/swiotlb: squashed 5.19 deps && performance optimizations
+
+ - squashed due to the effort required to fix each commit
+ - pull in the 5.19 dma changes, required to apply swoitlb patches cleanly.
+ - swiotlb performance and locking optimizations
+ 
+Signed-off-by: Jordan Johnston <johnstonljordan@gmail.com>
+---
+ .../admin-guide/kernel-parameters.txt         |   4 +-
+ arch/arm/include/asm/xen/page-coherent.h      |   2 -
+ arch/arm/mm/init.c                            |   6 +-
+ arch/arm/xen/mm.c                             |  38 +-
+ arch/arm64/include/asm/xen/page-coherent.h    |   2 -
+ arch/arm64/mm/init.c                          |   6 +-
+ arch/ia64/include/asm/iommu_table.h           |   7 -
+ arch/ia64/mm/init.c                           |   4 +-
+ arch/mips/cavium-octeon/dma-octeon.c          |  15 +-
+ arch/mips/loongson64/dma.c                    |   2 +-
+ arch/mips/pci/pci-octeon.c                    |   2 +-
+ arch/mips/sibyte/common/dma.c                 |   2 +-
+ arch/powerpc/include/asm/svm.h                |   4 -
+ arch/powerpc/include/asm/swiotlb.h            |   1 +
+ arch/powerpc/kernel/dma-swiotlb.c             |   1 +
+ arch/powerpc/mm/mem.c                         |   6 +-
+ arch/powerpc/platforms/pseries/setup.c        |   3 -
+ arch/powerpc/platforms/pseries/svm.c          |  26 +-
+ arch/riscv/mm/init.c                          |   8 +-
+ arch/s390/mm/init.c                           |   3 +-
+ arch/x86/include/asm/dma-mapping.h            |  12 -
+ arch/x86/include/asm/gart.h                   |   5 +-
+ arch/x86/include/asm/iommu.h                  |   8 +
+ arch/x86/include/asm/iommu_table.h            | 102 ----
+ arch/x86/include/asm/swiotlb.h                |  30 --
+ arch/x86/include/asm/xen/page-coherent.h      |  24 -
+ arch/x86/include/asm/xen/page.h               |   5 -
+ arch/x86/include/asm/xen/swiotlb-xen.h        |   8 +-
+ arch/x86/kernel/Makefile                      |   2 -
+ arch/x86/kernel/acpi/boot.c                   |   4 +
+ arch/x86/kernel/amd_gart_64.c                 |   5 +-
+ arch/x86/kernel/aperture_64.c                 |  14 +-
+ arch/x86/kernel/cpu/mshyperv.c                |   8 -
+ arch/x86/kernel/pci-dma.c                     | 114 ++++-
+ arch/x86/kernel/pci-iommu_table.c             |  77 ---
+ arch/x86/kernel/pci-swiotlb.c                 |  77 ---
+ arch/x86/kernel/tboot.c                       |   1 -
+ arch/x86/kernel/vmlinux.lds.S                 |  12 -
+ arch/x86/mm/mem_encrypt_amd.c                 |   3 -
+ arch/x86/pci/sta2x11-fixup.c                  |   2 +-
+ arch/x86/xen/Makefile                         |   2 -
+ arch/x86/xen/mmu_pv.c                         |   1 +
+ arch/x86/xen/pci-swiotlb-xen.c                |  96 ----
+ drivers/iommu/amd/init.c                      |   6 -
+ drivers/iommu/amd/iommu.c                     |   5 +-
+ drivers/iommu/intel/dmar.c                    |   6 +-
+ drivers/xen/swiotlb-xen.c                     | 231 ++-------
+ include/linux/dmar.h                          |   6 +-
+ include/linux/swiotlb.h                       |  69 ++-
+ include/trace/events/swiotlb.h                |  29 +-
+ include/xen/arm/page-coherent.h               |  20 -
+ include/xen/arm/page.h                        |   1 -
+ include/xen/swiotlb-xen.h                     |   2 -
+ include/xen/xen-ops.h                         |   7 -
+ kernel/dma/debug.c                            |   4 +-
+ kernel/dma/direct.c                           |  31 +-
+ kernel/dma/direct.h                           |   2 +-
+ kernel/dma/swiotlb.c                          | 453 +++++++++++-------
+ 58 files changed, 550 insertions(+), 1076 deletions(-)
+ delete mode 100644 arch/arm/include/asm/xen/page-coherent.h
+ delete mode 100644 arch/arm64/include/asm/xen/page-coherent.h
+ delete mode 100644 arch/ia64/include/asm/iommu_table.h
+ delete mode 100644 arch/x86/include/asm/iommu_table.h
+ delete mode 100644 arch/x86/include/asm/swiotlb.h
+ delete mode 100644 arch/x86/include/asm/xen/page-coherent.h
+ delete mode 100644 arch/x86/kernel/pci-iommu_table.c
+ delete mode 100644 arch/x86/kernel/pci-swiotlb.c
+ delete mode 100644 arch/x86/xen/pci-swiotlb-xen.c
+ delete mode 100644 include/xen/arm/page-coherent.h
+
+diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
+index d491c096f0a9..7335bc8e6f2d 100644
+--- a/Documentation/admin-guide/kernel-parameters.txt
++++ b/Documentation/admin-guide/kernel-parameters.txt
+@@ -5768,8 +5768,10 @@
+ 			it if 0 is given (See Documentation/admin-guide/cgroup-v1/memory.rst)
+ 
+ 	swiotlb=	[ARM,IA-64,PPC,MIPS,X86]
+-			Format: { <int> | force | noforce }
++			Format: { <int> [,<int>] | force | noforce }
+ 			<int> -- Number of I/O TLB slabs
++			<int> -- Second integer after comma. Number of swiotlb
++				 areas with their own lock. Must be power of 2.
+ 			force -- force using of bounce buffers even if they
+ 			         wouldn't be automatically used by the kernel
+ 			noforce -- Never use bounce buffers (for debugging)
+diff --git a/arch/arm/include/asm/xen/page-coherent.h b/arch/arm/include/asm/xen/page-coherent.h
+deleted file mode 100644
+index 27e984977402..000000000000
+--- a/arch/arm/include/asm/xen/page-coherent.h
++++ /dev/null
+@@ -1,2 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#include <xen/arm/page-coherent.h>
+diff --git a/arch/arm/mm/init.c b/arch/arm/mm/init.c
+index fe249ea91908..ce64bdb55a16 100644
+--- a/arch/arm/mm/init.c
++++ b/arch/arm/mm/init.c
+@@ -271,11 +271,7 @@ static void __init free_highpages(void)
+ void __init mem_init(void)
+ {
+ #ifdef CONFIG_ARM_LPAE
+-	if (swiotlb_force == SWIOTLB_FORCE ||
+-	    max_pfn > arm_dma_pfn_limit)
+-		swiotlb_init(1);
+-	else
+-		swiotlb_force = SWIOTLB_NO_FORCE;
++	swiotlb_init(max_pfn > arm_dma_pfn_limit, SWIOTLB_VERBOSE);
+ #endif
+ 
+ 	set_max_mapnr(pfn_to_page(max_pfn) - mem_map);
+diff --git a/arch/arm/xen/mm.c b/arch/arm/xen/mm.c
+index a7e54a087b80..3d826c0b5fee 100644
+--- a/arch/arm/xen/mm.c
++++ b/arch/arm/xen/mm.c
+@@ -23,22 +23,20 @@
+ #include <asm/xen/hypercall.h>
+ #include <asm/xen/interface.h>
+ 
+-unsigned long xen_get_swiotlb_free_pages(unsigned int order)
++static gfp_t xen_swiotlb_gfp(void)
+ {
+ 	phys_addr_t base;
+-	gfp_t flags = __GFP_NOWARN|__GFP_KSWAPD_RECLAIM;
+ 	u64 i;
+ 
+ 	for_each_mem_range(i, &base, NULL) {
+ 		if (base < (phys_addr_t)0xffffffff) {
+ 			if (IS_ENABLED(CONFIG_ZONE_DMA32))
+-				flags |= __GFP_DMA32;
+-			else
+-				flags |= __GFP_DMA;
+-			break;
++				return __GFP_DMA32;
++			return __GFP_DMA;
+ 		}
+ 	}
+-	return __get_free_pages(flags, order);
++
++	return GFP_KERNEL;
+ }
+ 
+ static bool hypercall_cflush = false;
+@@ -118,23 +116,6 @@ bool xen_arch_need_swiotlb(struct device *dev,
+ 		!dev_is_dma_coherent(dev));
+ }
+ 
+-int xen_create_contiguous_region(phys_addr_t pstart, unsigned int order,
+-				 unsigned int address_bits,
+-				 dma_addr_t *dma_handle)
+-{
+-	if (!xen_initial_domain())
+-		return -EINVAL;
+-
+-	/* we assume that dom0 is mapped 1:1 for now */
+-	*dma_handle = pstart;
+-	return 0;
+-}
+-
+-void xen_destroy_contiguous_region(phys_addr_t pstart, unsigned int order)
+-{
+-	return;
+-}
+-
+ static int __init xen_mm_init(void)
+ {
+ 	struct gnttab_cache_flush cflush;
+@@ -143,10 +124,13 @@ static int __init xen_mm_init(void)
+ 	if (!xen_swiotlb_detect())
+ 		return 0;
+ 
+-	rc = xen_swiotlb_init();
+ 	/* we can work with the default swiotlb */
+-	if (rc < 0 && rc != -EEXIST)
+-		return rc;
++	if (!io_tlb_default_mem.nslabs) {
++		rc = swiotlb_init_late(swiotlb_size_or_default(),
++				       xen_swiotlb_gfp(), NULL);
++		if (rc < 0)
++			return rc;
++	}
+ 
+ 	cflush.op = 0;
+ 	cflush.a.dev_bus_addr = 0;
+diff --git a/arch/arm64/include/asm/xen/page-coherent.h b/arch/arm64/include/asm/xen/page-coherent.h
+deleted file mode 100644
+index 27e984977402..000000000000
+--- a/arch/arm64/include/asm/xen/page-coherent.h
++++ /dev/null
+@@ -1,2 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#include <xen/arm/page-coherent.h>
+diff --git a/arch/arm64/mm/init.c b/arch/arm64/mm/init.c
+index 1e7b1550e2fc..bd4095b7fb40 100644
+--- a/arch/arm64/mm/init.c
++++ b/arch/arm64/mm/init.c
+@@ -398,11 +398,7 @@ void __init bootmem_init(void)
+  */
+ void __init mem_init(void)
+ {
+-	if (swiotlb_force == SWIOTLB_FORCE ||
+-	    max_pfn > PFN_DOWN(arm64_dma_phys_limit))
+-		swiotlb_init(1);
+-	else if (!xen_swiotlb_detect())
+-		swiotlb_force = SWIOTLB_NO_FORCE;
++	swiotlb_init(max_pfn > PFN_DOWN(arm64_dma_phys_limit), SWIOTLB_VERBOSE);
+ 
+ 	/* this will put all unused low memory onto the freelists */
+ 	memblock_free_all();
+diff --git a/arch/ia64/include/asm/iommu_table.h b/arch/ia64/include/asm/iommu_table.h
+deleted file mode 100644
+index cc96116ac276..000000000000
+--- a/arch/ia64/include/asm/iommu_table.h
++++ /dev/null
+@@ -1,7 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#ifndef _ASM_IA64_IOMMU_TABLE_H
+-#define _ASM_IA64_IOMMU_TABLE_H
+-
+-#define IOMMU_INIT_POST(_detect)
+-
+-#endif /* _ASM_IA64_IOMMU_TABLE_H */
+diff --git a/arch/ia64/mm/init.c b/arch/ia64/mm/init.c
+index 5d165607bf35..3c3e15b22608 100644
+--- a/arch/ia64/mm/init.c
++++ b/arch/ia64/mm/init.c
+@@ -437,9 +437,7 @@ mem_init (void)
+ 		if (iommu_detected)
+ 			break;
+ #endif
+-#ifdef CONFIG_SWIOTLB
+-		swiotlb_init(1);
+-#endif
++		swiotlb_init(true, SWIOTLB_VERBOSE);
+ 	} while (0);
+ 
+ #ifdef CONFIG_FLATMEM
+diff --git a/arch/mips/cavium-octeon/dma-octeon.c b/arch/mips/cavium-octeon/dma-octeon.c
+index df70308db0e6..9fbba6a8fa4c 100644
+--- a/arch/mips/cavium-octeon/dma-octeon.c
++++ b/arch/mips/cavium-octeon/dma-octeon.c
+@@ -186,15 +186,12 @@ phys_addr_t dma_to_phys(struct device *dev, dma_addr_t daddr)
+ 	return daddr;
+ }
+ 
+-char *octeon_swiotlb;
+-
+ void __init plat_swiotlb_setup(void)
+ {
+ 	phys_addr_t start, end;
+ 	phys_addr_t max_addr;
+ 	phys_addr_t addr_size;
+ 	size_t swiotlbsize;
+-	unsigned long swiotlb_nslabs;
+ 	u64 i;
+ 
+ 	max_addr = 0;
+@@ -236,15 +233,7 @@ void __init plat_swiotlb_setup(void)
+ 	if (OCTEON_IS_OCTEON2() && max_addr >= 0x100000000ul)
+ 		swiotlbsize = 64 * (1<<20);
+ #endif
+-	swiotlb_nslabs = swiotlbsize >> IO_TLB_SHIFT;
+-	swiotlb_nslabs = ALIGN(swiotlb_nslabs, IO_TLB_SEGSIZE);
+-	swiotlbsize = swiotlb_nslabs << IO_TLB_SHIFT;
+-
+-	octeon_swiotlb = memblock_alloc_low(swiotlbsize, PAGE_SIZE);
+-	if (!octeon_swiotlb)
+-		panic("%s: Failed to allocate %zu bytes align=%lx\n",
+-		      __func__, swiotlbsize, PAGE_SIZE);
+ 
+-	if (swiotlb_init_with_tbl(octeon_swiotlb, swiotlb_nslabs, 1) == -ENOMEM)
+-		panic("Cannot allocate SWIOTLB buffer");
++	swiotlb_adjust_size(swiotlbsize);
++	swiotlb_init(true, SWIOTLB_VERBOSE);
+ }
+diff --git a/arch/mips/loongson64/dma.c b/arch/mips/loongson64/dma.c
+index 364f2f27c872..8220a1bc0db6 100644
+--- a/arch/mips/loongson64/dma.c
++++ b/arch/mips/loongson64/dma.c
+@@ -24,5 +24,5 @@ phys_addr_t dma_to_phys(struct device *dev, dma_addr_t daddr)
+ 
+ void __init plat_swiotlb_setup(void)
+ {
+-	swiotlb_init(1);
++	swiotlb_init(true, SWIOTLB_VERBOSE);
+ }
+diff --git a/arch/mips/pci/pci-octeon.c b/arch/mips/pci/pci-octeon.c
+index fc29b85cfa92..e457a18cbdc5 100644
+--- a/arch/mips/pci/pci-octeon.c
++++ b/arch/mips/pci/pci-octeon.c
+@@ -664,7 +664,7 @@ static int __init octeon_pci_setup(void)
+ 
+ 		/* BAR1 movable regions contiguous to cover the swiotlb */
+ 		octeon_bar1_pci_phys =
+-			virt_to_phys(octeon_swiotlb) & ~((1ull << 22) - 1);
++			io_tlb_default_mem.start & ~((1ull << 22) - 1);
+ 
+ 		for (index = 0; index < 32; index++) {
+ 			union cvmx_pci_bar1_indexx bar1_index;
+diff --git a/arch/mips/sibyte/common/dma.c b/arch/mips/sibyte/common/dma.c
+index eb47a94f3583..c5c2c782aff6 100644
+--- a/arch/mips/sibyte/common/dma.c
++++ b/arch/mips/sibyte/common/dma.c
+@@ -10,5 +10,5 @@
+ 
+ void __init plat_swiotlb_setup(void)
+ {
+-	swiotlb_init(1);
++	swiotlb_init(true, SWIOTLB_VERBOSE);
+ }
+diff --git a/arch/powerpc/include/asm/svm.h b/arch/powerpc/include/asm/svm.h
+index 7546402d796a..85580b30aba4 100644
+--- a/arch/powerpc/include/asm/svm.h
++++ b/arch/powerpc/include/asm/svm.h
+@@ -15,8 +15,6 @@ static inline bool is_secure_guest(void)
+ 	return mfmsr() & MSR_S;
+ }
+ 
+-void __init svm_swiotlb_init(void);
+-
+ void dtl_cache_ctor(void *addr);
+ #define get_dtl_cache_ctor()	(is_secure_guest() ? dtl_cache_ctor : NULL)
+ 
+@@ -27,8 +25,6 @@ static inline bool is_secure_guest(void)
+ 	return false;
+ }
+ 
+-static inline void svm_swiotlb_init(void) {}
+-
+ #define get_dtl_cache_ctor() NULL
+ 
+ #endif /* CONFIG_PPC_SVM */
+diff --git a/arch/powerpc/include/asm/swiotlb.h b/arch/powerpc/include/asm/swiotlb.h
+index 3c1a1cd16128..4203b5e0a88e 100644
+--- a/arch/powerpc/include/asm/swiotlb.h
++++ b/arch/powerpc/include/asm/swiotlb.h
+@@ -9,6 +9,7 @@
+ #include <linux/swiotlb.h>
+ 
+ extern unsigned int ppc_swiotlb_enable;
++extern unsigned int ppc_swiotlb_flags;
+ 
+ #ifdef CONFIG_SWIOTLB
+ void swiotlb_detect_4g(void);
+diff --git a/arch/powerpc/kernel/dma-swiotlb.c b/arch/powerpc/kernel/dma-swiotlb.c
+index fc7816126a40..ba256c37bcc0 100644
+--- a/arch/powerpc/kernel/dma-swiotlb.c
++++ b/arch/powerpc/kernel/dma-swiotlb.c
+@@ -10,6 +10,7 @@
+ #include <asm/swiotlb.h>
+ 
+ unsigned int ppc_swiotlb_enable;
++unsigned int ppc_swiotlb_flags;
+ 
+ void __init swiotlb_detect_4g(void)
+ {
+diff --git a/arch/powerpc/mm/mem.c b/arch/powerpc/mm/mem.c
+index 4d221d033804..46fb78e3bb36 100644
+--- a/arch/powerpc/mm/mem.c
++++ b/arch/powerpc/mm/mem.c
+@@ -17,6 +17,7 @@
+ #include <linux/suspend.h>
+ #include <linux/dma-direct.h>
+ 
++#include <asm/swiotlb.h>
+ #include <asm/machdep.h>
+ #include <asm/rtas.h>
+ #include <asm/kasan.h>
+@@ -248,10 +249,7 @@ void __init mem_init(void)
+ 	 * back to to-down.
+ 	 */
+ 	memblock_set_bottom_up(true);
+-	if (is_secure_guest())
+-		svm_swiotlb_init();
+-	else
+-		swiotlb_init(0);
++	swiotlb_init(ppc_swiotlb_enable, ppc_swiotlb_flags);
+ #endif
+ 
+ 	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
+diff --git a/arch/powerpc/platforms/pseries/setup.c b/arch/powerpc/platforms/pseries/setup.c
+index 955ff8aa1644..0f74b2284773 100644
+--- a/arch/powerpc/platforms/pseries/setup.c
++++ b/arch/powerpc/platforms/pseries/setup.c
+@@ -849,9 +849,6 @@ static void __init pSeries_setup_arch(void)
+ 	}
+ 
+ 	ppc_md.pcibios_root_bridge_prepare = pseries_root_bridge_prepare;
+-
+-	if (swiotlb_force == SWIOTLB_FORCE)
+-		ppc_swiotlb_enable = 1;
+ }
+ 
+ static void pseries_panic(char *str)
+diff --git a/arch/powerpc/platforms/pseries/svm.c b/arch/powerpc/platforms/pseries/svm.c
+index c5228f4969eb..3b4045d508ec 100644
+--- a/arch/powerpc/platforms/pseries/svm.c
++++ b/arch/powerpc/platforms/pseries/svm.c
+@@ -28,7 +28,7 @@ static int __init init_svm(void)
+ 	 * need to use the SWIOTLB buffer for DMA even if dma_capable() says
+ 	 * otherwise.
+ 	 */
+-	swiotlb_force = SWIOTLB_FORCE;
++	ppc_swiotlb_flags |= SWIOTLB_ANY | SWIOTLB_FORCE;
+ 
+ 	/* Share the SWIOTLB buffer with the host. */
+ 	swiotlb_update_mem_attributes();
+@@ -37,30 +37,6 @@ static int __init init_svm(void)
+ }
+ machine_early_initcall(pseries, init_svm);
+ 
+-/*
+- * Initialize SWIOTLB. Essentially the same as swiotlb_init(), except that it
+- * can allocate the buffer anywhere in memory. Since the hypervisor doesn't have
+- * any addressing limitation, we don't need to allocate it in low addresses.
+- */
+-void __init svm_swiotlb_init(void)
+-{
+-	unsigned char *vstart;
+-	unsigned long bytes, io_tlb_nslabs;
+-
+-	io_tlb_nslabs = (swiotlb_size_or_default() >> IO_TLB_SHIFT);
+-	io_tlb_nslabs = ALIGN(io_tlb_nslabs, IO_TLB_SEGSIZE);
+-
+-	bytes = io_tlb_nslabs << IO_TLB_SHIFT;
+-
+-	vstart = memblock_alloc(PAGE_ALIGN(bytes), PAGE_SIZE);
+-	if (vstart && !swiotlb_init_with_tbl(vstart, io_tlb_nslabs, false))
+-		return;
+-
+-
+-	memblock_free(vstart, PAGE_ALIGN(io_tlb_nslabs << IO_TLB_SHIFT));
+-	panic("SVM: Cannot allocate SWIOTLB buffer");
+-}
+-
+ int set_memory_encrypted(unsigned long addr, int numpages)
+ {
+ 	if (!cc_platform_has(CC_ATTR_MEM_ENCRYPT))
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 05ed641a1134..180d6a3e2a05 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -120,13 +120,7 @@ void __init mem_init(void)
+ 	BUG_ON(!mem_map);
+ #endif /* CONFIG_FLATMEM */
+ 
+-#ifdef CONFIG_SWIOTLB
+-	if (swiotlb_force == SWIOTLB_FORCE ||
+-	    max_pfn > PFN_DOWN(dma32_phys_limit))
+-		swiotlb_init(1);
+-	else
+-		swiotlb_force = SWIOTLB_NO_FORCE;
+-#endif
++	swiotlb_init(max_pfn > PFN_DOWN(dma32_phys_limit), SWIOTLB_VERBOSE);
+ 	memblock_free_all();
+ 
+ 	print_vm_layout();
+diff --git a/arch/s390/mm/init.c b/arch/s390/mm/init.c
+index 86ffd0d51fd5..6fb6bf64326f 100644
+--- a/arch/s390/mm/init.c
++++ b/arch/s390/mm/init.c
+@@ -185,8 +185,7 @@ static void pv_init(void)
+ 		return;
+ 
+ 	/* make sure bounce buffers are shared */
+-	swiotlb_force = SWIOTLB_FORCE;
+-	swiotlb_init(1);
++	swiotlb_init(true, SWIOTLB_FORCE | SWIOTLB_VERBOSE);
+ 	swiotlb_update_mem_attributes();
+ }
+ 
+diff --git a/arch/x86/include/asm/dma-mapping.h b/arch/x86/include/asm/dma-mapping.h
+index bb1654fe0ce7..1c66708e3062 100644
+--- a/arch/x86/include/asm/dma-mapping.h
++++ b/arch/x86/include/asm/dma-mapping.h
+@@ -2,18 +2,6 @@
+ #ifndef _ASM_X86_DMA_MAPPING_H
+ #define _ASM_X86_DMA_MAPPING_H
+ 
+-/*
+- * IOMMU interface. See Documentation/core-api/dma-api-howto.rst and
+- * Documentation/core-api/dma-api.rst for documentation.
+- */
+-
+-#include <linux/scatterlist.h>
+-#include <asm/io.h>
+-#include <asm/swiotlb.h>
+-
+-extern int iommu_merge;
+-extern int panic_on_overflow;
+-
+ extern const struct dma_map_ops *dma_ops;
+ 
+ static inline const struct dma_map_ops *get_arch_dma_ops(struct bus_type *bus)
+diff --git a/arch/x86/include/asm/gart.h b/arch/x86/include/asm/gart.h
+index 318556574345..5af8088a10df 100644
+--- a/arch/x86/include/asm/gart.h
++++ b/arch/x86/include/asm/gart.h
+@@ -38,7 +38,7 @@ extern int gart_iommu_aperture_disabled;
+ extern void early_gart_iommu_check(void);
+ extern int gart_iommu_init(void);
+ extern void __init gart_parse_options(char *);
+-extern int gart_iommu_hole_init(void);
++void gart_iommu_hole_init(void);
+ 
+ #else
+ #define gart_iommu_aperture            0
+@@ -51,9 +51,8 @@ static inline void early_gart_iommu_check(void)
+ static inline void gart_parse_options(char *options)
+ {
+ }
+-static inline int gart_iommu_hole_init(void)
++static inline void gart_iommu_hole_init(void)
+ {
+-	return -ENODEV;
+ }
+ #endif
+ 
+diff --git a/arch/x86/include/asm/iommu.h b/arch/x86/include/asm/iommu.h
+index bf1ed2ddc74b..0bef44d30a27 100644
+--- a/arch/x86/include/asm/iommu.h
++++ b/arch/x86/include/asm/iommu.h
+@@ -8,6 +8,14 @@
+ 
+ extern int force_iommu, no_iommu;
+ extern int iommu_detected;
++extern int iommu_merge;
++extern int panic_on_overflow;
++
++#ifdef CONFIG_SWIOTLB
++extern bool x86_swiotlb_enable;
++#else
++#define x86_swiotlb_enable false
++#endif
+ 
+ /* 10 seconds */
+ #define DMAR_OPERATION_TIMEOUT ((cycles_t) tsc_khz*10*1000)
+diff --git a/arch/x86/include/asm/iommu_table.h b/arch/x86/include/asm/iommu_table.h
+deleted file mode 100644
+index 1fb3fd1a83c2..000000000000
+--- a/arch/x86/include/asm/iommu_table.h
++++ /dev/null
+@@ -1,102 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#ifndef _ASM_X86_IOMMU_TABLE_H
+-#define _ASM_X86_IOMMU_TABLE_H
+-
+-#include <asm/swiotlb.h>
+-
+-/*
+- * History lesson:
+- * The execution chain of IOMMUs in 2.6.36 looks as so:
+- *
+- *            [xen-swiotlb]
+- *                 |
+- *         +----[swiotlb *]--+
+- *        /         |         \
+- *       /          |          \
+- *    [GART]     [Calgary]  [Intel VT-d]
+- *     /
+- *    /
+- * [AMD-Vi]
+- *
+- * *: if SWIOTLB detected 'iommu=soft'/'swiotlb=force' it would skip
+- * over the rest of IOMMUs and unconditionally initialize the SWIOTLB.
+- * Also it would surreptitiously initialize set the swiotlb=1 if there were
+- * more than 4GB and if the user did not pass in 'iommu=off'. The swiotlb
+- * flag would be turned off by all IOMMUs except the Calgary one.
+- *
+- * The IOMMU_INIT* macros allow a similar tree (or more complex if desired)
+- * to be built by defining who we depend on.
+- *
+- * And all that needs to be done is to use one of the macros in the IOMMU
+- * and the pci-dma.c will take care of the rest.
+- */
+-
+-struct iommu_table_entry {
+-	initcall_t	detect;
+-	initcall_t	depend;
+-	void		(*early_init)(void); /* No memory allocate available. */
+-	void		(*late_init)(void); /* Yes, can allocate memory. */
+-#define IOMMU_FINISH_IF_DETECTED (1<<0)
+-#define IOMMU_DETECTED		 (1<<1)
+-	int		flags;
+-};
+-/*
+- * Macro fills out an entry in the .iommu_table that is equivalent
+- * to the fields that 'struct iommu_table_entry' has. The entries
+- * that are put in the .iommu_table section are not put in any order
+- * hence during boot-time we will have to resort them based on
+- * dependency. */
+-
+-
+-#define __IOMMU_INIT(_detect, _depend, _early_init, _late_init, _finish)\
+-	static const struct iommu_table_entry				\
+-		__iommu_entry_##_detect __used				\
+-	__attribute__ ((unused, __section__(".iommu_table"),		\
+-			aligned((sizeof(void *)))))	\
+-	= {_detect, _depend, _early_init, _late_init,			\
+-	   _finish ? IOMMU_FINISH_IF_DETECTED : 0}
+-/*
+- * The simplest IOMMU definition. Provide the detection routine
+- * and it will be run after the SWIOTLB and the other IOMMUs
+- * that utilize this macro. If the IOMMU is detected (ie, the
+- * detect routine returns a positive value), the other IOMMUs
+- * are also checked. You can use IOMMU_INIT_POST_FINISH if you prefer
+- * to stop detecting the other IOMMUs after yours has been detected.
+- */
+-#define IOMMU_INIT_POST(_detect)					\
+-	__IOMMU_INIT(_detect, pci_swiotlb_detect_4gb,  NULL, NULL, 0)
+-
+-#define IOMMU_INIT_POST_FINISH(detect)					\
+-	__IOMMU_INIT(_detect, pci_swiotlb_detect_4gb,  NULL, NULL, 1)
+-
+-/*
+- * A more sophisticated version of IOMMU_INIT. This variant requires:
+- *  a). A detection routine function.
+- *  b). The name of the detection routine we depend on to get called
+- *      before us.
+- *  c). The init routine which gets called if the detection routine
+- *      returns a positive value from the pci_iommu_alloc. This means
+- *      no presence of a memory allocator.
+- *  d). Similar to the 'init', except that this gets called from pci_iommu_init
+- *      where we do have a memory allocator.
+- *
+- * The standard IOMMU_INIT differs from the IOMMU_INIT_FINISH variant
+- * in that the former will continue detecting other IOMMUs in the call
+- * list after the detection routine returns a positive number, while the
+- * latter will stop the execution chain upon first successful detection.
+- * Both variants will still call the 'init' and 'late_init' functions if
+- * they are set.
+- */
+-#define IOMMU_INIT_FINISH(_detect, _depend, _init, _late_init)		\
+-	__IOMMU_INIT(_detect, _depend, _init, _late_init, 1)
+-
+-#define IOMMU_INIT(_detect, _depend, _init, _late_init)			\
+-	__IOMMU_INIT(_detect, _depend, _init, _late_init, 0)
+-
+-void sort_iommu_table(struct iommu_table_entry *start,
+-		      struct iommu_table_entry *finish);
+-
+-void check_iommu_entries(struct iommu_table_entry *start,
+-			 struct iommu_table_entry *finish);
+-
+-#endif /* _ASM_X86_IOMMU_TABLE_H */
+diff --git a/arch/x86/include/asm/swiotlb.h b/arch/x86/include/asm/swiotlb.h
+deleted file mode 100644
+index ff6c92eff035..000000000000
+--- a/arch/x86/include/asm/swiotlb.h
++++ /dev/null
+@@ -1,30 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#ifndef _ASM_X86_SWIOTLB_H
+-#define _ASM_X86_SWIOTLB_H
+-
+-#include <linux/swiotlb.h>
+-
+-#ifdef CONFIG_SWIOTLB
+-extern int swiotlb;
+-extern int __init pci_swiotlb_detect_override(void);
+-extern int __init pci_swiotlb_detect_4gb(void);
+-extern void __init pci_swiotlb_init(void);
+-extern void __init pci_swiotlb_late_init(void);
+-#else
+-#define swiotlb 0
+-static inline int pci_swiotlb_detect_override(void)
+-{
+-	return 0;
+-}
+-static inline int pci_swiotlb_detect_4gb(void)
+-{
+-	return 0;
+-}
+-static inline void pci_swiotlb_init(void)
+-{
+-}
+-static inline void pci_swiotlb_late_init(void)
+-{
+-}
+-#endif
+-#endif /* _ASM_X86_SWIOTLB_H */
+diff --git a/arch/x86/include/asm/xen/page-coherent.h b/arch/x86/include/asm/xen/page-coherent.h
+deleted file mode 100644
+index 63cd41b2e17a..000000000000
+--- a/arch/x86/include/asm/xen/page-coherent.h
++++ /dev/null
+@@ -1,24 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#ifndef _ASM_X86_XEN_PAGE_COHERENT_H
+-#define _ASM_X86_XEN_PAGE_COHERENT_H
+-
+-#include <asm/page.h>
+-#include <linux/dma-mapping.h>
+-
+-static inline void *xen_alloc_coherent_pages(struct device *hwdev, size_t size,
+-		dma_addr_t *dma_handle, gfp_t flags,
+-		unsigned long attrs)
+-{
+-	void *vstart = (void*)__get_free_pages(flags, get_order(size));
+-	*dma_handle = virt_to_phys(vstart);
+-	return vstart;
+-}
+-
+-static inline void xen_free_coherent_pages(struct device *hwdev, size_t size,
+-		void *cpu_addr, dma_addr_t dma_handle,
+-		unsigned long attrs)
+-{
+-	free_pages((unsigned long) cpu_addr, get_order(size));
+-}
+-
+-#endif /* _ASM_X86_XEN_PAGE_COHERENT_H */
+diff --git a/arch/x86/include/asm/xen/page.h b/arch/x86/include/asm/xen/page.h
+index e989bc2269f5..1fc67df50014 100644
+--- a/arch/x86/include/asm/xen/page.h
++++ b/arch/x86/include/asm/xen/page.h
+@@ -357,9 +357,4 @@ static inline bool xen_arch_need_swiotlb(struct device *dev,
+ 	return false;
+ }
+ 
+-static inline unsigned long xen_get_swiotlb_free_pages(unsigned int order)
+-{
+-	return __get_free_pages(__GFP_NOWARN, order);
+-}
+-
+ #endif /* _ASM_X86_XEN_PAGE_H */
+diff --git a/arch/x86/include/asm/xen/swiotlb-xen.h b/arch/x86/include/asm/xen/swiotlb-xen.h
+index 66b4ddde7743..77a2d19cc990 100644
+--- a/arch/x86/include/asm/xen/swiotlb-xen.h
++++ b/arch/x86/include/asm/xen/swiotlb-xen.h
+@@ -3,11 +3,15 @@
+ #define _ASM_X86_SWIOTLB_XEN_H
+ 
+ #ifdef CONFIG_SWIOTLB_XEN
+-extern int __init pci_xen_swiotlb_detect(void);
+ extern int pci_xen_swiotlb_init_late(void);
+ #else
+-#define pci_xen_swiotlb_detect NULL
+ static inline int pci_xen_swiotlb_init_late(void) { return -ENXIO; }
+ #endif
+ 
++int xen_swiotlb_fixup(void *buf, unsigned long nslabs);
++int xen_create_contiguous_region(phys_addr_t pstart, unsigned int order,
++				unsigned int address_bits,
++				dma_addr_t *dma_handle);
++void xen_destroy_contiguous_region(phys_addr_t pstart, unsigned int order);
++
+ #endif /* _ASM_X86_SWIOTLB_XEN_H */
+diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
+index c41ef42adbe8..e17b7e92a3fa 100644
+--- a/arch/x86/kernel/Makefile
++++ b/arch/x86/kernel/Makefile
+@@ -68,7 +68,6 @@ obj-y			+= bootflag.o e820.o
+ obj-y			+= pci-dma.o quirks.o topology.o kdebugfs.o
+ obj-y			+= alternative.o i8253.o hw_breakpoint.o
+ obj-y			+= tsc.o tsc_msr.o io_delay.o rtc.o
+-obj-y			+= pci-iommu_table.o
+ obj-y			+= resource.o
+ obj-y			+= irqflags.o
+ obj-y			+= static_call.o
+@@ -134,7 +133,6 @@ obj-$(CONFIG_PCSPKR_PLATFORM)	+= pcspeaker.o
+ 
+ obj-$(CONFIG_X86_CHECK_BIOS_CORRUPTION) += check.o
+ 
+-obj-$(CONFIG_SWIOTLB)			+= pci-swiotlb.o
+ obj-$(CONFIG_OF)			+= devicetree.o
+ obj-$(CONFIG_UPROBES)			+= uprobes.o
+ 
+diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
+index 0d01e7f5078c..dc94aae7852b 100644
+--- a/arch/x86/kernel/acpi/boot.c
++++ b/arch/x86/kernel/acpi/boot.c
+@@ -22,6 +22,7 @@
+ #include <linux/efi-bgrt.h>
+ #include <linux/serial_core.h>
+ #include <linux/pgtable.h>
++#include <linux/swiotlb.h>
+ 
+ #include <asm/e820/api.h>
+ #include <asm/irqdomain.h>
+@@ -1072,6 +1073,9 @@ static int __init acpi_parse_madt_lapic_entries(void)
+ 		return count;
+ 	}
+ 
++	/* This does not take overrides into consideration */
++	swiotlb_hint_cpus(max(count, x2count));
++
+ 	x2count = acpi_table_parse_madt(ACPI_MADT_TYPE_LOCAL_X2APIC_NMI,
+ 					acpi_parse_x2apic_nmi, 0);
+ 	count = acpi_table_parse_madt(ACPI_MADT_TYPE_LOCAL_APIC_NMI,
+diff --git a/arch/x86/kernel/amd_gart_64.c b/arch/x86/kernel/amd_gart_64.c
+index ed837383de5c..194d54eed537 100644
+--- a/arch/x86/kernel/amd_gart_64.c
++++ b/arch/x86/kernel/amd_gart_64.c
+@@ -38,11 +38,9 @@
+ #include <asm/iommu.h>
+ #include <asm/gart.h>
+ #include <asm/set_memory.h>
+-#include <asm/swiotlb.h>
+ #include <asm/dma.h>
+ #include <asm/amd_nb.h>
+ #include <asm/x86_init.h>
+-#include <asm/iommu_table.h>
+ 
+ static unsigned long iommu_bus_base;	/* GART remapping area (physical) */
+ static unsigned long iommu_size;	/* size of remapping area bytes */
+@@ -808,7 +806,7 @@ int __init gart_iommu_init(void)
+ 	flush_gart();
+ 	dma_ops = &gart_dma_ops;
+ 	x86_platform.iommu_shutdown = gart_iommu_shutdown;
+-	swiotlb = 0;
++	x86_swiotlb_enable = false;
+ 
+ 	return 0;
+ }
+@@ -842,4 +840,3 @@ void __init gart_parse_options(char *p)
+ 		}
+ 	}
+ }
+-IOMMU_INIT_POST(gart_iommu_hole_init);
+diff --git a/arch/x86/kernel/aperture_64.c b/arch/x86/kernel/aperture_64.c
+index af3ba08b684b..7a5630d904b2 100644
+--- a/arch/x86/kernel/aperture_64.c
++++ b/arch/x86/kernel/aperture_64.c
+@@ -392,7 +392,7 @@ void __init early_gart_iommu_check(void)
+ 
+ static int __initdata printed_gart_size_msg;
+ 
+-int __init gart_iommu_hole_init(void)
++void __init gart_iommu_hole_init(void)
+ {
+ 	u32 agp_aper_base = 0, agp_aper_order = 0;
+ 	u32 aper_size, aper_alloc = 0, aper_order = 0, last_aper_order = 0;
+@@ -401,11 +401,11 @@ int __init gart_iommu_hole_init(void)
+ 	int i, node;
+ 
+ 	if (!amd_gart_present())
+-		return -ENODEV;
++		return;
+ 
+ 	if (gart_iommu_aperture_disabled || !fix_aperture ||
+ 	    !early_pci_allowed())
+-		return -ENODEV;
++		return;
+ 
+ 	pr_info("Checking aperture...\n");
+ 
+@@ -491,10 +491,8 @@ int __init gart_iommu_hole_init(void)
+ 			 * and fixed up the northbridge
+ 			 */
+ 			exclude_from_core(last_aper_base, last_aper_order);
+-
+-			return 1;
+ 		}
+-		return 0;
++		return;
+ 	}
+ 
+ 	if (!fallback_aper_force) {
+@@ -527,7 +525,7 @@ int __init gart_iommu_hole_init(void)
+ 			panic("Not enough memory for aperture");
+ 		}
+ 	} else {
+-		return 0;
++		return;
+ 	}
+ 
+ 	/*
+@@ -561,6 +559,4 @@ int __init gart_iommu_hole_init(void)
+ 	}
+ 
+ 	set_up_gart_resume(aper_order, aper_alloc);
+-
+-	return 1;
+ }
+diff --git a/arch/x86/kernel/cpu/mshyperv.c b/arch/x86/kernel/cpu/mshyperv.c
+index 4b67094215bb..5b8f2c357160 100644
+--- a/arch/x86/kernel/cpu/mshyperv.c
++++ b/arch/x86/kernel/cpu/mshyperv.c
+@@ -337,14 +337,6 @@ static void __init ms_hyperv_init_platform(void)
+ 			swiotlb_unencrypted_base = ms_hyperv.shared_gpa_boundary;
+ #endif
+ 		}
+-
+-#ifdef CONFIG_SWIOTLB
+-		/*
+-		 * Enable swiotlb force mode in Isolation VM to
+-		 * use swiotlb bounce buffer for dma transaction.
+-		 */
+-		swiotlb_force = SWIOTLB_FORCE;
+-#endif
+ 		/* Isolation VMs are unenlightened SEV-based VMs, thus this check: */
+ 		if (IS_ENABLED(CONFIG_AMD_MEM_ENCRYPT)) {
+ 			if (hv_get_isolation_type() != HV_ISOLATION_TYPE_NONE)
+diff --git a/arch/x86/kernel/pci-dma.c b/arch/x86/kernel/pci-dma.c
+index de234e7a8962..30bbe4abb5d6 100644
+--- a/arch/x86/kernel/pci-dma.c
++++ b/arch/x86/kernel/pci-dma.c
+@@ -7,13 +7,16 @@
+ #include <linux/memblock.h>
+ #include <linux/gfp.h>
+ #include <linux/pci.h>
++#include <linux/amd-iommu.h>
+ 
+ #include <asm/proto.h>
+ #include <asm/dma.h>
+ #include <asm/iommu.h>
+ #include <asm/gart.h>
+ #include <asm/x86_init.h>
+-#include <asm/iommu_table.h>
++
++#include <xen/xen.h>
++#include <xen/swiotlb-xen.h>
+ 
+ static bool disable_dac_quirk __read_mostly;
+ 
+@@ -34,24 +37,90 @@ int no_iommu __read_mostly;
+ /* Set this to 1 if there is a HW IOMMU in the system */
+ int iommu_detected __read_mostly = 0;
+ 
+-extern struct iommu_table_entry __iommu_table[], __iommu_table_end[];
++#ifdef CONFIG_SWIOTLB
++bool x86_swiotlb_enable;
++static unsigned int x86_swiotlb_flags;
++
++static void __init pci_swiotlb_detect(void)
++{
++	/* don't initialize swiotlb if iommu=off (no_iommu=1) */
++	if (!no_iommu && max_possible_pfn > MAX_DMA32_PFN)
++		x86_swiotlb_enable = true;
++
++	/*
++	 * Set swiotlb to 1 so that bounce buffers are allocated and used for
++	 * devices that can't support DMA to encrypted memory.
++	 */
++	if (cc_platform_has(CC_ATTR_HOST_MEM_ENCRYPT))
++		x86_swiotlb_enable = true;
++
++	/*
++	 * Guest with guest memory encryption currently perform all DMA through
++	 * bounce buffers as the hypervisor can't access arbitrary VM memory
++	 * that is not explicitly shared with it.
++	 */
++	if (cc_platform_has(CC_ATTR_GUEST_MEM_ENCRYPT)) {
++		x86_swiotlb_enable = true;
++		x86_swiotlb_flags |= SWIOTLB_FORCE;
++	}
++}
++#else
++static inline void __init pci_swiotlb_detect(void)
++{
++}
++#define x86_swiotlb_flags 0
++#endif /* CONFIG_SWIOTLB */
++
++#ifdef CONFIG_SWIOTLB_XEN
++static void __init pci_xen_swiotlb_init(void)
++{
++	if (!xen_initial_domain() && !x86_swiotlb_enable)
++		return;
++	x86_swiotlb_enable = true;
++	x86_swiotlb_flags |= SWIOTLB_ANY;
++	swiotlb_init_remap(true, x86_swiotlb_flags, xen_swiotlb_fixup);
++	dma_ops = &xen_swiotlb_dma_ops;
++	if (IS_ENABLED(CONFIG_PCI))
++		pci_request_acs();
++}
++
++int pci_xen_swiotlb_init_late(void)
++{
++	if (dma_ops == &xen_swiotlb_dma_ops)
++		return 0;
++
++	/* we can work with the default swiotlb */
++	if (!io_tlb_default_mem.nslabs) {
++		int rc = swiotlb_init_late(swiotlb_size_or_default(),
++					   GFP_KERNEL, xen_swiotlb_fixup);
++		if (rc < 0)
++			return rc;
++	}
++
++	/* XXX: this switches the dma ops under live devices! */
++	dma_ops = &xen_swiotlb_dma_ops;
++	if (IS_ENABLED(CONFIG_PCI))
++		pci_request_acs();
++	return 0;
++}
++EXPORT_SYMBOL_GPL(pci_xen_swiotlb_init_late);
++#else
++static inline void __init pci_xen_swiotlb_init(void)
++{
++}
++#endif /* CONFIG_SWIOTLB_XEN */
+ 
+ void __init pci_iommu_alloc(void)
+ {
+-	struct iommu_table_entry *p;
+-
+-	sort_iommu_table(__iommu_table, __iommu_table_end);
+-	check_iommu_entries(__iommu_table, __iommu_table_end);
+-
+-	for (p = __iommu_table; p < __iommu_table_end; p++) {
+-		if (p && p->detect && p->detect() > 0) {
+-			p->flags |= IOMMU_DETECTED;
+-			if (p->early_init)
+-				p->early_init();
+-			if (p->flags & IOMMU_FINISH_IF_DETECTED)
+-				break;
+-		}
++	if (xen_pv_domain()) {
++		pci_xen_swiotlb_init();
++		return;
+ 	}
++	pci_swiotlb_detect();
++	gart_iommu_hole_init();
++	amd_iommu_detect();
++	detect_intel_iommu();
++	swiotlb_init(x86_swiotlb_enable, x86_swiotlb_flags);
+ }
+ 
+ /*
+@@ -102,7 +171,7 @@ static __init int iommu_setup(char *p)
+ 		}
+ #ifdef CONFIG_SWIOTLB
+ 		if (!strncmp(p, "soft", 4))
+-			swiotlb = 1;
++			x86_swiotlb_enable = true;
+ #endif
+ 		if (!strncmp(p, "pt", 2))
+ 			iommu_set_default_passthrough(true);
+@@ -121,14 +190,17 @@ early_param("iommu", iommu_setup);
+ 
+ static int __init pci_iommu_init(void)
+ {
+-	struct iommu_table_entry *p;
+-
+ 	x86_init.iommu.iommu_init();
+ 
+-	for (p = __iommu_table; p < __iommu_table_end; p++) {
+-		if (p && (p->flags & IOMMU_DETECTED) && p->late_init)
+-			p->late_init();
++#ifdef CONFIG_SWIOTLB
++	/* An IOMMU turned us off. */
++	if (x86_swiotlb_enable) {
++		pr_info("PCI-DMA: Using software bounce buffering for IO (SWIOTLB)\n");
++		swiotlb_print_info();
++	} else {
++		swiotlb_exit();
+ 	}
++#endif
+ 
+ 	return 0;
+ }
+diff --git a/arch/x86/kernel/pci-iommu_table.c b/arch/x86/kernel/pci-iommu_table.c
+deleted file mode 100644
+index 42e92ec62973..000000000000
+--- a/arch/x86/kernel/pci-iommu_table.c
++++ /dev/null
+@@ -1,77 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-#include <linux/dma-mapping.h>
+-#include <asm/iommu_table.h>
+-#include <linux/string.h>
+-#include <linux/kallsyms.h>
+-
+-static struct iommu_table_entry * __init
+-find_dependents_of(struct iommu_table_entry *start,
+-		   struct iommu_table_entry *finish,
+-		   struct iommu_table_entry *q)
+-{
+-	struct iommu_table_entry *p;
+-
+-	if (!q)
+-		return NULL;
+-
+-	for (p = start; p < finish; p++)
+-		if (p->detect == q->depend)
+-			return p;
+-
+-	return NULL;
+-}
+-
+-
+-void __init sort_iommu_table(struct iommu_table_entry *start,
+-			     struct iommu_table_entry *finish) {
+-
+-	struct iommu_table_entry *p, *q, tmp;
+-
+-	for (p = start; p < finish; p++) {
+-again:
+-		q = find_dependents_of(start, finish, p);
+-		/* We are bit sneaky here. We use the memory address to figure
+-		 * out if the node we depend on is past our point, if so, swap.
+-		 */
+-		if (q > p) {
+-			tmp = *p;
+-			memmove(p, q, sizeof(*p));
+-			*q = tmp;
+-			goto again;
+-		}
+-	}
+-
+-}
+-
+-#ifdef DEBUG
+-void __init check_iommu_entries(struct iommu_table_entry *start,
+-				struct iommu_table_entry *finish)
+-{
+-	struct iommu_table_entry *p, *q, *x;
+-
+-	/* Simple cyclic dependency checker. */
+-	for (p = start; p < finish; p++) {
+-		q = find_dependents_of(start, finish, p);
+-		x = find_dependents_of(start, finish, q);
+-		if (p == x) {
+-			printk(KERN_ERR "CYCLIC DEPENDENCY FOUND! %pS depends on %pS and vice-versa. BREAKING IT.\n",
+-			       p->detect, q->detect);
+-			/* Heavy handed way..*/
+-			x->depend = NULL;
+-		}
+-	}
+-
+-	for (p = start; p < finish; p++) {
+-		q = find_dependents_of(p, finish, p);
+-		if (q && q > p) {
+-			printk(KERN_ERR "EXECUTION ORDER INVALID! %pS should be called before %pS!\n",
+-			       p->detect, q->detect);
+-		}
+-	}
+-}
+-#else
+-void __init check_iommu_entries(struct iommu_table_entry *start,
+-				       struct iommu_table_entry *finish)
+-{
+-}
+-#endif
+diff --git a/arch/x86/kernel/pci-swiotlb.c b/arch/x86/kernel/pci-swiotlb.c
+deleted file mode 100644
+index 814ab46a0dad..000000000000
+--- a/arch/x86/kernel/pci-swiotlb.c
++++ /dev/null
+@@ -1,77 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-
+-#include <linux/pci.h>
+-#include <linux/cache.h>
+-#include <linux/init.h>
+-#include <linux/swiotlb.h>
+-#include <linux/memblock.h>
+-#include <linux/dma-direct.h>
+-#include <linux/cc_platform.h>
+-
+-#include <asm/iommu.h>
+-#include <asm/swiotlb.h>
+-#include <asm/dma.h>
+-#include <asm/xen/swiotlb-xen.h>
+-#include <asm/iommu_table.h>
+-
+-int swiotlb __read_mostly;
+-
+-/*
+- * pci_swiotlb_detect_override - set swiotlb to 1 if necessary
+- *
+- * This returns non-zero if we are forced to use swiotlb (by the boot
+- * option).
+- */
+-int __init pci_swiotlb_detect_override(void)
+-{
+-	if (swiotlb_force == SWIOTLB_FORCE)
+-		swiotlb = 1;
+-
+-	return swiotlb;
+-}
+-IOMMU_INIT_FINISH(pci_swiotlb_detect_override,
+-		  pci_xen_swiotlb_detect,
+-		  pci_swiotlb_init,
+-		  pci_swiotlb_late_init);
+-
+-/*
+- * If 4GB or more detected (and iommu=off not set) or if SME is active
+- * then set swiotlb to 1 and return 1.
+- */
+-int __init pci_swiotlb_detect_4gb(void)
+-{
+-	/* don't initialize swiotlb if iommu=off (no_iommu=1) */
+-	if (!no_iommu && max_possible_pfn > MAX_DMA32_PFN)
+-		swiotlb = 1;
+-
+-	/*
+-	 * Set swiotlb to 1 so that bounce buffers are allocated and used for
+-	 * devices that can't support DMA to encrypted memory.
+-	 */
+-	if (cc_platform_has(CC_ATTR_HOST_MEM_ENCRYPT))
+-		swiotlb = 1;
+-
+-	return swiotlb;
+-}
+-IOMMU_INIT(pci_swiotlb_detect_4gb,
+-	   pci_swiotlb_detect_override,
+-	   pci_swiotlb_init,
+-	   pci_swiotlb_late_init);
+-
+-void __init pci_swiotlb_init(void)
+-{
+-	if (swiotlb)
+-		swiotlb_init(0);
+-}
+-
+-void __init pci_swiotlb_late_init(void)
+-{
+-	/* An IOMMU turned us off. */
+-	if (!swiotlb)
+-		swiotlb_exit();
+-	else {
+-		printk(KERN_INFO "PCI-DMA: "
+-		       "Using software bounce buffering for IO (SWIOTLB)\n");
+-		swiotlb_print_info();
+-	}
+-}
+diff --git a/arch/x86/kernel/tboot.c b/arch/x86/kernel/tboot.c
+index f9af561c3cd4..0c1154a1c403 100644
+--- a/arch/x86/kernel/tboot.c
++++ b/arch/x86/kernel/tboot.c
+@@ -24,7 +24,6 @@
+ #include <asm/processor.h>
+ #include <asm/bootparam.h>
+ #include <asm/pgalloc.h>
+-#include <asm/swiotlb.h>
+ #include <asm/fixmap.h>
+ #include <asm/proto.h>
+ #include <asm/setup.h>
+diff --git a/arch/x86/kernel/vmlinux.lds.S b/arch/x86/kernel/vmlinux.lds.S
+index 7fda7f27e762..f5f6dc2e8007 100644
+--- a/arch/x86/kernel/vmlinux.lds.S
++++ b/arch/x86/kernel/vmlinux.lds.S
+@@ -315,18 +315,6 @@ SECTIONS
+ 		*(.altinstr_replacement)
+ 	}
+ 
+-	/*
+-	 * struct iommu_table_entry entries are injected in this section.
+-	 * It is an array of IOMMUs which during run time gets sorted depending
+-	 * on its dependency order. After rootfs_initcall is complete
+-	 * this section can be safely removed.
+-	 */
+-	.iommu_table : AT(ADDR(.iommu_table) - LOAD_OFFSET) {
+-		__iommu_table = .;
+-		*(.iommu_table)
+-		__iommu_table_end = .;
+-	}
+-
+ 	. = ALIGN(8);
+ 	.apicdrivers : AT(ADDR(.apicdrivers) - LOAD_OFFSET) {
+ 		__apicdrivers = .;
+diff --git a/arch/x86/mm/mem_encrypt_amd.c b/arch/x86/mm/mem_encrypt_amd.c
+index 6169053c2854..d732d727d3de 100644
+--- a/arch/x86/mm/mem_encrypt_amd.c
++++ b/arch/x86/mm/mem_encrypt_amd.c
+@@ -432,9 +432,6 @@ void __init sme_early_init(void)
+ 	for (i = 0; i < ARRAY_SIZE(protection_map); i++)
+ 		protection_map[i] = pgprot_encrypted(protection_map[i]);
+ 
+-	if (cc_platform_has(CC_ATTR_GUEST_MEM_ENCRYPT))
+-		swiotlb_force = SWIOTLB_FORCE;
+-
+ 	x86_platform.guest.enc_status_change_prepare = amd_enc_status_change_prepare;
+ 	x86_platform.guest.enc_status_change_finish  = amd_enc_status_change_finish;
+ 	x86_platform.guest.enc_tlb_flush_required    = amd_enc_tlb_flush_required;
+diff --git a/arch/x86/pci/sta2x11-fixup.c b/arch/x86/pci/sta2x11-fixup.c
+index 101081ad64b6..7368afc03998 100644
+--- a/arch/x86/pci/sta2x11-fixup.c
++++ b/arch/x86/pci/sta2x11-fixup.c
+@@ -57,7 +57,7 @@ static void sta2x11_new_instance(struct pci_dev *pdev)
+ 		int size = STA2X11_SWIOTLB_SIZE;
+ 		/* First instance: register your own swiotlb area */
+ 		dev_info(&pdev->dev, "Using SWIOTLB (size %i)\n", size);
+-		if (swiotlb_late_init_with_default_size(size))
++		if (swiotlb_init_late(size, GFP_DMA, NULL))
+ 			dev_emerg(&pdev->dev, "init swiotlb failed\n");
+ 	}
+ 	list_add(&instance->list, &sta2x11_instance_list);
+diff --git a/arch/x86/xen/Makefile b/arch/x86/xen/Makefile
+index 4953260e281c..3c5b52fbe4a7 100644
+--- a/arch/x86/xen/Makefile
++++ b/arch/x86/xen/Makefile
+@@ -47,6 +47,4 @@ obj-$(CONFIG_XEN_DEBUG_FS)	+= debugfs.o
+ 
+ obj-$(CONFIG_XEN_PV_DOM0)	+= vga.o
+ 
+-obj-$(CONFIG_SWIOTLB_XEN)	+= pci-swiotlb-xen.o
+-
+ obj-$(CONFIG_XEN_EFI)		+= efi.o
+diff --git a/arch/x86/xen/mmu_pv.c b/arch/x86/xen/mmu_pv.c
+index 00354866921b..ee29fb558f2e 100644
+--- a/arch/x86/xen/mmu_pv.c
++++ b/arch/x86/xen/mmu_pv.c
+@@ -80,6 +80,7 @@
+ #include <xen/interface/version.h>
+ #include <xen/interface/memory.h>
+ #include <xen/hvc-console.h>
++#include <xen/swiotlb-xen.h>
+ 
+ #include "multicalls.h"
+ #include "mmu.h"
+diff --git a/arch/x86/xen/pci-swiotlb-xen.c b/arch/x86/xen/pci-swiotlb-xen.c
+deleted file mode 100644
+index 46df59aeaa06..000000000000
+--- a/arch/x86/xen/pci-swiotlb-xen.c
++++ /dev/null
+@@ -1,96 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-
+-/* Glue code to lib/swiotlb-xen.c */
+-
+-#include <linux/dma-map-ops.h>
+-#include <linux/pci.h>
+-#include <xen/swiotlb-xen.h>
+-
+-#include <asm/xen/hypervisor.h>
+-#include <xen/xen.h>
+-#include <asm/iommu_table.h>
+-
+-
+-#include <asm/xen/swiotlb-xen.h>
+-#ifdef CONFIG_X86_64
+-#include <asm/iommu.h>
+-#include <asm/dma.h>
+-#endif
+-#include <linux/export.h>
+-
+-static int xen_swiotlb __read_mostly;
+-
+-/*
+- * pci_xen_swiotlb_detect - set xen_swiotlb to 1 if necessary
+- *
+- * This returns non-zero if we are forced to use xen_swiotlb (by the boot
+- * option).
+- */
+-int __init pci_xen_swiotlb_detect(void)
+-{
+-
+-	if (!xen_pv_domain())
+-		return 0;
+-
+-	/* If running as PV guest, either iommu=soft, or swiotlb=force will
+-	 * activate this IOMMU. If running as PV privileged, activate it
+-	 * irregardless.
+-	 */
+-	if (xen_initial_domain() || swiotlb || swiotlb_force == SWIOTLB_FORCE)
+-		xen_swiotlb = 1;
+-
+-	/* If we are running under Xen, we MUST disable the native SWIOTLB.
+-	 * Don't worry about swiotlb_force flag activating the native, as
+-	 * the 'swiotlb' flag is the only one turning it on. */
+-	swiotlb = 0;
+-
+-#ifdef CONFIG_X86_64
+-	/* pci_swiotlb_detect_4gb turns on native SWIOTLB if no_iommu == 0
+-	 * (so no iommu=X command line over-writes).
+-	 * Considering that PV guests do not want the *native SWIOTLB* but
+-	 * only Xen SWIOTLB it is not useful to us so set no_iommu=1 here.
+-	 */
+-	if (max_pfn > MAX_DMA32_PFN)
+-		no_iommu = 1;
+-#endif
+-	return xen_swiotlb;
+-}
+-
+-static void __init pci_xen_swiotlb_init(void)
+-{
+-	if (xen_swiotlb) {
+-		xen_swiotlb_init_early();
+-		dma_ops = &xen_swiotlb_dma_ops;
+-
+-#ifdef CONFIG_PCI
+-		/* Make sure ACS will be enabled */
+-		pci_request_acs();
+-#endif
+-	}
+-}
+-
+-int pci_xen_swiotlb_init_late(void)
+-{
+-	int rc;
+-
+-	if (xen_swiotlb)
+-		return 0;
+-
+-	rc = xen_swiotlb_init();
+-	if (rc)
+-		return rc;
+-
+-	dma_ops = &xen_swiotlb_dma_ops;
+-#ifdef CONFIG_PCI
+-	/* Make sure ACS will be enabled */
+-	pci_request_acs();
+-#endif
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(pci_xen_swiotlb_init_late);
+-
+-IOMMU_INIT_FINISH(pci_xen_swiotlb_detect,
+-		  NULL,
+-		  pci_xen_swiotlb_init,
+-		  NULL);
+diff --git a/drivers/iommu/amd/init.c b/drivers/iommu/amd/init.c
+index b4a798c7b347..1a3ad58ba846 100644
+--- a/drivers/iommu/amd/init.c
++++ b/drivers/iommu/amd/init.c
+@@ -27,7 +27,6 @@
+ #include <asm/apic.h>
+ #include <asm/gart.h>
+ #include <asm/x86_init.h>
+-#include <asm/iommu_table.h>
+ #include <asm/io_apic.h>
+ #include <asm/irq_remapping.h>
+ #include <asm/set_memory.h>
+@@ -3257,11 +3256,6 @@ __setup("ivrs_ioapic",		parse_ivrs_ioapic);
+ __setup("ivrs_hpet",		parse_ivrs_hpet);
+ __setup("ivrs_acpihid",		parse_ivrs_acpihid);
+ 
+-IOMMU_INIT_FINISH(amd_iommu_detect,
+-		  gart_iommu_hole_init,
+-		  NULL,
+-		  NULL);
+-
+ bool amd_iommu_v2_supported(void)
+ {
+ 	return amd_iommu_v2_present;
+diff --git a/drivers/iommu/amd/iommu.c b/drivers/iommu/amd/iommu.c
+index a1ada7bff44e..b47220ac09ea 100644
+--- a/drivers/iommu/amd/iommu.c
++++ b/drivers/iommu/amd/iommu.c
+@@ -1840,7 +1840,10 @@ void amd_iommu_domain_update(struct protection_domain *domain)
+ 
+ static void __init amd_iommu_init_dma_ops(void)
+ {
+-	swiotlb = (iommu_default_passthrough() || sme_me_mask) ? 1 : 0;
++	if (iommu_default_passthrough() || sme_me_mask)
++		x86_swiotlb_enable = true;
++	else
++		x86_swiotlb_enable = false;
+ }
+ 
+ int __init amd_iommu_init_api(void)
+diff --git a/drivers/iommu/intel/dmar.c b/drivers/iommu/intel/dmar.c
+index 4de960834a1b..592c1e1a5d4b 100644
+--- a/drivers/iommu/intel/dmar.c
++++ b/drivers/iommu/intel/dmar.c
+@@ -30,7 +30,6 @@
+ #include <linux/numa.h>
+ #include <linux/limits.h>
+ #include <asm/irq_remapping.h>
+-#include <asm/iommu_table.h>
+ #include <trace/events/intel_iommu.h>
+ 
+ #include "../irq_remapping.h"
+@@ -912,7 +911,7 @@ dmar_validate_one_drhd(struct acpi_dmar_header *entry, void *arg)
+ 	return 0;
+ }
+ 
+-int __init detect_intel_iommu(void)
++void __init detect_intel_iommu(void)
+ {
+ 	int ret;
+ 	struct dmar_res_callback validate_drhd_cb = {
+@@ -945,8 +944,6 @@ int __init detect_intel_iommu(void)
+ 		dmar_tbl = NULL;
+ 	}
+ 	up_write(&dmar_global_lock);
+-
+-	return ret ? ret : 1;
+ }
+ 
+ static void unmap_iommu(struct intel_iommu *iommu)
+@@ -2164,7 +2161,6 @@ static int __init dmar_free_unused_resources(void)
+ }
+ 
+ late_initcall(dmar_free_unused_resources);
+-IOMMU_INIT_POST(detect_intel_iommu);
+ 
+ /*
+  * DMAR Hotplug Support
+diff --git a/drivers/xen/swiotlb-xen.c b/drivers/xen/swiotlb-xen.c
+index 47aebd98f52f..67aa74d20162 100644
+--- a/drivers/xen/swiotlb-xen.c
++++ b/drivers/xen/swiotlb-xen.c
+@@ -36,7 +36,6 @@
+ #include <xen/hvc-console.h>
+ 
+ #include <asm/dma-mapping.h>
+-#include <asm/xen/page-coherent.h>
+ 
+ #include <trace/events/swiotlb.h>
+ #define MAX_DMA_BITS 32
+@@ -104,7 +103,8 @@ static int is_xen_swiotlb_buffer(struct device *dev, dma_addr_t dma_addr)
+ 	return 0;
+ }
+ 
+-static int xen_swiotlb_fixup(void *buf, unsigned long nslabs)
++#ifdef CONFIG_X86
++int xen_swiotlb_fixup(void *buf, unsigned long nslabs)
+ {
+ 	int rc;
+ 	unsigned int order = get_order(IO_TLB_SEGSIZE << IO_TLB_SHIFT);
+@@ -130,223 +130,59 @@ static int xen_swiotlb_fixup(void *buf, unsigned long nslabs)
+ 	return 0;
+ }
+ 
+-enum xen_swiotlb_err {
+-	XEN_SWIOTLB_UNKNOWN = 0,
+-	XEN_SWIOTLB_ENOMEM,
+-	XEN_SWIOTLB_EFIXUP
+-};
+-
+-static const char *xen_swiotlb_error(enum xen_swiotlb_err err)
+-{
+-	switch (err) {
+-	case XEN_SWIOTLB_ENOMEM:
+-		return "Cannot allocate Xen-SWIOTLB buffer\n";
+-	case XEN_SWIOTLB_EFIXUP:
+-		return "Failed to get contiguous memory for DMA from Xen!\n"\
+-		    "You either: don't have the permissions, do not have"\
+-		    " enough free memory under 4GB, or the hypervisor memory"\
+-		    " is too fragmented!";
+-	default:
+-		break;
+-	}
+-	return "";
+-}
+-
+-int xen_swiotlb_init(void)
+-{
+-	enum xen_swiotlb_err m_ret = XEN_SWIOTLB_UNKNOWN;
+-	unsigned long bytes = swiotlb_size_or_default();
+-	unsigned long nslabs = bytes >> IO_TLB_SHIFT;
+-	unsigned int order, repeat = 3;
+-	int rc = -ENOMEM;
+-	char *start;
+-
+-	if (io_tlb_default_mem.nslabs) {
+-		pr_warn("swiotlb buffer already initialized\n");
+-		return -EEXIST;
+-	}
+-
+-retry:
+-	m_ret = XEN_SWIOTLB_ENOMEM;
+-	order = get_order(bytes);
+-
+-	/*
+-	 * Get IO TLB memory from any location.
+-	 */
+-#define SLABS_PER_PAGE (1 << (PAGE_SHIFT - IO_TLB_SHIFT))
+-#define IO_TLB_MIN_SLABS ((1<<20) >> IO_TLB_SHIFT)
+-	while ((SLABS_PER_PAGE << order) > IO_TLB_MIN_SLABS) {
+-		start = (void *)xen_get_swiotlb_free_pages(order);
+-		if (start)
+-			break;
+-		order--;
+-	}
+-	if (!start)
+-		goto exit;
+-	if (order != get_order(bytes)) {
+-		pr_warn("Warning: only able to allocate %ld MB for software IO TLB\n",
+-			(PAGE_SIZE << order) >> 20);
+-		nslabs = SLABS_PER_PAGE << order;
+-		bytes = nslabs << IO_TLB_SHIFT;
+-	}
+-
+-	/*
+-	 * And replace that memory with pages under 4GB.
+-	 */
+-	rc = xen_swiotlb_fixup(start, nslabs);
+-	if (rc) {
+-		free_pages((unsigned long)start, order);
+-		m_ret = XEN_SWIOTLB_EFIXUP;
+-		goto error;
+-	}
+-	rc = swiotlb_late_init_with_tbl(start, nslabs);
+-	if (rc)
+-		return rc;
+-	swiotlb_set_max_segment(PAGE_SIZE);
+-	return 0;
+-error:
+-	if (nslabs > 1024 && repeat--) {
+-		/* Min is 2MB */
+-		nslabs = max(1024UL, ALIGN(nslabs >> 1, IO_TLB_SEGSIZE));
+-		bytes = nslabs << IO_TLB_SHIFT;
+-		pr_info("Lowering to %luMB\n", bytes >> 20);
+-		goto retry;
+-	}
+-exit:
+-	pr_err("%s (rc:%d)\n", xen_swiotlb_error(m_ret), rc);
+-	return rc;
+-}
+-
+-#ifdef CONFIG_X86
+-void __init xen_swiotlb_init_early(void)
+-{
+-	unsigned long bytes = swiotlb_size_or_default();
+-	unsigned long nslabs = bytes >> IO_TLB_SHIFT;
+-	unsigned int repeat = 3;
+-	char *start;
+-	int rc;
+-
+-retry:
+-	/*
+-	 * Get IO TLB memory from any location.
+-	 */
+-	start = memblock_alloc(PAGE_ALIGN(bytes),
+-			       IO_TLB_SEGSIZE << IO_TLB_SHIFT);
+-	if (!start)
+-		panic("%s: Failed to allocate %lu bytes\n",
+-		      __func__, PAGE_ALIGN(bytes));
+-
+-	/*
+-	 * And replace that memory with pages under 4GB.
+-	 */
+-	rc = xen_swiotlb_fixup(start, nslabs);
+-	if (rc) {
+-		memblock_free(start, PAGE_ALIGN(bytes));
+-		if (nslabs > 1024 && repeat--) {
+-			/* Min is 2MB */
+-			nslabs = max(1024UL, ALIGN(nslabs >> 1, IO_TLB_SEGSIZE));
+-			bytes = nslabs << IO_TLB_SHIFT;
+-			pr_info("Lowering to %luMB\n", bytes >> 20);
+-			goto retry;
+-		}
+-		panic("%s (rc:%d)", xen_swiotlb_error(XEN_SWIOTLB_EFIXUP), rc);
+-	}
+-
+-	if (swiotlb_init_with_tbl(start, nslabs, true))
+-		panic("Cannot allocate SWIOTLB buffer");
+-	swiotlb_set_max_segment(PAGE_SIZE);
+-}
+-#endif /* CONFIG_X86 */
+-
+ static void *
+-xen_swiotlb_alloc_coherent(struct device *hwdev, size_t size,
+-			   dma_addr_t *dma_handle, gfp_t flags,
+-			   unsigned long attrs)
++xen_swiotlb_alloc_coherent(struct device *dev, size_t size,
++		dma_addr_t *dma_handle, gfp_t flags, unsigned long attrs)
+ {
+-	void *ret;
++	u64 dma_mask = dev->coherent_dma_mask;
+ 	int order = get_order(size);
+-	u64 dma_mask = DMA_BIT_MASK(32);
+ 	phys_addr_t phys;
+-	dma_addr_t dev_addr;
+-
+-	/*
+-	* Ignore region specifiers - the kernel's ideas of
+-	* pseudo-phys memory layout has nothing to do with the
+-	* machine physical layout.  We can't allocate highmem
+-	* because we can't return a pointer to it.
+-	*/
+-	flags &= ~(__GFP_DMA | __GFP_HIGHMEM);
++	void *ret;
+ 
+-	/* Convert the size to actually allocated. */
++	/* Align the allocation to the Xen page size */
+ 	size = 1UL << (order + XEN_PAGE_SHIFT);
+ 
+-	/* On ARM this function returns an ioremap'ped virtual address for
+-	 * which virt_to_phys doesn't return the corresponding physical
+-	 * address. In fact on ARM virt_to_phys only works for kernel direct
+-	 * mapped RAM memory. Also see comment below.
+-	 */
+-	ret = xen_alloc_coherent_pages(hwdev, size, dma_handle, flags, attrs);
+-
++	ret = (void *)__get_free_pages(flags, get_order(size));
+ 	if (!ret)
+ 		return ret;
+-
+-	if (hwdev && hwdev->coherent_dma_mask)
+-		dma_mask = hwdev->coherent_dma_mask;
+-
+-	/* At this point dma_handle is the dma address, next we are
+-	 * going to set it to the machine address.
+-	 * Do not use virt_to_phys(ret) because on ARM it doesn't correspond
+-	 * to *dma_handle. */
+-	phys = dma_to_phys(hwdev, *dma_handle);
+-	dev_addr = xen_phys_to_dma(hwdev, phys);
+-	if (((dev_addr + size - 1 <= dma_mask)) &&
+-	    !range_straddles_page_boundary(phys, size))
+-		*dma_handle = dev_addr;
+-	else {
+-		if (xen_create_contiguous_region(phys, order,
+-						 fls64(dma_mask), dma_handle) != 0) {
+-			xen_free_coherent_pages(hwdev, size, ret, (dma_addr_t)phys, attrs);
+-			return NULL;
+-		}
+-		*dma_handle = phys_to_dma(hwdev, *dma_handle);
++	phys = virt_to_phys(ret);
++
++	*dma_handle = xen_phys_to_dma(dev, phys);
++	if (*dma_handle + size - 1 > dma_mask ||
++	    range_straddles_page_boundary(phys, size)) {
++		if (xen_create_contiguous_region(phys, order, fls64(dma_mask),
++				dma_handle) != 0)
++			goto out_free_pages;
+ 		SetPageXenRemapped(virt_to_page(ret));
+ 	}
++
+ 	memset(ret, 0, size);
+ 	return ret;
++
++out_free_pages:
++	free_pages((unsigned long)ret, get_order(size));
++	return NULL;
+ }
+ 
+ static void
+-xen_swiotlb_free_coherent(struct device *hwdev, size_t size, void *vaddr,
+-			  dma_addr_t dev_addr, unsigned long attrs)
++xen_swiotlb_free_coherent(struct device *dev, size_t size, void *vaddr,
++		dma_addr_t dma_handle, unsigned long attrs)
+ {
++	phys_addr_t phys = virt_to_phys(vaddr);
+ 	int order = get_order(size);
+-	phys_addr_t phys;
+-	u64 dma_mask = DMA_BIT_MASK(32);
+-	struct page *page;
+-
+-	if (hwdev && hwdev->coherent_dma_mask)
+-		dma_mask = hwdev->coherent_dma_mask;
+-
+-	/* do not use virt_to_phys because on ARM it doesn't return you the
+-	 * physical address */
+-	phys = xen_dma_to_phys(hwdev, dev_addr);
+ 
+ 	/* Convert the size to actually allocated. */
+ 	size = 1UL << (order + XEN_PAGE_SHIFT);
+ 
+-	if (is_vmalloc_addr(vaddr))
+-		page = vmalloc_to_page(vaddr);
+-	else
+-		page = virt_to_page(vaddr);
++	if (WARN_ON_ONCE(dma_handle + size - 1 > dev->coherent_dma_mask) ||
++	    WARN_ON_ONCE(range_straddles_page_boundary(phys, size)))
++	    	return;
+ 
+-	if (!WARN_ON((dev_addr + size - 1 > dma_mask) ||
+-		     range_straddles_page_boundary(phys, size)) &&
+-	    TestClearPageXenRemapped(page))
++	if (TestClearPageXenRemapped(virt_to_page(vaddr)))
+ 		xen_destroy_contiguous_region(phys, order);
+-
+-	xen_free_coherent_pages(hwdev, size, vaddr, phys_to_dma(hwdev, phys),
+-				attrs);
++	free_pages((unsigned long)vaddr, get_order(size));
+ }
++#endif /* CONFIG_X86 */
+ 
+ /*
+  * Map a single buffer of the indicated size for DMA in streaming mode.  The
+@@ -378,7 +214,7 @@ static dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
+ 	/*
+ 	 * Oh well, have to allocate and map a bounce buffer.
+ 	 */
+-	trace_swiotlb_bounced(dev, dev_addr, size, swiotlb_force);
++	trace_swiotlb_bounced(dev, dev_addr, size);
+ 
+ 	map = swiotlb_tbl_map_single(dev, phys, size, size, 0, dir, attrs);
+ 	if (map == (phys_addr_t)DMA_MAPPING_ERROR)
+@@ -549,8 +385,13 @@ xen_swiotlb_dma_supported(struct device *hwdev, u64 mask)
+ }
+ 
+ const struct dma_map_ops xen_swiotlb_dma_ops = {
++#ifdef CONFIG_X86
+ 	.alloc = xen_swiotlb_alloc_coherent,
+ 	.free = xen_swiotlb_free_coherent,
++#else
++	.alloc = dma_direct_alloc,
++	.free = dma_direct_free,
++#endif
+ 	.sync_single_for_cpu = xen_swiotlb_sync_single_for_cpu,
+ 	.sync_single_for_device = xen_swiotlb_sync_single_for_device,
+ 	.sync_sg_for_cpu = xen_swiotlb_sync_sg_for_cpu,
+diff --git a/include/linux/dmar.h b/include/linux/dmar.h
+index 45e903d84733..cbd714a198a0 100644
+--- a/include/linux/dmar.h
++++ b/include/linux/dmar.h
+@@ -121,7 +121,7 @@ extern int dmar_remove_dev_scope(struct dmar_pci_notify_info *info,
+ 				 u16 segment, struct dmar_dev_scope *devices,
+ 				 int count);
+ /* Intel IOMMU detection */
+-extern int detect_intel_iommu(void);
++void detect_intel_iommu(void);
+ extern int enable_drhd_fault_handling(void);
+ extern int dmar_device_add(acpi_handle handle);
+ extern int dmar_device_remove(acpi_handle handle);
+@@ -197,6 +197,10 @@ static inline bool dmar_platform_optin(void)
+ 	return false;
+ }
+ 
++static inline void detect_intel_iommu(void)
++{
++}
++
+ #endif /* CONFIG_DMAR_TABLE */
+ 
+ struct irte {
+diff --git a/include/linux/swiotlb.h b/include/linux/swiotlb.h
+index f6c3638255d5..cf36c5cc7584 100644
+--- a/include/linux/swiotlb.h
++++ b/include/linux/swiotlb.h
+@@ -13,11 +13,9 @@ struct device;
+ struct page;
+ struct scatterlist;
+ 
+-enum swiotlb_force {
+-	SWIOTLB_NORMAL,		/* Default - depending on HW DMA mask etc. */
+-	SWIOTLB_FORCE,		/* swiotlb=force */
+-	SWIOTLB_NO_FORCE,	/* swiotlb=noforce */
+-};
++#define SWIOTLB_VERBOSE	(1 << 0) /* verbose initialization */
++#define SWIOTLB_FORCE	(1 << 1) /* force bounce buffering */
++#define SWIOTLB_ANY	(1 << 2) /* allow any memory for the buffer */
+ 
+ /*
+  * Maximum allowable number of contiguous slabs to map,
+@@ -36,11 +34,11 @@ enum swiotlb_force {
+ /* default to 64MB */
+ #define IO_TLB_DEFAULT_SIZE (64UL<<20)
+ 
+-extern void swiotlb_init(int verbose);
+-int swiotlb_init_with_tbl(char *tlb, unsigned long nslabs, int verbose);
+ unsigned long swiotlb_size_or_default(void);
+-extern int swiotlb_late_init_with_tbl(char *tlb, unsigned long nslabs);
+-extern int swiotlb_late_init_with_default_size(size_t default_size);
++void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
++	int (*remap)(void *tlb, unsigned long nslabs));
++int swiotlb_init_late(size_t size, gfp_t gfp_mask,
++	int (*remap)(void *tlb, unsigned long nslabs));
+ extern void __init swiotlb_update_mem_attributes(void);
+ 
+ phys_addr_t swiotlb_tbl_map_single(struct device *hwdev, phys_addr_t phys,
+@@ -64,8 +62,32 @@ dma_addr_t swiotlb_map(struct device *dev, phys_addr_t phys,
+ #ifdef CONFIG_SWIOTLB
+ extern enum swiotlb_force swiotlb_force;
+ 
++struct io_tlb_slot {
++	phys_addr_t orig_addr;
++	size_t alloc_size;
++	struct list_head node;
++};
++
+ /**
+- * struct io_tlb_mem - IO TLB Memory Pool Descriptor
++ * struct io_tlb_area - IO TLB memory area descriptor
++ *
++ * This is a single area with a single lock.
++ *
++ * @used:	The number of used IO TLB block.
++ * @list:	The free list describing the number of free entries available
++ *		from each index.
++ * @lock:	The lock to protect the above data structures in the map and
++ *		unmap calls.
++ */
++
++struct io_tlb_area {
++	unsigned long used;
++	struct list_head free_slots;
++	spinlock_t lock;
++};
++
++/**
++ * struct io_tlb_mem - io tlb memory pool descriptor
+  *
+  * @start:	The start address of the swiotlb memory pool. Used to do a quick
+  *		range check to see if the memory was in fact allocated by this
+@@ -80,35 +102,28 @@ extern enum swiotlb_force swiotlb_force;
+  *		@end. For default swiotlb, this is command line adjustable via
+  *		setup_io_tlb_npages.
+  * @used:	The number of used IO TLB block.
+- * @list:	The free list describing the number of free entries available
+- *		from each index.
+  * @index:	The index to start searching in the next round.
+  * @orig_addr:	The original address corresponding to a mapped entry.
+  * @alloc_size:	Size of the allocated buffer.
+- * @lock:	The lock to protect the above data structures in the map and
+- *		unmap calls.
+  * @debugfs:	The dentry to debugfs.
+  * @late_alloc:	%true if allocated using the page allocator
+  * @force_bounce: %true if swiotlb bouncing is forced
+  * @for_alloc:  %true if the pool is used for memory allocation
++ * @bitmap:	The bitmap used to track free entries. 1 in bit X means the slot
++ *		indexed by X is free.
+  */
+ struct io_tlb_mem {
+ 	phys_addr_t start;
+ 	phys_addr_t end;
+ 	void *vaddr;
+ 	unsigned long nslabs;
+-	unsigned long used;
+-	unsigned int index;
+-	spinlock_t lock;
+ 	struct dentry *debugfs;
+ 	bool late_alloc;
+ 	bool force_bounce;
+ 	bool for_alloc;
+-	struct io_tlb_slot {
+-		phys_addr_t orig_addr;
+-		size_t alloc_size;
+-		unsigned int list;
+-	} *slots;
++	struct io_tlb_area *areas;
++	struct io_tlb_slot *slots;
++	unsigned long *bitmap;
+ };
+ extern struct io_tlb_mem io_tlb_default_mem;
+ 
+@@ -126,13 +141,17 @@ static inline bool is_swiotlb_force_bounce(struct device *dev)
+ 	return mem && mem->force_bounce;
+ }
+ 
++void swiotlb_init(bool addressing_limited, unsigned int flags);
+ void __init swiotlb_exit(void);
+ unsigned int swiotlb_max_segment(void);
+ size_t swiotlb_max_mapping_size(struct device *dev);
+ bool is_swiotlb_active(struct device *dev);
+ void __init swiotlb_adjust_size(unsigned long size);
++void swiotlb_hint_cpus(int cpus);
+ #else
+-#define swiotlb_force SWIOTLB_NO_FORCE
++static inline void swiotlb_init(bool addressing_limited, unsigned int flags)
++{
++}
+ static inline bool is_swiotlb_buffer(struct device *dev, phys_addr_t paddr)
+ {
+ 	return false;
+@@ -161,10 +180,12 @@ static inline bool is_swiotlb_active(struct device *dev)
+ static inline void swiotlb_adjust_size(unsigned long size)
+ {
+ }
++static inline void swiotlb_hint_cpus(int cpus)
++{
++}
+ #endif /* CONFIG_SWIOTLB */
+ 
+ extern void swiotlb_print_info(void);
+-extern void swiotlb_set_max_segment(unsigned int);
+ 
+ #ifdef CONFIG_DMA_RESTRICTED_POOL
+ struct page *swiotlb_alloc(struct device *dev, size_t size);
+diff --git a/include/trace/events/swiotlb.h b/include/trace/events/swiotlb.h
+index 705be43b71ab..da05c9ebd224 100644
+--- a/include/trace/events/swiotlb.h
++++ b/include/trace/events/swiotlb.h
+@@ -8,20 +8,15 @@
+ #include <linux/tracepoint.h>
+ 
+ TRACE_EVENT(swiotlb_bounced,
+-
+-	TP_PROTO(struct device *dev,
+-		 dma_addr_t dev_addr,
+-		 size_t size,
+-		 enum swiotlb_force swiotlb_force),
+-
+-	TP_ARGS(dev, dev_addr, size, swiotlb_force),
++	TP_PROTO(struct device *dev, dma_addr_t dev_addr, size_t size),
++	TP_ARGS(dev, dev_addr, size),
+ 
+ 	TP_STRUCT__entry(
+-		__string(	dev_name,	dev_name(dev)		)
+-		__field(	u64,	dma_mask			)
+-		__field(	dma_addr_t,	dev_addr		)
+-		__field(	size_t,	size				)
+-		__field(	enum swiotlb_force,	swiotlb_force	)
++		__string(dev_name, dev_name(dev))
++		__field(u64, dma_mask)
++		__field(dma_addr_t, dev_addr)
++		__field(size_t, size)
++		__field(bool, force)
+ 	),
+ 
+ 	TP_fast_assign(
+@@ -29,19 +24,15 @@ TRACE_EVENT(swiotlb_bounced,
+ 		__entry->dma_mask = (dev->dma_mask ? *dev->dma_mask : 0);
+ 		__entry->dev_addr = dev_addr;
+ 		__entry->size = size;
+-		__entry->swiotlb_force = swiotlb_force;
++		__entry->force = is_swiotlb_force_bounce(dev);
+ 	),
+ 
+-	TP_printk("dev_name: %s dma_mask=%llx dev_addr=%llx "
+-		"size=%zu %s",
++	TP_printk("dev_name: %s dma_mask=%llx dev_addr=%llx size=%zu %s",
+ 		__get_str(dev_name),
+ 		__entry->dma_mask,
+ 		(unsigned long long)__entry->dev_addr,
+ 		__entry->size,
+-		__print_symbolic(__entry->swiotlb_force,
+-			{ SWIOTLB_NORMAL,	"NORMAL" },
+-			{ SWIOTLB_FORCE,	"FORCE" },
+-			{ SWIOTLB_NO_FORCE,	"NO_FORCE" }))
++		__entry->force ? "FORCE" : "NORMAL")
+ );
+ 
+ #endif /*  _TRACE_SWIOTLB_H */
+diff --git a/include/xen/arm/page-coherent.h b/include/xen/arm/page-coherent.h
+deleted file mode 100644
+index b9cc11e887ed..000000000000
+--- a/include/xen/arm/page-coherent.h
++++ /dev/null
+@@ -1,20 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-#ifndef _XEN_ARM_PAGE_COHERENT_H
+-#define _XEN_ARM_PAGE_COHERENT_H
+-
+-#include <linux/dma-mapping.h>
+-#include <asm/page.h>
+-
+-static inline void *xen_alloc_coherent_pages(struct device *hwdev, size_t size,
+-		dma_addr_t *dma_handle, gfp_t flags, unsigned long attrs)
+-{
+-	return dma_direct_alloc(hwdev, size, dma_handle, flags, attrs);
+-}
+-
+-static inline void xen_free_coherent_pages(struct device *hwdev, size_t size,
+-		void *cpu_addr, dma_addr_t dma_handle, unsigned long attrs)
+-{
+-	dma_direct_free(hwdev, size, cpu_addr, dma_handle, attrs);
+-}
+-
+-#endif /* _XEN_ARM_PAGE_COHERENT_H */
+diff --git a/include/xen/arm/page.h b/include/xen/arm/page.h
+index ac1b65470563..7e199c6656b9 100644
+--- a/include/xen/arm/page.h
++++ b/include/xen/arm/page.h
+@@ -115,6 +115,5 @@ static inline bool set_phys_to_machine(unsigned long pfn, unsigned long mfn)
+ bool xen_arch_need_swiotlb(struct device *dev,
+ 			   phys_addr_t phys,
+ 			   dma_addr_t dev_addr);
+-unsigned long xen_get_swiotlb_free_pages(unsigned int order);
+ 
+ #endif /* _ASM_ARM_XEN_PAGE_H */
+diff --git a/include/xen/swiotlb-xen.h b/include/xen/swiotlb-xen.h
+index b3e647f86e3e..808d17ad8d57 100644
+--- a/include/xen/swiotlb-xen.h
++++ b/include/xen/swiotlb-xen.h
+@@ -10,8 +10,6 @@ void xen_dma_sync_for_cpu(struct device *dev, dma_addr_t handle,
+ void xen_dma_sync_for_device(struct device *dev, dma_addr_t handle,
+ 			     size_t size, enum dma_data_direction dir);
+ 
+-int xen_swiotlb_init(void);
+-void __init xen_swiotlb_init_early(void);
+ extern const struct dma_map_ops xen_swiotlb_dma_ops;
+ 
+ #endif /* __LINUX_SWIOTLB_XEN_H */
+diff --git a/include/xen/xen-ops.h b/include/xen/xen-ops.h
+index a3584a357f35..c7c1b46ff4cd 100644
+--- a/include/xen/xen-ops.h
++++ b/include/xen/xen-ops.h
+@@ -42,13 +42,6 @@ int xen_setup_shutdown_event(void);
+ 
+ extern unsigned long *xen_contiguous_bitmap;
+ 
+-#if defined(CONFIG_XEN_PV) || defined(CONFIG_ARM) || defined(CONFIG_ARM64)
+-int xen_create_contiguous_region(phys_addr_t pstart, unsigned int order,
+-				unsigned int address_bits,
+-				dma_addr_t *dma_handle);
+-void xen_destroy_contiguous_region(phys_addr_t pstart, unsigned int order);
+-#endif
+-
+ #if defined(CONFIG_XEN_PV)
+ int xen_remap_pfn(struct vm_area_struct *vma, unsigned long addr,
+ 		  xen_pfn_t *pfn, int nr, int *err_ptr, pgprot_t prot,
+diff --git a/kernel/dma/debug.c b/kernel/dma/debug.c
+index f8ff598596b8..2caafd13f8aa 100644
+--- a/kernel/dma/debug.c
++++ b/kernel/dma/debug.c
+@@ -448,7 +448,7 @@ void debug_dma_dump_mappings(struct device *dev)
+  * other hand, consumes a single dma_debug_entry, but inserts 'nents'
+  * entries into the tree.
+  */
+-static RADIX_TREE(dma_active_cacheline, GFP_NOWAIT);
++static RADIX_TREE(dma_active_cacheline, GFP_ATOMIC);
+ static DEFINE_SPINLOCK(radix_lock);
+ #define ACTIVE_CACHELINE_MAX_OVERLAP ((1 << RADIX_TREE_MAX_TAGS) - 1)
+ #define CACHELINE_PER_PAGE_SHIFT (PAGE_SHIFT - L1_CACHE_SHIFT)
+@@ -564,7 +564,7 @@ static void add_dma_entry(struct dma_debug_entry *entry, unsigned long attrs)
+ 
+ 	rc = active_cacheline_insert(entry);
+ 	if (rc == -ENOMEM) {
+-		pr_err("cacheline tracking ENOMEM, dma-debug disabled\n");
++		pr_err_once("cacheline tracking ENOMEM, dma-debug disabled\n");
+ 		global_disable = true;
+ 	} else if (rc == -EEXIST && !(attrs & DMA_ATTR_SKIP_CPU_SYNC)) {
+ 		err_printk(entry->dev, entry,
+diff --git a/kernel/dma/direct.c b/kernel/dma/direct.c
+index 9743c6ccce1a..e978f36e6be8 100644
+--- a/kernel/dma/direct.c
++++ b/kernel/dma/direct.c
+@@ -79,7 +79,7 @@ static int dma_set_decrypted(struct device *dev, void *vaddr, size_t size)
+ {
+ 	if (!force_dma_unencrypted(dev))
+ 		return 0;
+-	return set_memory_decrypted((unsigned long)vaddr, 1 << get_order(size));
++	return set_memory_decrypted((unsigned long)vaddr, PFN_UP(size));
+ }
+ 
+ static int dma_set_encrypted(struct device *dev, void *vaddr, size_t size)
+@@ -88,7 +88,7 @@ static int dma_set_encrypted(struct device *dev, void *vaddr, size_t size)
+ 
+ 	if (!force_dma_unencrypted(dev))
+ 		return 0;
+-	ret = set_memory_encrypted((unsigned long)vaddr, 1 << get_order(size));
++	ret = set_memory_encrypted((unsigned long)vaddr, PFN_UP(size));
+ 	if (ret)
+ 		pr_warn_ratelimited("leaking DMA memory that can't be re-encrypted\n");
+ 	return ret;
+@@ -115,7 +115,7 @@ static struct page *dma_direct_alloc_swiotlb(struct device *dev, size_t size)
+ }
+ 
+ static struct page *__dma_direct_alloc_pages(struct device *dev, size_t size,
+-		gfp_t gfp)
++		gfp_t gfp, bool allow_highmem)
+ {
+ 	int node = dev_to_node(dev);
+ 	struct page *page = NULL;
+@@ -129,9 +129,12 @@ static struct page *__dma_direct_alloc_pages(struct device *dev, size_t size,
+ 	gfp |= dma_direct_optimal_gfp_mask(dev, dev->coherent_dma_mask,
+ 					   &phys_limit);
+ 	page = dma_alloc_contiguous(dev, size, gfp);
+-	if (page && !dma_coherent_ok(dev, page_to_phys(page), size)) {
+-		dma_free_contiguous(dev, page, size);
+-		page = NULL;
++	if (page) {
++		if (!dma_coherent_ok(dev, page_to_phys(page), size) ||
++		    (!allow_highmem && PageHighMem(page))) {
++			dma_free_contiguous(dev, page, size);
++			page = NULL;
++		}
+ 	}
+ again:
+ 	if (!page)
+@@ -189,7 +192,7 @@ static void *dma_direct_alloc_no_mapping(struct device *dev, size_t size,
+ {
+ 	struct page *page;
+ 
+-	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO);
++	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
+ 	if (!page)
+ 		return NULL;
+ 
+@@ -262,7 +265,7 @@ void *dma_direct_alloc(struct device *dev, size_t size,
+ 		return dma_direct_alloc_from_pool(dev, size, dma_handle, gfp);
+ 
+ 	/* we always manually zero the memory once we are done */
+-	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO);
++	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
+ 	if (!page)
+ 		return NULL;
+ 
+@@ -370,19 +373,9 @@ struct page *dma_direct_alloc_pages(struct device *dev, size_t size,
+ 	if (force_dma_unencrypted(dev) && dma_direct_use_pool(dev, gfp))
+ 		return dma_direct_alloc_from_pool(dev, size, dma_handle, gfp);
+ 
+-	page = __dma_direct_alloc_pages(dev, size, gfp);
++	page = __dma_direct_alloc_pages(dev, size, gfp, false);
+ 	if (!page)
+ 		return NULL;
+-	if (PageHighMem(page)) {
+-		/*
+-		 * Depending on the cma= arguments and per-arch setup
+-		 * dma_alloc_contiguous could return highmem pages.
+-		 * Without remapping there is no way to return them here,
+-		 * so log an error and fail.
+-		 */
+-		dev_info(dev, "Rejecting highmem page from CMA.\n");
+-		goto out_free_pages;
+-	}
+ 
+ 	ret = page_address(page);
+ 	if (dma_set_decrypted(dev, ret, size))
+diff --git a/kernel/dma/direct.h b/kernel/dma/direct.h
+index 8a6cd53dbe8c..a78c0ba70645 100644
+--- a/kernel/dma/direct.h
++++ b/kernel/dma/direct.h
+@@ -91,7 +91,7 @@ static inline dma_addr_t dma_direct_map_page(struct device *dev,
+ 		return swiotlb_map(dev, phys, size, dir, attrs);
+ 
+ 	if (unlikely(!dma_capable(dev, dma_addr, size, true))) {
+-		if (swiotlb_force != SWIOTLB_NO_FORCE)
++		if (is_swiotlb_active(dev))
+ 			return swiotlb_map(dev, phys, size, dir, attrs);
+ 
+ 		dev_WARN_ONCE(dev, 1,
+diff --git a/kernel/dma/swiotlb.c b/kernel/dma/swiotlb.c
+index 73a41cec9e38..c736283a64f9 100644
+--- a/kernel/dma/swiotlb.c
++++ b/kernel/dma/swiotlb.c
+@@ -62,53 +62,91 @@
+ 
+ #define INVALID_PHYS_ADDR (~(phys_addr_t)0)
+ 
+-enum swiotlb_force swiotlb_force;
++#define NUM_AREAS_DEFAULT 1
++
++static bool swiotlb_force_bounce;
++static bool swiotlb_force_disable;
+ 
+ struct io_tlb_mem io_tlb_default_mem;
+ 
+ phys_addr_t swiotlb_unencrypted_base;
+ 
++static unsigned long default_nslabs = IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT;
++
++static __read_mostly unsigned int area_index_shift;
++static __read_mostly unsigned int area_bits;
++static __read_mostly int num_areas = NUM_AREAS_DEFAULT;
++
++static __init int setup_areas(int n)
++{
++	unsigned long nslabs;
++
++	if (n < 1 || !is_power_of_2(n) || n > default_nslabs) {
++		pr_err("swiotlb: Invalid areas parameter %d\n", n);
++		return -EINVAL;
++	}
++
++	/*
++	 * Round up number of slabs to the next power of 2.
++	 * The last area is going be smaller than the rest if default_nslabs is
++	 * not power of two.
++	 */
++	nslabs = roundup_pow_of_two(default_nslabs);
++
++	pr_info("swiotlb: Using %d areas\n", n);
++	num_areas = n;
++	area_index_shift = __fls(nslabs) - __fls(num_areas);
++	area_bits = __fls(n);
++	return 0;
++}
++
+ /*
+- * Max segment that we can provide which (if pages are contingous) will
+- * not be bounced (unless SWIOTLB_FORCE is set).
++ * Can be called from architecture specific code when swiotlb is set up before
++ * possible cpus are setup.
+  */
+-static unsigned int max_segment;
+ 
+-static unsigned long default_nslabs = IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT;
++void __init swiotlb_hint_cpus(int cpus)
++{
++	if (num_areas == NUM_AREAS_DEFAULT && cpus > 1) {
++		if (!is_power_of_2(cpus))
++			cpus = 1U << (__fls(cpus) + 1);
++		setup_areas(cpus);
++	}
++}
+ 
+ static int __init
+ setup_io_tlb_npages(char *str)
+ {
++	int ret = 0;
++
+ 	if (isdigit(*str)) {
+ 		/* avoid tail segment of size < IO_TLB_SEGSIZE */
+ 		default_nslabs =
+ 			ALIGN(simple_strtoul(str, &str, 0), IO_TLB_SEGSIZE);
+ 	}
++	if (*str == ',')
++		++str;
++	if (isdigit(*str))
++		ret = setup_areas(simple_strtoul(str, &str, 0));
+ 	if (*str == ',')
+ 		++str;
+ 	if (!strcmp(str, "force"))
+-		swiotlb_force = SWIOTLB_FORCE;
++		swiotlb_force_bounce = true;
+ 	else if (!strcmp(str, "noforce"))
+-		swiotlb_force = SWIOTLB_NO_FORCE;
++		swiotlb_force_disable = true;
+ 
+-	return 0;
++	return ret;
+ }
+ early_param("swiotlb", setup_io_tlb_npages);
+ 
+ unsigned int swiotlb_max_segment(void)
+ {
+-	return io_tlb_default_mem.nslabs ? max_segment : 0;
++	if (!io_tlb_default_mem.nslabs)
++		return 0;
++	return rounddown(io_tlb_default_mem.nslabs << IO_TLB_SHIFT, PAGE_SIZE);
+ }
+ EXPORT_SYMBOL_GPL(swiotlb_max_segment);
+ 
+-void swiotlb_set_max_segment(unsigned int val)
+-{
+-	if (swiotlb_force == SWIOTLB_FORCE)
+-		max_segment = 1;
+-	else
+-		max_segment = rounddown(val, PAGE_SIZE);
+-}
+-
+ unsigned long swiotlb_size_or_default(void)
+ {
+ 	return default_nslabs << IO_TLB_SHIFT;
+@@ -125,6 +163,7 @@ void __init swiotlb_adjust_size(unsigned long size)
+ 		return;
+ 	size = ALIGN(size, IO_TLB_SIZE);
+ 	default_nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
++	setup_areas(num_areas);
+ 	pr_info("SWIOTLB bounce buffer size adjusted to %luMB", size >> 20);
+ }
+ 
+@@ -203,7 +242,7 @@ void __init swiotlb_update_mem_attributes(void)
+ }
+ 
+ static void swiotlb_init_io_tlb_mem(struct io_tlb_mem *mem, phys_addr_t start,
+-				    unsigned long nslabs, bool late_alloc)
++		unsigned long nslabs, unsigned int flags, bool late_alloc)
+ {
+ 	void *vaddr = phys_to_virt(start);
+ 	unsigned long bytes = nslabs << IO_TLB_SHIFT, i;
+@@ -211,17 +250,21 @@ static void swiotlb_init_io_tlb_mem(struct io_tlb_mem *mem, phys_addr_t start,
+ 	mem->nslabs = nslabs;
+ 	mem->start = start;
+ 	mem->end = mem->start + bytes;
+-	mem->index = 0;
+ 	mem->late_alloc = late_alloc;
+ 
+-	if (swiotlb_force == SWIOTLB_FORCE)
+-		mem->force_bounce = true;
++	mem->force_bounce = swiotlb_force_bounce || (flags & SWIOTLB_FORCE);
+ 
+-	spin_lock_init(&mem->lock);
++	for (i = 0; i < num_areas; i++) {
++		INIT_LIST_HEAD(&mem->areas[i].free_slots);
++		spin_lock_init(&mem->areas[i].lock);
++	}
+ 	for (i = 0; i < mem->nslabs; i++) {
+-		mem->slots[i].list = IO_TLB_SEGSIZE - io_tlb_offset(i);
++		int aindex = area_index_shift ? i >> area_index_shift : 0;
++		__set_bit(i, mem->bitmap);
+ 		mem->slots[i].orig_addr = INVALID_PHYS_ADDR;
+ 		mem->slots[i].alloc_size = 0;
++		list_add_tail(&mem->slots[i].node,
++			      &mem->areas[aindex].free_slots);
+ 	}
+ 
+ 	/*
+@@ -236,57 +279,74 @@ static void swiotlb_init_io_tlb_mem(struct io_tlb_mem *mem, phys_addr_t start,
+ 	return;
+ }
+ 
+-int __init swiotlb_init_with_tbl(char *tlb, unsigned long nslabs, int verbose)
++/*
++ * Statically reserve bounce buffer space and initialize bounce buffer data
++ * structures for the software IO TLB used to implement the DMA API.
++ */
++void __init swiotlb_init_remap(bool addressing_limit, unsigned int flags,
++		int (*remap)(void *tlb, unsigned long nslabs))
+ {
+ 	struct io_tlb_mem *mem = &io_tlb_default_mem;
++	unsigned long nslabs = default_nslabs;
+ 	size_t alloc_size;
++	size_t bytes;
++	void *tlb;
+ 
+-	if (swiotlb_force == SWIOTLB_NO_FORCE)
+-		return 0;
++	if (!addressing_limit && !swiotlb_force_bounce)
++		return;
++	if (swiotlb_force_disable)
++		return;
+ 
+-	/* protect against double initialization */
+-	if (WARN_ON_ONCE(mem->nslabs))
+-		return -ENOMEM;
++	/*
++	 * By default allocate the bounce buffer memory from low memory, but
++	 * allow to pick a location everywhere for hypervisors with guest
++	 * memory encryption.
++	 */
++retry:
++	bytes = PAGE_ALIGN(nslabs << IO_TLB_SHIFT);
++	if (flags & SWIOTLB_ANY)
++		tlb = memblock_alloc(bytes, PAGE_SIZE);
++	else
++		tlb = memblock_alloc_low(bytes, PAGE_SIZE);
++	if (!tlb) {
++		pr_warn("%s: failed to allocate tlb structure\n", __func__);
++		return;
++	}
++
++	if (remap && remap(tlb, nslabs) < 0) {
++		memblock_free(tlb, PAGE_ALIGN(bytes));
++
++		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
++		if (nslabs < IO_TLB_MIN_SLABS)
++			panic("%s: Failed to remap %zu bytes\n",
++			      __func__, bytes);
++		goto retry;
++	}
+ 
+ 	alloc_size = PAGE_ALIGN(array_size(sizeof(*mem->slots), nslabs));
+ 	mem->slots = memblock_alloc(alloc_size, PAGE_SIZE);
+ 	if (!mem->slots)
+ 		panic("%s: Failed to allocate %zu bytes align=0x%lx\n",
+ 		      __func__, alloc_size, PAGE_SIZE);
++	mem->areas = memblock_alloc(sizeof(struct io_tlb_area) * num_areas,
++				    SMP_CACHE_BYTES);
++	if (!mem->areas)
++		panic("Cannot allocate io_tlb_areas");
+ 
+-	swiotlb_init_io_tlb_mem(mem, __pa(tlb), nslabs, false);
++	mem->bitmap = memblock_alloc(BITS_TO_BYTES(nslabs), SMP_CACHE_BYTES);
++	if (!mem->bitmap)
++		panic("%s: Failed to allocate %lu bytes align=0x%x\n",
++		      __func__, DIV_ROUND_UP(nslabs, BITS_PER_BYTE), SMP_CACHE_BYTES);
+ 
+-	if (verbose)
++	swiotlb_init_io_tlb_mem(mem, __pa(tlb), nslabs, flags, false);
++
++	if (flags & SWIOTLB_VERBOSE)
+ 		swiotlb_print_info();
+-	swiotlb_set_max_segment(mem->nslabs << IO_TLB_SHIFT);
+-	return 0;
+ }
+ 
+-/*
+- * Statically reserve bounce buffer space and initialize bounce buffer data
+- * structures for the software IO TLB used to implement the DMA API.
+- */
+-void  __init
+-swiotlb_init(int verbose)
++void __init swiotlb_init(bool addressing_limit, unsigned int flags)
+ {
+-	size_t bytes = PAGE_ALIGN(default_nslabs << IO_TLB_SHIFT);
+-	void *tlb;
+-
+-	if (swiotlb_force == SWIOTLB_NO_FORCE)
+-		return;
+-
+-	/* Get IO TLB memory from the low pages */
+-	tlb = memblock_alloc_low(bytes, PAGE_SIZE);
+-	if (!tlb)
+-		goto fail;
+-	if (swiotlb_init_with_tbl(tlb, default_nslabs, verbose))
+-		goto fail_free_mem;
+-	return;
+-
+-fail_free_mem:
+-	memblock_free(tlb, bytes);
+-fail:
+-	pr_warn("Cannot allocate buffer");
++	return swiotlb_init_remap(addressing_limit, flags, NULL);
+ }
+ 
+ /*
+@@ -294,72 +354,74 @@ swiotlb_init(int verbose)
+  * initialize the swiotlb later using the slab allocator if needed.
+  * This should be just like above, but with some error catching.
+  */
+-int
+-swiotlb_late_init_with_default_size(size_t default_size)
++int swiotlb_init_late(size_t size, gfp_t gfp_mask,
++		int (*remap)(void *tlb, unsigned long nslabs))
+ {
+-	unsigned long nslabs =
+-		ALIGN(default_size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
+-	unsigned long bytes;
++	struct io_tlb_mem *mem = &io_tlb_default_mem;
++	unsigned long nslabs = ALIGN(size >> IO_TLB_SHIFT, IO_TLB_SEGSIZE);
+ 	unsigned char *vstart = NULL;
+ 	unsigned int order;
++	bool retried = false;
+ 	int rc = 0;
+ 
+-	if (swiotlb_force == SWIOTLB_NO_FORCE)
++	if (swiotlb_force_disable)
+ 		return 0;
+ 
+-	/*
+-	 * Get IO TLB memory from the low pages
+-	 */
++retry:
+ 	order = get_order(nslabs << IO_TLB_SHIFT);
+ 	nslabs = SLABS_PER_PAGE << order;
+-	bytes = nslabs << IO_TLB_SHIFT;
+ 
+ 	while ((SLABS_PER_PAGE << order) > IO_TLB_MIN_SLABS) {
+-		vstart = (void *)__get_free_pages(GFP_DMA | __GFP_NOWARN,
++		vstart = (void *)__get_free_pages(gfp_mask | __GFP_NOWARN,
+ 						  order);
+ 		if (vstart)
+ 			break;
+ 		order--;
++		nslabs = SLABS_PER_PAGE << order;
++		retried = true;
+ 	}
+ 
+ 	if (!vstart)
+ 		return -ENOMEM;
+ 
+-	if (order != get_order(bytes)) {
+-		pr_warn("only able to allocate %ld MB\n",
+-			(PAGE_SIZE << order) >> 20);
+-		nslabs = SLABS_PER_PAGE << order;
+-	}
+-	rc = swiotlb_late_init_with_tbl(vstart, nslabs);
+-	if (rc)
++	if (remap)
++		rc = remap(vstart, nslabs);
++	if (rc) {
+ 		free_pages((unsigned long)vstart, order);
+ 
+-	return rc;
+-}
+-
+-int
+-swiotlb_late_init_with_tbl(char *tlb, unsigned long nslabs)
+-{
+-	struct io_tlb_mem *mem = &io_tlb_default_mem;
+-	unsigned long bytes = nslabs << IO_TLB_SHIFT;
+-
+-	if (swiotlb_force == SWIOTLB_NO_FORCE)
+-		return 0;
++		nslabs = ALIGN(nslabs >> 1, IO_TLB_SEGSIZE);
++		if (nslabs < IO_TLB_MIN_SLABS)
++			return rc;
++		retried = true;
++		goto retry;
++	}
+ 
+-	/* protect against double initialization */
+-	if (WARN_ON_ONCE(mem->nslabs))
+-		return -ENOMEM;
++	if (retried) {
++		pr_warn("only able to allocate %ld MB\n",
++			(PAGE_SIZE << order) >> 20);
++	}
+ 
++	mem->bitmap = bitmap_zalloc(nslabs, GFP_KERNEL);
+ 	mem->slots = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
+ 		get_order(array_size(sizeof(*mem->slots), nslabs)));
+-	if (!mem->slots)
++	if (!mem->slots || !mem->bitmap) {
++		free_pages((unsigned long)vstart, order);
++		bitmap_free(mem->bitmap);
++		kfree(mem->slots);
+ 		return -ENOMEM;
++	}
+ 
+-	set_memory_decrypted((unsigned long)tlb, bytes >> PAGE_SHIFT);
+-	swiotlb_init_io_tlb_mem(mem, virt_to_phys(tlb), nslabs, true);
++	mem->areas = kcalloc(num_areas, sizeof(struct io_tlb_area), GFP_KERNEL);
++	if (!mem->areas) {
++		free_pages((unsigned long)mem->slots, order);
++		return -ENOMEM;
++	}
++
++	set_memory_decrypted((unsigned long)vstart,
++			     (nslabs << IO_TLB_SHIFT) >> PAGE_SHIFT);
++	swiotlb_init_io_tlb_mem(mem, virt_to_phys(vstart), nslabs, 0, true);
+ 
+ 	swiotlb_print_info();
+-	swiotlb_set_max_segment(mem->nslabs << IO_TLB_SHIFT);
+ 	return 0;
+ }
+ 
+@@ -369,6 +431,9 @@ void __init swiotlb_exit(void)
+ 	unsigned long tbl_vaddr;
+ 	size_t tbl_size, slots_size;
+ 
++	if (swiotlb_force_bounce)
++		return;
++
+ 	if (!mem->nslabs)
+ 		return;
+ 
+@@ -379,9 +444,12 @@ void __init swiotlb_exit(void)
+ 
+ 	set_memory_encrypted(tbl_vaddr, tbl_size >> PAGE_SHIFT);
+ 	if (mem->late_alloc) {
++		kfree(mem->areas);
+ 		free_pages(tbl_vaddr, get_order(tbl_size));
+ 		free_pages((unsigned long)mem->slots, get_order(slots_size));
+ 	} else {
++		memblock_free_late(__pa(mem->areas),
++				   num_areas * sizeof(struct io_tlb_area));
+ 		memblock_free_late(mem->start, tbl_size);
+ 		memblock_free_late(__pa(mem->slots), slots_size);
+ 	}
+@@ -484,57 +552,74 @@ static inline unsigned long get_max_slots(unsigned long boundary_mask)
+ 	return nr_slots(boundary_mask + 1);
+ }
+ 
+-static unsigned int wrap_index(struct io_tlb_mem *mem, unsigned int index)
++static inline unsigned long area_nslabs(struct io_tlb_mem *mem)
+ {
+-	if (index >= mem->nslabs)
+-		return 0;
+-	return index;
++	return area_index_shift ? (1UL << area_index_shift) + 1 :
++			mem->nslabs;
++}
++
++static inline unsigned int area_start(int aindex)
++{
++	return aindex << area_index_shift;
++}
++
++static inline unsigned int area_end(struct io_tlb_mem *mem, int aindex)
++{
++	return area_start(aindex) + area_nslabs(mem);
+ }
+ 
+ /*
+  * Find a suitable number of IO TLB entries size that will fit this request and
+  * allocate a buffer from that IO TLB pool.
+  */
+-static int swiotlb_find_slots(struct device *dev, phys_addr_t orig_addr,
+-			      size_t alloc_size, unsigned int alloc_align_mask)
++static int swiotlb_do_find_slots(struct io_tlb_mem *mem,
++				 struct io_tlb_area *area,
++				 struct device *dev, phys_addr_t orig_addr,
++				 size_t alloc_size,
++				 unsigned int alloc_align_mask)
+ {
+-	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
++	struct io_tlb_slot *slot, *tmp;
+ 	unsigned long boundary_mask = dma_get_seg_boundary(dev);
+ 	dma_addr_t tbl_dma_addr =
+ 		phys_to_dma_unencrypted(dev, mem->start) & boundary_mask;
++	dma_addr_t slot_dma_addr;
+ 	unsigned long max_slots = get_max_slots(boundary_mask);
+ 	unsigned int iotlb_align_mask =
+ 		dma_get_min_align_mask(dev) & ~(IO_TLB_SIZE - 1);
+-	unsigned int nslots = nr_slots(alloc_size), stride;
+-	unsigned int index, wrap, count = 0, i;
++	unsigned int nslots = nr_slots(alloc_size);
++	unsigned int index, i;
+ 	unsigned int offset = swiotlb_align_offset(dev, orig_addr);
+ 	unsigned long flags;
+ 
+ 	BUG_ON(!nslots);
+ 
+-	/*
+-	 * For mappings with an alignment requirement don't bother looping to
+-	 * unaligned slots once we found an aligned one.  For allocations of
+-	 * PAGE_SIZE or larger only look for page aligned allocations.
+-	 */
+-	stride = (iotlb_align_mask >> IO_TLB_SHIFT) + 1;
+-	if (alloc_size >= PAGE_SIZE)
+-		stride = max(stride, stride << (PAGE_SHIFT - IO_TLB_SHIFT));
+-	stride = max(stride, (alloc_align_mask >> IO_TLB_SHIFT) + 1);
++	/* slots shouldn't cross one segment */
++	max_slots = min_t(unsigned long, max_slots, IO_TLB_SEGSIZE);
+ 
+-	spin_lock_irqsave(&mem->lock, flags);
+-	if (unlikely(nslots > mem->nslabs - mem->used))
++	spin_lock_irqsave(&area->lock, flags);
++	if (unlikely(nslots > area_nslabs(mem) - area->used))
+ 		goto not_found;
+ 
+-	index = wrap = wrap_index(mem, ALIGN(mem->index, stride));
+-	do {
++	list_for_each_entry_safe(slot, tmp, &area->free_slots, node) {
++		index = slot - mem->slots;
++		slot_dma_addr = slot_addr(tbl_dma_addr, index);
+ 		if (orig_addr &&
+-		    (slot_addr(tbl_dma_addr, index) & iotlb_align_mask) !=
++		    (slot_dma_addr & iotlb_align_mask) !=
+ 			    (orig_addr & iotlb_align_mask)) {
+-			index = wrap_index(mem, index + 1);
+ 			continue;
+ 		}
+ 
++		/* Ensure requested alignment is met */
++		if (alloc_align_mask && (slot_dma_addr & (alloc_align_mask - 1)))
++			continue;
++
++		/*
++		 * If requested size is larger than a page, ensure allocated
++		 * memory to be page aligned.
++		 */
++		if (alloc_size >= PAGE_SIZE && (slot_dma_addr & ~PAGE_MASK))
++			continue;
++
+ 		/*
+ 		 * If we find a slot that indicates we have 'nslots' number of
+ 		 * contiguous buffers, we allocate the buffers from that slot
+@@ -543,40 +628,61 @@ static int swiotlb_find_slots(struct device *dev, phys_addr_t orig_addr,
+ 		if (!iommu_is_span_boundary(index, nslots,
+ 					    nr_slots(tbl_dma_addr),
+ 					    max_slots)) {
+-			if (mem->slots[index].list >= nslots)
++			if (find_next_zero_bit(mem->bitmap, index + nslots, index) ==
++					index + nslots)
+ 				goto found;
+ 		}
+-		index = wrap_index(mem, index + stride);
+-	} while (index != wrap);
+-
++	} 
++	
+ not_found:
+-	spin_unlock_irqrestore(&mem->lock, flags);
++	spin_unlock_irqrestore(&area->lock, flags);
+ 	return -1;
+ 
+ found:
+ 	for (i = index; i < index + nslots; i++) {
+-		mem->slots[i].list = 0;
++		__clear_bit(i, mem->bitmap);
+ 		mem->slots[i].alloc_size =
+ 			alloc_size - (offset + ((i - index) << IO_TLB_SHIFT));
++		list_del(&mem->slots[i].node);
+ 	}
+-	for (i = index - 1;
+-	     io_tlb_offset(i) != IO_TLB_SEGSIZE - 1 &&
+-	     mem->slots[i].list; i--)
+-		mem->slots[i].list = ++count;
+ 
+-	/*
+-	 * Update the indices to avoid searching in the next round.
+-	 */
+-	if (index + nslots < mem->nslabs)
+-		mem->index = index + nslots;
+-	else
+-		mem->index = 0;
+-	mem->used += nslots;
++	area->used += nslots;
+ 
+-	spin_unlock_irqrestore(&mem->lock, flags);
++	spin_unlock_irqrestore(&area->lock, flags);
+ 	return index;
+ }
+ 
++static int swiotlb_find_slots(struct device *dev, phys_addr_t orig_addr,
++			      size_t alloc_size, unsigned int alloc_align_mask)
++{
++	struct io_tlb_mem *mem = dev->dma_io_tlb_mem;
++	int start = raw_smp_processor_id() & ((1U << area_bits) - 1);
++	int i, index;
++
++	i = start;
++	do {
++		index = swiotlb_do_find_slots(mem, mem->areas + i,
++					      dev, orig_addr, alloc_size,
++					      alloc_align_mask);
++		if (index >= 0)
++			return index;
++		if (++i >= num_areas)
++			i = 0;
++	} while (i != start);
++	return -1;
++}
++
++/* Somewhat racy estimate */
++static unsigned long mem_used(struct io_tlb_mem *mem)
++{
++	int i;
++	unsigned long used = 0;
++
++	for (i = 0; i < num_areas; i++)
++		used += mem->areas[i].used;
++	return used;
++}
++
+ phys_addr_t swiotlb_tbl_map_single(struct device *dev, phys_addr_t orig_addr,
+ 		size_t mapping_size, size_t alloc_size,
+ 		unsigned int alloc_align_mask, enum dma_data_direction dir,
+@@ -606,7 +712,7 @@ phys_addr_t swiotlb_tbl_map_single(struct device *dev, phys_addr_t orig_addr,
+ 		if (!(attrs & DMA_ATTR_NO_WARN))
+ 			dev_warn_ratelimited(dev,
+ 	"swiotlb buffer is full (sz: %zd bytes), total %lu (slots), used %lu (slots)\n",
+-				 alloc_size, mem->nslabs, mem->used);
++				 alloc_size, mem->nslabs, mem_used(mem));
+ 		return (phys_addr_t)DMA_MAPPING_ERROR;
+ 	}
+ 
+@@ -636,40 +742,27 @@ static void swiotlb_release_slots(struct device *dev, phys_addr_t tlb_addr)
+ 	unsigned int offset = swiotlb_align_offset(dev, tlb_addr);
+ 	int index = (tlb_addr - offset - mem->start) >> IO_TLB_SHIFT;
+ 	int nslots = nr_slots(mem->slots[index].alloc_size + offset);
+-	int count, i;
++	int aindex = area_index_shift ? index >> area_index_shift : 0;
++	struct io_tlb_area *area = mem->areas + aindex;
++	int i;
+ 
+-	/*
+-	 * Return the buffer to the free list by setting the corresponding
+-	 * entries to indicate the number of contiguous entries available.
+-	 * While returning the entries to the free list, we merge the entries
+-	 * with slots below and above the pool being returned.
+-	 */
+-	spin_lock_irqsave(&mem->lock, flags);
+-	if (index + nslots < ALIGN(index + 1, IO_TLB_SEGSIZE))
+-		count = mem->slots[index + nslots].list;
+-	else
+-		count = 0;
++	WARN_ON(aindex >= num_areas);
++
++	spin_lock_irqsave(&area->lock, flags);
+ 
+ 	/*
+-	 * Step 1: return the slots to the free list, merging the slots with
+-	 * superceeding slots
++	 * Return the slots to swiotlb, updating bitmap to indicate
++	 * corresponding entries are free.
+ 	 */
+ 	for (i = index + nslots - 1; i >= index; i--) {
+-		mem->slots[i].list = ++count;
++		__set_bit(i, mem->bitmap);
+ 		mem->slots[i].orig_addr = INVALID_PHYS_ADDR;
+ 		mem->slots[i].alloc_size = 0;
++		list_add(&mem->slots[i].node, &area->free_slots);
+ 	}
+ 
+-	/*
+-	 * Step 2: merge the returned slots with the preceding slots, if
+-	 * available (non zero)
+-	 */
+-	for (i = index - 1;
+-	     io_tlb_offset(i) != IO_TLB_SEGSIZE - 1 && mem->slots[i].list;
+-	     i--)
+-		mem->slots[i].list = ++count;
+-	mem->used -= nslots;
+-	spin_unlock_irqrestore(&mem->lock, flags);
++	area->used -= nslots;
++	spin_unlock_irqrestore(&area->lock, flags);
+ }
+ 
+ /*
+@@ -717,8 +810,7 @@ dma_addr_t swiotlb_map(struct device *dev, phys_addr_t paddr, size_t size,
+ 	phys_addr_t swiotlb_addr;
+ 	dma_addr_t dma_addr;
+ 
+-	trace_swiotlb_bounced(dev, phys_to_dma(dev, paddr), size,
+-			      swiotlb_force);
++	trace_swiotlb_bounced(dev, phys_to_dma(dev, paddr), size);
+ 
+ 	swiotlb_addr = swiotlb_tbl_map_single(dev, paddr, size, size, 0, dir,
+ 			attrs);
+@@ -743,7 +835,18 @@ dma_addr_t swiotlb_map(struct device *dev, phys_addr_t paddr, size_t size,
+ 
+ size_t swiotlb_max_mapping_size(struct device *dev)
+ {
+-	return ((size_t)IO_TLB_SIZE) * IO_TLB_SEGSIZE;
++	int min_align_mask = dma_get_min_align_mask(dev);
++	int min_align = 0;
++
++	/*
++	 * swiotlb_find_slots() skips slots according to
++	 * min align mask. This affects max mapping size.
++	 * Take it into acount here.
++	 */
++	if (min_align_mask)
++		min_align = roundup(min_align_mask, IO_TLB_SIZE);
++
++	return ((size_t)IO_TLB_SIZE) * IO_TLB_SEGSIZE - min_align;
+ }
+ 
+ bool is_swiotlb_active(struct device *dev)
+@@ -754,6 +857,15 @@ bool is_swiotlb_active(struct device *dev)
+ }
+ EXPORT_SYMBOL_GPL(is_swiotlb_active);
+ 
++static int used_get(void *data, u64 *val)
++{
++	struct io_tlb_mem *mem = (struct io_tlb_mem *)data;
++	*val = mem_used(mem);
++	return 0;
++}
++
++DEFINE_DEBUGFS_ATTRIBUTE(used_fops, used_get, NULL, "%llu\n");
++
+ static void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
+ 					 const char *dirname)
+ {
+@@ -762,7 +874,7 @@ static void swiotlb_create_debugfs_files(struct io_tlb_mem *mem,
+ 		return;
+ 
+ 	debugfs_create_ulong("io_tlb_nslabs", 0400, mem->debugfs, &mem->nslabs);
+-	debugfs_create_ulong("io_tlb_used", 0400, mem->debugfs, &mem->used);
++	debugfs_create_file("io_tlb_used", 0400, mem->debugfs, mem, &used_fops);
+ }
+ 
+ static int __init __maybe_unused swiotlb_create_default_debugfs(void)
+@@ -824,15 +936,18 @@ static int rmem_swiotlb_device_init(struct reserved_mem *rmem,
+ 			return -ENOMEM;
+ 
+ 		mem->slots = kcalloc(nslabs, sizeof(*mem->slots), GFP_KERNEL);
+-		if (!mem->slots) {
++		mem->bitmap = bitmap_zalloc(nslabs, GFP_KERNEL);
++		if (!mem->slots || !mem->bitmap) {
++			kfree(mem->slots);
++			bitmap_free(mem->bitmap);
+ 			kfree(mem);
+ 			return -ENOMEM;
+ 		}
+ 
+ 		set_memory_decrypted((unsigned long)phys_to_virt(rmem->base),
+ 				     rmem->size >> PAGE_SHIFT);
+-		swiotlb_init_io_tlb_mem(mem, rmem->base, nslabs, false);
+-		mem->force_bounce = true;
++		swiotlb_init_io_tlb_mem(mem, rmem->base, nslabs, SWIOTLB_FORCE,
++				false);
+ 		mem->for_alloc = true;
+ 
+ 		rmem->priv = mem;
+-- 
+2.37.0
+
