@@ -1,0 +1,517 @@
+From ed0691cf55140ce0f3fb100225645d902cce904b Mon Sep 17 00:00:00 2001
+From: Sagi Grimberg <sagi@grimberg.me>
+Date: Fri, 24 Jun 2022 00:49:53 +0300
+Subject: [PATCH 1/6] nvmet-tcp: fix regression in data_digest calculation
+
+Data digest calculation iterates over command mapped iovec. However
+since commit bac04454ef9f we unmap the iovec before we handle the data
+digest, and since commit 69b85e1f1d1d we clear nr_mapped when we unmap
+the iov.
+
+Instead of open-coding the command iov traversal, simply call
+crypto_ahash_digest with the command sg that is already allocated (we
+already do that for the send path). Rename nvmet_tcp_send_ddgst to
+nvmet_tcp_calc_ddgst and call it from send and recv paths.
+
+Fixes: 69b85e1f1d1d ("nvmet-tcp: add an helper to free the cmd buffers")
+Fixes: bac04454ef9f ("nvmet-tcp: fix kmap leak when data digest in use")
+Signed-off-by: Sagi Grimberg <sagi@grimberg.me>
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+---
+ drivers/nvme/target/tcp.c | 23 +++--------------------
+ 1 file changed, 3 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/nvme/target/tcp.c b/drivers/nvme/target/tcp.c
+index 2793554e622ee6..0a9542599ad1c9 100644
+--- a/drivers/nvme/target/tcp.c
++++ b/drivers/nvme/target/tcp.c
+@@ -405,7 +405,7 @@ static int nvmet_tcp_map_data(struct nvmet_tcp_cmd *cmd)
+ 	return NVME_SC_INTERNAL;
+ }
+ 
+-static void nvmet_tcp_send_ddgst(struct ahash_request *hash,
++static void nvmet_tcp_calc_ddgst(struct ahash_request *hash,
+ 		struct nvmet_tcp_cmd *cmd)
+ {
+ 	ahash_request_set_crypt(hash, cmd->req.sg,
+@@ -413,23 +413,6 @@ static void nvmet_tcp_send_ddgst(struct ahash_request *hash,
+ 	crypto_ahash_digest(hash);
+ }
+ 
+-static void nvmet_tcp_recv_ddgst(struct ahash_request *hash,
+-		struct nvmet_tcp_cmd *cmd)
+-{
+-	struct scatterlist sg;
+-	struct kvec *iov;
+-	int i;
+-
+-	crypto_ahash_init(hash);
+-	for (i = 0, iov = cmd->iov; i < cmd->nr_mapped; i++, iov++) {
+-		sg_init_one(&sg, iov->iov_base, iov->iov_len);
+-		ahash_request_set_crypt(hash, &sg, NULL, iov->iov_len);
+-		crypto_ahash_update(hash);
+-	}
+-	ahash_request_set_crypt(hash, NULL, (void *)&cmd->exp_ddgst, 0);
+-	crypto_ahash_final(hash);
+-}
+-
+ static void nvmet_setup_c2h_data_pdu(struct nvmet_tcp_cmd *cmd)
+ {
+ 	struct nvme_tcp_data_pdu *pdu = cmd->data_pdu;
+@@ -454,7 +437,7 @@ static void nvmet_setup_c2h_data_pdu(struct nvmet_tcp_cmd *cmd)
+ 
+ 	if (queue->data_digest) {
+ 		pdu->hdr.flags |= NVME_TCP_F_DDGST;
+-		nvmet_tcp_send_ddgst(queue->snd_hash, cmd);
++		nvmet_tcp_calc_ddgst(queue->snd_hash, cmd);
+ 	}
+ 
+ 	if (cmd->queue->hdr_digest) {
+@@ -1137,7 +1120,7 @@ static void nvmet_tcp_prep_recv_ddgst(struct nvmet_tcp_cmd *cmd)
+ {
+ 	struct nvmet_tcp_queue *queue = cmd->queue;
+ 
+-	nvmet_tcp_recv_ddgst(queue->rcv_hash, cmd);
++	nvmet_tcp_calc_ddgst(queue->rcv_hash, cmd);
+ 	queue->offset = 0;
+ 	queue->left = NVME_TCP_DIGEST_LENGTH;
+ 	queue->rcv_state = NVMET_TCP_RECV_DDGST;
+
+From 41d07df7de841bfbc32725ce21d933ad358f2844 Mon Sep 17 00:00:00 2001
+From: Sagi Grimberg <sagi@grimberg.me>
+Date: Sun, 26 Jun 2022 12:24:51 +0300
+Subject: [PATCH 2/6] nvme-tcp: always fail a request when sending it failed
+
+queue stoppage and inflight requests cancellation is fully fenced from
+io_work and thus failing a request from this context. Hence we don't
+need to try to guess from the socket retcode if this failure is because
+the queue is about to be torn down or not.
+
+We are perfectly safe to just fail it, the request will not be cancelled
+later on.
+
+This solves possible very long shutdown delays when the users issues a
+'nvme disconnect-all'
+
+Reported-by: Daniel Wagner <dwagner@suse.de>
+Signed-off-by: Sagi Grimberg <sagi@grimberg.me>
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+---
+ drivers/nvme/host/tcp.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/nvme/host/tcp.c b/drivers/nvme/host/tcp.c
+index bb67538d241b65..009c2cf3f1068f 100644
+--- a/drivers/nvme/host/tcp.c
++++ b/drivers/nvme/host/tcp.c
+@@ -1180,8 +1180,7 @@ static int nvme_tcp_try_send(struct nvme_tcp_queue *queue)
+ 	} else if (ret < 0) {
+ 		dev_err(queue->ctrl->ctrl.device,
+ 			"failed to send request %d\n", ret);
+-		if (ret != -EPIPE && ret != -ECONNRESET)
+-			nvme_tcp_fail_request(queue->request);
++		nvme_tcp_fail_request(queue->request);
+ 		nvme_tcp_done_send_req(queue);
+ 	}
+ 	return ret;
+
+From 1629de0e0373e04d68e88e6d9d3071fbf70b7ea8 Mon Sep 17 00:00:00 2001
+From: Pablo Greco <pgreco@centosproject.org>
+Date: Sat, 25 Jun 2022 09:15:02 -0300
+Subject: [PATCH 3/6] nvme-pci: add NVME_QUIRK_BOGUS_NID for ADATA XPG
+ SX6000LNP (AKA SPECTRIX S40G)
+
+ADATA XPG SPECTRIX S40G drives report bogus eui64 values that appear to
+be the same across drives in one system. Quirk them out so they are
+not marked as "non globally unique" duplicates.
+
+Before:
+[    2.258919] nvme nvme1: pci function 0000:06:00.0
+[    2.264898] nvme nvme2: pci function 0000:05:00.0
+[    2.323235] nvme nvme1: failed to set APST feature (2)
+[    2.326153] nvme nvme2: failed to set APST feature (2)
+[    2.333935] nvme nvme1: allocated 64 MiB host memory buffer.
+[    2.336492] nvme nvme2: allocated 64 MiB host memory buffer.
+[    2.339611] nvme nvme1: 7/0/0 default/read/poll queues
+[    2.341805] nvme nvme2: 7/0/0 default/read/poll queues
+[    2.346114]  nvme1n1: p1
+[    2.347197] nvme nvme2: globally duplicate IDs for nsid 1
+After:
+[    2.427715] nvme nvme1: pci function 0000:06:00.0
+[    2.427771] nvme nvme2: pci function 0000:05:00.0
+[    2.488154] nvme nvme2: failed to set APST feature (2)
+[    2.489895] nvme nvme1: failed to set APST feature (2)
+[    2.498773] nvme nvme2: allocated 64 MiB host memory buffer.
+[    2.500587] nvme nvme1: allocated 64 MiB host memory buffer.
+[    2.504113] nvme nvme2: 7/0/0 default/read/poll queues
+[    2.507026] nvme nvme1: 7/0/0 default/read/poll queues
+[    2.509467] nvme nvme2: Ignoring bogus Namespace Identifiers
+[    2.512804] nvme nvme1: Ignoring bogus Namespace Identifiers
+[    2.513698]  nvme1n1: p1
+
+Signed-off-by: Pablo Greco <pgreco@centosproject.org>
+Reviewed-by: Keith Busch <kbusch@kernel.org>
+Reviewed-by: Chaitanya Kulkarni <kch@nvidia.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+---
+ drivers/nvme/host/pci.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index d7b24ee1728599..c9ebe60724980e 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -3470,7 +3470,8 @@ static const struct pci_device_id nvme_id_table[] = {
+ 		.driver_data = NVME_QUIRK_NO_NS_DESC_LIST |
+ 				NVME_QUIRK_IGNORE_DEV_SUBNQN, },
+ 	{ PCI_DEVICE(0x10ec, 0x5762),   /* ADATA SX6000LNP */
+-		.driver_data = NVME_QUIRK_IGNORE_DEV_SUBNQN, },
++		.driver_data = NVME_QUIRK_IGNORE_DEV_SUBNQN |
++				NVME_QUIRK_BOGUS_NID, },
+ 	{ PCI_DEVICE(0x1cc1, 0x8201),   /* ADATA SX8200PNP 512GB */
+ 		.driver_data = NVME_QUIRK_NO_DEEPEST_PS |
+ 				NVME_QUIRK_IGNORE_DEV_SUBNQN, },
+
+From f7f70f4aa09dc43d7455c060143e86a017c30548 Mon Sep 17 00:00:00 2001
+From: Ruozhu Li <liruozhu@huawei.com>
+Date: Thu, 23 Jun 2022 14:45:39 +0800
+Subject: [PATCH 4/6] nvme: fix regression when disconnect a recovering ctrl
+
+We encountered a problem that the disconnect command hangs.
+After analyzing the log and stack, we found that the triggering
+process is as follows:
+CPU0                          CPU1
+                                nvme_rdma_error_recovery_work
+                                  nvme_rdma_teardown_io_queues
+nvme_do_delete_ctrl                 nvme_stop_queues
+  nvme_remove_namespaces
+  --clear ctrl->namespaces
+                                    nvme_start_queues
+                                    --no ns in ctrl->namespaces
+    nvme_ns_remove                  return(because ctrl is deleting)
+      blk_freeze_queue
+        blk_mq_freeze_queue_wait
+        --wait for ns to unquiesce to clean infligt IO, hang forever
+
+This problem was not found in older kernels because we will flush
+err work in nvme_stop_ctrl before nvme_remove_namespaces.It does not
+seem to be modified for functional reasons, the patch can be revert
+to solve the problem.
+
+Revert commit 794a4cb3d2f7 ("nvme: remove the .stop_ctrl callout")
+
+Signed-off-by: Ruozhu Li <liruozhu@huawei.com>
+Reviewed-by: Sagi Grimberg <sagi@grimberg.me>
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+---
+ drivers/nvme/host/core.c |  2 ++
+ drivers/nvme/host/nvme.h |  1 +
+ drivers/nvme/host/rdma.c | 12 +++++++++---
+ drivers/nvme/host/tcp.c  | 10 +++++++---
+ 4 files changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/nvme/host/core.c b/drivers/nvme/host/core.c
+index b3d9c29aba1e6a..ec6ac298d8de2b 100644
+--- a/drivers/nvme/host/core.c
++++ b/drivers/nvme/host/core.c
+@@ -4595,6 +4595,8 @@ void nvme_stop_ctrl(struct nvme_ctrl *ctrl)
+ 	nvme_stop_failfast_work(ctrl);
+ 	flush_work(&ctrl->async_event_work);
+ 	cancel_work_sync(&ctrl->fw_act_work);
++	if (ctrl->ops->stop_ctrl)
++		ctrl->ops->stop_ctrl(ctrl);
+ }
+ EXPORT_SYMBOL_GPL(nvme_stop_ctrl);
+ 
+diff --git a/drivers/nvme/host/nvme.h b/drivers/nvme/host/nvme.h
+index 0da94b233feda8..5558f88121579d 100644
+--- a/drivers/nvme/host/nvme.h
++++ b/drivers/nvme/host/nvme.h
+@@ -502,6 +502,7 @@ struct nvme_ctrl_ops {
+ 	void (*free_ctrl)(struct nvme_ctrl *ctrl);
+ 	void (*submit_async_event)(struct nvme_ctrl *ctrl);
+ 	void (*delete_ctrl)(struct nvme_ctrl *ctrl);
++	void (*stop_ctrl)(struct nvme_ctrl *ctrl);
+ 	int (*get_address)(struct nvme_ctrl *ctrl, char *buf, int size);
+ 	void (*print_device_info)(struct nvme_ctrl *ctrl);
+ };
+diff --git a/drivers/nvme/host/rdma.c b/drivers/nvme/host/rdma.c
+index f2a5e1ea508a7a..46c2dcf72f7ea4 100644
+--- a/drivers/nvme/host/rdma.c
++++ b/drivers/nvme/host/rdma.c
+@@ -1048,6 +1048,14 @@ static void nvme_rdma_teardown_io_queues(struct nvme_rdma_ctrl *ctrl,
+ 	}
+ }
+ 
++static void nvme_rdma_stop_ctrl(struct nvme_ctrl *nctrl)
++{
++	struct nvme_rdma_ctrl *ctrl = to_rdma_ctrl(nctrl);
++
++	cancel_work_sync(&ctrl->err_work);
++	cancel_delayed_work_sync(&ctrl->reconnect_work);
++}
++
+ static void nvme_rdma_free_ctrl(struct nvme_ctrl *nctrl)
+ {
+ 	struct nvme_rdma_ctrl *ctrl = to_rdma_ctrl(nctrl);
+@@ -2252,9 +2260,6 @@ static const struct blk_mq_ops nvme_rdma_admin_mq_ops = {
+ 
+ static void nvme_rdma_shutdown_ctrl(struct nvme_rdma_ctrl *ctrl, bool shutdown)
+ {
+-	cancel_work_sync(&ctrl->err_work);
+-	cancel_delayed_work_sync(&ctrl->reconnect_work);
+-
+ 	nvme_rdma_teardown_io_queues(ctrl, shutdown);
+ 	nvme_stop_admin_queue(&ctrl->ctrl);
+ 	if (shutdown)
+@@ -2304,6 +2309,7 @@ static const struct nvme_ctrl_ops nvme_rdma_ctrl_ops = {
+ 	.submit_async_event	= nvme_rdma_submit_async_event,
+ 	.delete_ctrl		= nvme_rdma_delete_ctrl,
+ 	.get_address		= nvmf_get_address,
++	.stop_ctrl		= nvme_rdma_stop_ctrl,
+ };
+ 
+ /*
+diff --git a/drivers/nvme/host/tcp.c b/drivers/nvme/host/tcp.c
+index 009c2cf3f1068f..7a9e6ffa234290 100644
+--- a/drivers/nvme/host/tcp.c
++++ b/drivers/nvme/host/tcp.c
+@@ -2193,9 +2193,6 @@ static void nvme_tcp_error_recovery_work(struct work_struct *work)
+ 
+ static void nvme_tcp_teardown_ctrl(struct nvme_ctrl *ctrl, bool shutdown)
+ {
+-	cancel_work_sync(&to_tcp_ctrl(ctrl)->err_work);
+-	cancel_delayed_work_sync(&to_tcp_ctrl(ctrl)->connect_work);
+-
+ 	nvme_tcp_teardown_io_queues(ctrl, shutdown);
+ 	nvme_stop_admin_queue(ctrl);
+ 	if (shutdown)
+@@ -2235,6 +2232,12 @@ static void nvme_reset_ctrl_work(struct work_struct *work)
+ 	nvme_tcp_reconnect_or_remove(ctrl);
+ }
+ 
++static void nvme_tcp_stop_ctrl(struct nvme_ctrl *ctrl)
++{
++	cancel_work_sync(&to_tcp_ctrl(ctrl)->err_work);
++	cancel_delayed_work_sync(&to_tcp_ctrl(ctrl)->connect_work);
++}
++
+ static void nvme_tcp_free_ctrl(struct nvme_ctrl *nctrl)
+ {
+ 	struct nvme_tcp_ctrl *ctrl = to_tcp_ctrl(nctrl);
+@@ -2556,6 +2559,7 @@ static const struct nvme_ctrl_ops nvme_tcp_ctrl_ops = {
+ 	.submit_async_event	= nvme_tcp_submit_async_event,
+ 	.delete_ctrl		= nvme_tcp_delete_ctrl,
+ 	.get_address		= nvmf_get_address,
++	.stop_ctrl		= nvme_tcp_stop_ctrl,
+ };
+ 
+ static bool
+
+From 34ad61514c4c3657df21a058f9961c3bb2f84ff2 Mon Sep 17 00:00:00 2001
+From: Alan Adamson <alan.adamson@oracle.com>
+Date: Mon, 27 Jun 2022 16:25:43 -0700
+Subject: [PATCH 5/6] nvmet: add a clear_ids attribute for passthru targets
+
+If the clear_ids attribute is set to true, the EUI/GUID/UUID is cleared
+for the passthru target.  By default, loop targets will set clear_ids to
+true.
+
+This resolves an issue where a connect to a passthru target fails when
+using a trtype of 'loop' because EUI/GUID/UUID is not unique.
+
+Fixes: 2079f41ec6ff ("nvme: check that EUI/GUID/UUID are globally unique")
+Signed-off-by: Alan Adamson <alan.adamson@oracle.com>
+Reviewed-by: Keith Busch <kbusch@kernel.org>
+Reviewed-by: Chaitanya Kulkarni <kch@nvidia.com>
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+---
+ drivers/nvme/target/configfs.c | 20 +++++++++++++
+ drivers/nvme/target/core.c     |  6 ++++
+ drivers/nvme/target/nvmet.h    |  1 +
+ drivers/nvme/target/passthru.c | 55 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 82 insertions(+)
+
+diff --git a/drivers/nvme/target/configfs.c b/drivers/nvme/target/configfs.c
+index e44b2988759ec2..ff77c3d2354fa4 100644
+--- a/drivers/nvme/target/configfs.c
++++ b/drivers/nvme/target/configfs.c
+@@ -773,11 +773,31 @@ static ssize_t nvmet_passthru_io_timeout_store(struct config_item *item,
+ }
+ CONFIGFS_ATTR(nvmet_passthru_, io_timeout);
+ 
++static ssize_t nvmet_passthru_clear_ids_show(struct config_item *item,
++		char *page)
++{
++	return sprintf(page, "%u\n", to_subsys(item->ci_parent)->clear_ids);
++}
++
++static ssize_t nvmet_passthru_clear_ids_store(struct config_item *item,
++		const char *page, size_t count)
++{
++	struct nvmet_subsys *subsys = to_subsys(item->ci_parent);
++	unsigned int clear_ids;
++
++	if (kstrtouint(page, 0, &clear_ids))
++		return -EINVAL;
++	subsys->clear_ids = clear_ids;
++	return count;
++}
++CONFIGFS_ATTR(nvmet_passthru_, clear_ids);
++
+ static struct configfs_attribute *nvmet_passthru_attrs[] = {
+ 	&nvmet_passthru_attr_device_path,
+ 	&nvmet_passthru_attr_enable,
+ 	&nvmet_passthru_attr_admin_timeout,
+ 	&nvmet_passthru_attr_io_timeout,
++	&nvmet_passthru_attr_clear_ids,
+ 	NULL,
+ };
+ 
+diff --git a/drivers/nvme/target/core.c b/drivers/nvme/target/core.c
+index 90e75324dae056..c27660a660d9ae 100644
+--- a/drivers/nvme/target/core.c
++++ b/drivers/nvme/target/core.c
+@@ -1374,6 +1374,12 @@ u16 nvmet_alloc_ctrl(const char *subsysnqn, const char *hostnqn,
+ 	ctrl->port = req->port;
+ 	ctrl->ops = req->ops;
+ 
++#ifdef CONFIG_NVME_TARGET_PASSTHRU
++	/* By default, set loop targets to clear IDS by default */
++	if (ctrl->port->disc_addr.trtype == NVMF_TRTYPE_LOOP)
++		subsys->clear_ids = 1;
++#endif
++
+ 	INIT_WORK(&ctrl->async_event_work, nvmet_async_event_work);
+ 	INIT_LIST_HEAD(&ctrl->async_events);
+ 	INIT_RADIX_TREE(&ctrl->p2p_ns_map, GFP_KERNEL);
+diff --git a/drivers/nvme/target/nvmet.h b/drivers/nvme/target/nvmet.h
+index 69818752a33a58..2b3e5719f24e4c 100644
+--- a/drivers/nvme/target/nvmet.h
++++ b/drivers/nvme/target/nvmet.h
+@@ -249,6 +249,7 @@ struct nvmet_subsys {
+ 	struct config_group	passthru_group;
+ 	unsigned int		admin_timeout;
+ 	unsigned int		io_timeout;
++	unsigned int		clear_ids;
+ #endif /* CONFIG_NVME_TARGET_PASSTHRU */
+ 
+ #ifdef CONFIG_BLK_DEV_ZONED
+diff --git a/drivers/nvme/target/passthru.c b/drivers/nvme/target/passthru.c
+index b1f7efab391803..6f39a29828b122 100644
+--- a/drivers/nvme/target/passthru.c
++++ b/drivers/nvme/target/passthru.c
+@@ -30,6 +30,53 @@ void nvmet_passthrough_override_cap(struct nvmet_ctrl *ctrl)
+ 		ctrl->cap &= ~(1ULL << 43);
+ }
+ 
++static u16 nvmet_passthru_override_id_descs(struct nvmet_req *req)
++{
++	struct nvmet_ctrl *ctrl = req->sq->ctrl;
++	u16 status = NVME_SC_SUCCESS;
++	int pos, len;
++	bool csi_seen = false;
++	void *data;
++	u8 csi;
++
++	if (!ctrl->subsys->clear_ids)
++		return status;
++
++	data = kzalloc(NVME_IDENTIFY_DATA_SIZE, GFP_KERNEL);
++	if (!data)
++		return NVME_SC_INTERNAL;
++
++	status = nvmet_copy_from_sgl(req, 0, data, NVME_IDENTIFY_DATA_SIZE);
++	if (status)
++		goto out_free;
++
++	for (pos = 0; pos < NVME_IDENTIFY_DATA_SIZE; pos += len) {
++		struct nvme_ns_id_desc *cur = data + pos;
++
++		if (cur->nidl == 0)
++			break;
++		if (cur->nidt == NVME_NIDT_CSI) {
++			memcpy(&csi, cur + 1, NVME_NIDT_CSI_LEN);
++			csi_seen = true;
++			break;
++		}
++		len = sizeof(struct nvme_ns_id_desc) + cur->nidl;
++	}
++
++	memset(data, 0, NVME_IDENTIFY_DATA_SIZE);
++	if (csi_seen) {
++		struct nvme_ns_id_desc *cur = data;
++
++		cur->nidt = NVME_NIDT_CSI;
++		cur->nidl = NVME_NIDT_CSI_LEN;
++		memcpy(cur + 1, &csi, NVME_NIDT_CSI_LEN);
++	}
++	status = nvmet_copy_to_sgl(req, 0, data, NVME_IDENTIFY_DATA_SIZE);
++out_free:
++	kfree(data);
++	return status;
++}
++
+ static u16 nvmet_passthru_override_id_ctrl(struct nvmet_req *req)
+ {
+ 	struct nvmet_ctrl *ctrl = req->sq->ctrl;
+@@ -152,6 +199,11 @@ static u16 nvmet_passthru_override_id_ns(struct nvmet_req *req)
+ 	 */
+ 	id->mc = 0;
+ 
++	if (req->sq->ctrl->subsys->clear_ids) {
++		memset(id->nguid, 0, NVME_NIDT_NGUID_LEN);
++		memset(id->eui64, 0, NVME_NIDT_EUI64_LEN);
++	}
++
+ 	status = nvmet_copy_to_sgl(req, 0, id, sizeof(*id));
+ 
+ out_free:
+@@ -176,6 +228,9 @@ static void nvmet_passthru_execute_cmd_work(struct work_struct *w)
+ 		case NVME_ID_CNS_NS:
+ 			nvmet_passthru_override_id_ns(req);
+ 			break;
++		case NVME_ID_CNS_NS_DESC_LIST:
++			nvmet_passthru_override_id_descs(req);
++			break;
+ 		}
+ 	} else if (status < 0)
+ 		status = NVME_SC_INTERNAL;
+
+From e1c70d79346356bb1ede3f79436df80917845ab9 Mon Sep 17 00:00:00 2001
+From: Lamarque Vieira Souza <lamarque@petrosoftdesign.com>
+Date: Wed, 29 Jun 2022 21:30:53 -0300
+Subject: [PATCH 6/6] nvme-pci: add NVME_QUIRK_BOGUS_NID for ADATA IM2P33F8ABR1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ADATA IM2P33F8ABR1 reports bogus eui64 values that appear to be the same
+across all drives. Quirk them out so they are not marked as "non globally
+unique" duplicates.
+
+Co-developed-by: Felipe de Jesus Araujo da Conceição <felipe.conceicao@petrosoftdesign.com>
+Signed-off-by: Felipe de Jesus Araujo da Conceição <felipe.conceicao@petrosoftdesign.com>
+Signed-off-by: Lamarque V. Souza <lamarque.souza@petrosoftdesign.com>
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Christoph Hellwig <hch@lst.de>
+---
+ drivers/nvme/host/pci.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/nvme/host/pci.c b/drivers/nvme/host/pci.c
+index c9ebe60724980e..e7af2234e53b93 100644
+--- a/drivers/nvme/host/pci.c
++++ b/drivers/nvme/host/pci.c
+@@ -3469,6 +3469,8 @@ static const struct pci_device_id nvme_id_table[] = {
+ 	{ PCI_DEVICE(0x1b4b, 0x1092),	/* Lexar 256 GB SSD */
+ 		.driver_data = NVME_QUIRK_NO_NS_DESC_LIST |
+ 				NVME_QUIRK_IGNORE_DEV_SUBNQN, },
++	{ PCI_DEVICE(0x1cc1, 0x33f8),   /* ADATA IM2P33F8ABR1 1 TB */
++		.driver_data = NVME_QUIRK_BOGUS_NID, },
+ 	{ PCI_DEVICE(0x10ec, 0x5762),   /* ADATA SX6000LNP */
+ 		.driver_data = NVME_QUIRK_IGNORE_DEV_SUBNQN |
+ 				NVME_QUIRK_BOGUS_NID, },
+

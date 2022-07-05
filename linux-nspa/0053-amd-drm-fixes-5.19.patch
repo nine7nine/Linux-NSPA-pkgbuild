@@ -1,0 +1,185 @@
+From bbba251577b27422ebe173e1bd006424d6a8cfb3 Mon Sep 17 00:00:00 2001
+From: Alex Deucher <alexander.deucher@amd.com>
+Date: Thu, 16 Jun 2022 16:52:01 -0400
+Subject: [PATCH 1/4] drm/amdgpu: fix adev variable used in
+ amdgpu_device_gpu_recover()
+
+Use the correct adev variable for the drm_fb_helper in
+amdgpu_device_gpu_recover().  Noticed by inspection.
+
+Fixes: 087451f372bf ("drm/amdgpu: use generic fb helpers instead of setting up AMD own's.")
+Reviewed-by: Guchun Chen <guchun.chen@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_device.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c
+index 625424f3082b6b..58df107e3bebac 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c
+@@ -5164,7 +5164,7 @@ int amdgpu_device_gpu_recover_imp(struct amdgpu_device *adev,
+ 		 */
+ 		amdgpu_unregister_gpu_instance(tmp_adev);
+ 
+-		drm_fb_helper_set_suspend_unlocked(adev_to_drm(adev)->fb_helper, true);
++		drm_fb_helper_set_suspend_unlocked(adev_to_drm(tmp_adev)->fb_helper, true);
+ 
+ 		/* disable ras on ALL IPs */
+ 		if (!need_emergency_restart &&
+
+From 20b8264394b33adb1640a485a62a84bc1388b6a3 Mon Sep 17 00:00:00 2001
+From: Carlos Llamas <cmllamas@google.com>
+Date: Tue, 21 Jun 2022 20:39:21 +0000
+Subject: [PATCH 2/4] drm/fourcc: fix integer type usage in uapi header
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Kernel uapi headers are supposed to use __[us]{8,16,32,64} types defined
+by <linux/types.h> as opposed to 'uint32_t' and similar. See [1] for the
+relevant discussion about this topic. In this particular case, the usage
+of 'uint64_t' escaped headers_check as these macros are not being called
+here. However, the following program triggers a compilation error:
+
+  #include <drm/drm_fourcc.h>
+
+  int main()
+  {
+  	unsigned long x = AMD_FMT_MOD_CLEAR(RB);
+  	return 0;
+  }
+
+gcc error:
+  drm.c:5:27: error: ‘uint64_t’ undeclared (first use in this function)
+      5 |         unsigned long x = AMD_FMT_MOD_CLEAR(RB);
+        |                           ^~~~~~~~~~~~~~~~~
+
+This patch changes AMD_FMT_MOD_{SET,CLEAR} macros to use the correct
+integer types, which fixes the above issue.
+
+  [1] https://lkml.org/lkml/2019/6/5/18
+
+Fixes: 8ba16d599374 ("drm/fourcc: Add AMD DRM modifiers.")
+Signed-off-by: Carlos Llamas <cmllamas@google.com>
+Reviewed-by: Simon Ser <contact@emersion.fr>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ include/uapi/drm/drm_fourcc.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/uapi/drm/drm_fourcc.h b/include/uapi/drm/drm_fourcc.h
+index f1972154a5940c..0980678d502dc7 100644
+--- a/include/uapi/drm/drm_fourcc.h
++++ b/include/uapi/drm/drm_fourcc.h
+@@ -1444,11 +1444,11 @@ drm_fourcc_canonicalize_nvidia_format_mod(__u64 modifier)
+ #define AMD_FMT_MOD_PIPE_MASK 0x7
+ 
+ #define AMD_FMT_MOD_SET(field, value) \
+-	((uint64_t)(value) << AMD_FMT_MOD_##field##_SHIFT)
++	((__u64)(value) << AMD_FMT_MOD_##field##_SHIFT)
+ #define AMD_FMT_MOD_GET(field, value) \
+ 	(((value) >> AMD_FMT_MOD_##field##_SHIFT) & AMD_FMT_MOD_##field##_MASK)
+ #define AMD_FMT_MOD_CLEAR(field) \
+-	(~((uint64_t)AMD_FMT_MOD_##field##_MASK << AMD_FMT_MOD_##field##_SHIFT))
++	(~((__u64)AMD_FMT_MOD_##field##_MASK << AMD_FMT_MOD_##field##_SHIFT))
+ 
+ #if defined(__cplusplus)
+ }
+
+From 5cb0e3fb2c54eabfb3f932a1574bff1774946bc0 Mon Sep 17 00:00:00 2001
+From: Ruili Ji <ruiliji2@amd.com>
+Date: Wed, 22 Jun 2022 14:20:22 +0800
+Subject: [PATCH 3/4] drm/amdgpu: To flush tlb for MMHUB of RAVEN series
+
+amdgpu: [mmhub0] no-retry page fault (src_id:0 ring:40 vmid:8 pasid:32769, for process test_basic pid 3305 thread test_basic pid 3305)
+amdgpu: in page starting at address 0x00007ff990003000 from IH client 0x12 (VMC)
+amdgpu: VM_L2_PROTECTION_FAULT_STATUS:0x00840051
+amdgpu: Faulty UTCL2 client ID: MP1 (0x0)
+amdgpu: MORE_FAULTS: 0x1
+amdgpu: WALKER_ERROR: 0x0
+amdgpu: PERMISSION_FAULTS: 0x5
+amdgpu: MAPPING_ERROR: 0x0
+amdgpu: RW: 0x1
+
+When memory is allocated by kfd, no one triggers the tlb flush for MMHUB0.
+There is page fault from MMHUB0.
+
+v2:fix indentation
+v3:change subject and fix indentation
+
+Signed-off-by: Ruili Ji <ruiliji2@amd.com>
+Reviewed-by: Philip Yang <philip.yang@amd.com>
+Reviewed-by: Aaron Liu <aaron.liu@amd.com>
+Acked-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c
+index 1f8161cd507f00..3b1c675aba3462 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd.c
+@@ -714,7 +714,8 @@ int amdgpu_amdkfd_flush_gpu_tlb_pasid(struct amdgpu_device *adev,
+ {
+ 	bool all_hub = false;
+ 
+-	if (adev->family == AMDGPU_FAMILY_AI)
++	if (adev->family == AMDGPU_FAMILY_AI ||
++	    adev->family == AMDGPU_FAMILY_RV)
+ 		all_hub = true;
+ 
+ 	return amdgpu_gmc_flush_gpu_tlb_pasid(adev, pasid, flush_type, all_hub);
+
+From a775e4e4941bf2f326aa36c58f67bd6c96cac717 Mon Sep 17 00:00:00 2001
+From: Alex Deucher <alexander.deucher@amd.com>
+Date: Mon, 20 Jun 2022 18:29:39 -0400
+Subject: [PATCH 4/4] Revert "drm/amdgpu/display: set vblank_disable_immediate
+ for DC"
+
+This reverts commit 92020e81ddbeac351ea4a19bcf01743f32b9c800.
+
+This causes stuttering and timeouts with DMCUB for some users
+so revert it until we understand why and safely enable it
+to save power.
+
+Bug: https://gitlab.freedesktop.org/drm/amd/-/issues/1887
+Acked-by: Harry Wentland <harry.wentland@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: Nicholas Kazlauskas <nicholas.kazlauskas@amd.com>
+Cc: stable@vger.kernel.org
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_irq.c           | 1 +
+ drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c | 3 ---
+ 2 files changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_irq.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_irq.c
+index b4cf8717f554ea..89011bae7588e8 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_irq.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_irq.c
+@@ -320,6 +320,7 @@ int amdgpu_irq_init(struct amdgpu_device *adev)
+ 	if (!amdgpu_device_has_dc_support(adev)) {
+ 		if (!adev->enable_virtual_display)
+ 			/* Disable vblank IRQs aggressively for power-saving */
++			/* XXX: can this be enabled for DC? */
+ 			adev_to_drm(adev)->vblank_disable_immediate = true;
+ 
+ 		r = drm_vblank_init(adev_to_drm(adev), adev->mode_info.num_crtc);
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+index 39b425d83bb1a5..9dd2e0601ea8ce 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+@@ -4259,9 +4259,6 @@ static int amdgpu_dm_initialize_drm_device(struct amdgpu_device *adev)
+ 		}
+ 	}
+ 
+-	/* Disable vblank IRQs aggressively for power-saving. */
+-	adev_to_drm(adev)->vblank_disable_immediate = true;
+-
+ 	/* loops over all connectors on the board */
+ 	for (i = 0; i < link_cnt; i++) {
+ 		struct dc_link *link = NULL;
+
