@@ -82,7 +82,7 @@ index c47e8361bfb5..d5eeba955f07 100644
 +/*
 + * The maximum number of times where lock can be stolen per waiter.
 + */
-+#define	RT_MUTEX_LOCK_STEAL_MAX	(1U << 5)
++#define	RT_MUTEX_LOCK_STEAL_MAX	64
 +
  /**
   * rt_wake_q_head - Wrapper around regular wake_q_head to support

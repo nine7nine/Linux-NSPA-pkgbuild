@@ -5,9 +5,9 @@ To: mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
 	bristot@redhat.com, vschneid@redhat.com
 Cc: linux-kernel@vger.kernel.org, zhaohui.shi@horizon.ai,
 	Schspa Shi <schspa@gmail.com>
-Subject: [PATCH v2] sched/rt: fix bad task migration for rt tasks
-Date: Mon, 27 Jun 2022 23:40:51 +0800	[thread overview]
-Message-ID: <20220627154051.92599-1-schspa@gmail.com> (raw)
+Subject: [PATCH v4 1/2] sched/rt: fix bad task migration for rt tasks
+Date: Sat,  9 Jul 2022 05:17:54 +0800	[thread overview]
+Message-ID: <20220708211755.73637-1-schspa@gmail.com> (raw)
 
 Commit 95158a89dd50 ("sched,rt: Use the full cpumask for balancing")
 allow find_lock_lowest_rq to pick a task with migration disabled.
@@ -86,66 +86,120 @@ set_task_cpu+0x8c/0x108
 [123671.997064]  handle_irq_event_percpu+0x50/0xac
 [123671.997072]  handle_irq_event+0x84/0xfc
 
-To fix it, we need to check migration_disabled flag again and retry
-to retry to push the current running task on this CPU away.
+To fix it, we need to check migration_disabled flag again to avoid
+bad migration.
 
 Fixes: 95158a89dd50 ("sched,rt: Use the full cpumask for balancing")
+
 Signed-off-by: Schspa Shi <schspa@gmail.com>
 
--- 
+--
 
 Changelog:
 v1 -> v2:
         - Modify commit message to add fixed commit information.
         - Going to retry to push the current running task on this CPU
           away, instead doing nothing for this migrate disabled task.
-
+v2 -> v3:
+        - Change migration disabled check to the correct position
+v3 -> v4:
+        - Check migrate disabled in find_lock_lowest_rq to avoid not
+        necessary check when task rq is not released as Steven adviced.
 ---
- kernel/sched/core.c | 6 ++++++
- kernel/sched/rt.c   | 9 +++++++++
- 2 files changed, 15 insertions(+)
+ kernel/sched/deadline.c | 1 +
+ kernel/sched/rt.c       | 3 +++
+ 2 files changed, 4 insertions(+)
 
-diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index da0bf6fe9ecd..3003baa28d2d 100644
---- a/kernel/sched/core.c
-+++ b/kernel/sched/core.c
-@@ -2512,6 +2512,11 @@ int push_cpu_stop(void *arg)
- 	if (!lowest_rq)
- 		goto out_unlock;
- 
-+	if (unlikely(is_migration_disabled(p))) {
-+		p->migration_flags |= MDF_PUSH;
-+		goto out_double_unlock;
-+	}
-+
- 	// XXX validate p is still the highest prio task
- 	if (task_rq(p) == rq) {
- 		deactivate_task(rq, p, 0);
-@@ -2520,6 +2525,7 @@ int push_cpu_stop(void *arg)
- 		resched_curr(lowest_rq);
- 	}
- 
-+out_double_unlock:
- 	double_unlock_balance(rq, lowest_rq);
- 
- out_unlock:
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index b5152961b7432..cb3b886a081c3 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -2238,6 +2238,7 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
+ 				     !cpumask_test_cpu(later_rq->cpu, &task->cpus_mask) ||
+ 				     task_running(rq, task) ||
+ 				     !dl_task(task) ||
++				     is_migration_disabled(task) ||
+ 				     !task_on_rq_queued(task))) {
+ 				double_unlock_balance(rq, later_rq);
+ 				later_rq = NULL;
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 8c9ed9664840..6a1efccdc122 100644
+index 8c9ed96648409..0e0bc9aeaa394 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
-@@ -2115,6 +2115,15 @@ static int push_rt_task(struct rq *rq, bool pull)
- 	if (WARN_ON(next_task == rq->curr))
- 		return 0;
+@@ -1998,11 +1998,14 @@ static struct rq *find_lock_lowest_rq(struct task_struct *task, struct rq *rq)
+ 			 * the mean time, task could have
+ 			 * migrated already or had its affinity changed.
+ 			 * Also make sure that it wasn't scheduled on its rq.
++			 * It is possible the task has running for a while,
++			 * And we check task migration disable flag here.
+ 			 */
+ 			if (unlikely(task_rq(task) != rq ||
+ 				     !cpumask_test_cpu(lowest_rq->cpu, &task->cpus_mask) ||
+ 				     task_running(rq, task) ||
+ 				     !rt_task(task) ||
++				     is_migration_disabled(task) ||
+ 				     !task_on_rq_queued(task))) {
  
-+	/*
-+	 * It is possible the task has running for a while, we need to check
-+	 * task migration disable flag again. If task migration is disabled,
-+	 * the retry code will retry to push the current running task on this
-+	 * CPU away.
-+	 */
-+	if (unlikely(is_migration_disabled(next_task)))
-+		goto retry;
+ 				double_unlock_balance(rq, lowest_rq);
+-- 
+2.37.0
+
+From: Schspa Shi <schspa@gmail.com>
+To: mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+	vincent.guittot@linaro.org, dietmar.eggemann@arm.com,
+	rostedt@goodmis.org, bsegall@google.com, mgorman@suse.de,
+	bristot@redhat.com, vschneid@redhat.com
+Cc: linux-kernel@vger.kernel.org, zhaohui.shi@horizon.ai,
+	Schspa Shi <schspa@gmail.com>
+Subject: [PATCH v4 2/2] sched/rt: Trying to push current task when target disable migrating
+Date: Sat,  9 Jul 2022 05:17:55 +0800	[thread overview]
+Message-ID: <20220708211755.73637-2-schspa@gmail.com> (raw)
+In-Reply-To: <20220708211755.73637-1-schspa@gmail.com>
+
+When the task to push disable migration, retry to push the current
+running task on this CPU away, instead doing nothing for this migrate
+disabled task.
+
+Signed-off-by: Schspa Shi <schspa@gmail.com>
+---
+ kernel/sched/core.c | 6 +++++-
+ kernel/sched/rt.c   | 6 ++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index da0bf6fe9ecdc..0b1fefd97d874 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2509,8 +2509,12 @@ int push_cpu_stop(void *arg)
+ 	if (p->sched_class->find_lock_rq)
+ 		lowest_rq = p->sched_class->find_lock_rq(p, rq);
+ 
+-	if (!lowest_rq)
++	if (!lowest_rq) {
++		if (unlikely(is_migration_disabled(p)))
++			p->migration_flags |= MDF_PUSH;
 +
- 	/* We might release rq lock */
- 	get_task_struct(next_task);
+ 		goto out_unlock;
++	}
  
+ 	// XXX validate p is still the highest prio task
+ 	if (task_rq(p) == rq) {
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 0e0bc9aeaa394..9a91adf486e34 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -2135,6 +2135,12 @@ static int push_rt_task(struct rq *rq, bool pull)
+ 		 */
+ 		task = pick_next_pushable_task(rq);
+ 		if (task == next_task) {
++			/*
++			 * If next task has now disabled migrating, see if we
++			 * can push the current task.
++			 */
++			if (unlikely(is_migration_disabled(task)))
++				goto retry;
+ 			/*
+ 			 * The task hasn't migrated, and is still the next
+ 			 * eligible task, but we failed to find a run-queue
+-- 
+2.37.0
