@@ -107,7 +107,7 @@ _srcname=linux-${_stable}
 #_srcname=linux-${_major}
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=34
+pkgrel=35
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -172,6 +172,7 @@ source=(
  "0054-rtmutex-Limit_number_of_lock_stealing_for_non-RT_waiters.patch"
  "0055-schedutil-Fix_deadlock_between_cpuset_and_cpu_hotplug.patch"
  "0056-sched-core-Always_flush_pending_blk_plug.patch"
+ "0057-watchqueue-5.19.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -697,7 +698,7 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             'd795f51899549cd08001896e6114fc4591e694ee2c5f5be67f5fa28b7ad64905'
             'd9d83c07a2252eff94e9d9c9ee71ba8cee7893b5697db41a2d870dc7182605f4'
             'c8493a0614dc55ee01bcba4488f87b3a972fb7cbc1cf48f0766eacb26dd29927'
-            '830a1169225bc58745ccabed4ef728eb798a8d4dc153b9d8c8c92687900b53dc'
+            '91aa3623410e9228034f2272d4a55dc0a1f4291677daeeedc7007deef4a1575a'
             '8495edc071c9788862568f8869032d7919c147366b2c72a584581d568c351023'
             '5aad892ca987fd73c4f7e3ad487b2ed4e73e4b420acf0fcee9f32a29a6f0b939'
             '59f76c17b6bccd08165766c1f5f0c29127994195e679208af0161bb4176bdc2f'
@@ -707,5 +708,6 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             '71a12b7cd539d6cd2bbb477eb4fef0f17e8fc07ad8452c80e463f5b4cc53d390'
             'e22faa7811a3de10affe5f7e6d671f263599c75f9f78cca6e3cdf7a9e36d71de'
             'ba640b93b7d4bce58b15ad2232f0547007b725c2f518a8b19902d45632da0a47'
-            'c68b39d60c410588609f7d0bc0cbe4dba4978394ad05d75fc588a592f45e924a')
+            'c68b39d60c410588609f7d0bc0cbe4dba4978394ad05d75fc588a592f45e924a'
+            'a1edb15e66c1b5525aca56ae4729984b393f352fd71fa7674519d67877b360b6')
 
