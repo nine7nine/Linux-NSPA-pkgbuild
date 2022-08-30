@@ -13,17 +13,18 @@ Google, Kernel Toast, upstream and various other sources.
 * PREEMPT_RT_FULL : Realtime Linux Patchset
 * Fair/RT Scheduler optimizations, modifications + backports
 * Multi-Gnerational LRU (https://lwn.net/Articles/856931/)
-* Tunable WorkingSet Protection Mechanism 
 * Winesync driver (Although currently Fsync/Futex_waitv is better)
+* Tunable WorkingSet Protection Mechanism 
 * Subset of Intel Clear Linux Kernel patches
 * Various Performance / interactivity related changes
 * Wine-related performance patchwork
 * Power management improvements
 * Numerous subsystem backports from 5.19+
-* Faster bootup
 * Misc fixes (nvme, xhci, mm, pm, locking, etc)
-* ioprio patchset
+* Block-ioprio patchset
 * rtw88 related patchwork
+* lrng patchwork
+* Faster bootup
 
 NOTE: currently sticking with 5.18+ kernel, until linux-6.1 is available for rebase (Maple tree + MLGru, etc)
 
