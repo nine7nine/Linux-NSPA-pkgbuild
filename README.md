@@ -6,20 +6,26 @@
 
 This repo contains customized PREEMPT_RT kernel packages that have additional
 patchwork and out-of-tree features added. Patchwork taken from CachyOS, Intel,
-Google annd other sources.
+Google, Kernel Toast, upstream and various other sources.
 
 ### Features/Patchwork:
 
 * PREEMPT_RT_FULL : Realtime Linux Patchset
+* Fair/RT Scheduler optimizations, modifications + backports
 * Multi-Gnerational LRU (https://lwn.net/Articles/856931/)
 * Tunable WorkingSet Protection Mechanism 
 * Winesync driver (Although currently Fsync/Futex_waitv is better)
 * Subset of Intel Clear Linux Kernel patches
 * Various Performance / interactivity related changes
-* Wine-related patchwork
+* Wine-related performance patchwork
 * Power management improvements
+* Numerous subsystem backports from 5.19+
 * Faster bootup
-* Misc fixes
+* Misc fixes (nvme, xhci, mm, pm, locking, etc)
+* ioprio patchset
+* rtw88 related patchwork
+
+NOTE: currently sticking with 5.18+ kernel, until linux-6.1 is available for rebase (Maple tree + MLGru, etc)
 
 SPECIAL NOTE: the included kernel config is specifically for my laptop. If
 anyone is using these packages, you will need to have a look at the 
