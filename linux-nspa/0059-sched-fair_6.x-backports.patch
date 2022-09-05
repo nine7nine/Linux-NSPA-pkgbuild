@@ -1,0 +1,767 @@
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Move task sched_avg attach to enqueue_task_fair()
+Date: Tue, 23 Aug 2022 09:27:29 -0000	[thread overview]
+Message-ID: <166124684994.401.15319814976088151997.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-9-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     d6531ab6e50149ab2a144b0f4787cb9277d0893f
+Gitweb:        https://git.kernel.org/tip/d6531ab6e50149ab2a144b0f4787cb9277d0893f
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:48:04 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:19 +02:00
+
+sched/fair: Move task sched_avg attach to enqueue_task_fair()
+
+When wake_up_new_task(), we use post_init_entity_util_avg() to init
+util_avg/runnable_avg based on cpu's util_avg at that time, and
+attach task sched_avg to cfs_rq.
+
+Since enqueue_task_fair() -> enqueue_entity() -> update_load_avg()
+loop will do attach, we can move this work to update_load_avg().
+
+wake_up_new_task(p)
+  post_init_entity_util_avg(p)
+    attach_entity_cfs_rq()  --> (1)
+  activate_task(rq, p)
+    enqueue_task() := enqueue_task_fair()
+      enqueue_entity() loop
+        update_load_avg(cfs_rq, se, UPDATE_TG | DO_ATTACH)
+          if (!se->avg.last_update_time && (flags & DO_ATTACH))
+            attach_entity_load_avg()  --> (2)
+
+This patch move attach from (1) to (2), update related comments too.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-9-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 11 +++--------
+ 1 file changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index fd1aa4c..ef325b5 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -799,8 +799,6 @@ void init_entity_runnable_average(struct sched_entity *se)
+ 	/* when this task enqueue'ed, it will contribute to its cfs_rq's load_avg */
+ }
+ 
+-static void attach_entity_cfs_rq(struct sched_entity *se);
+-
+ /*
+  * With new tasks being created, their initial util_avgs are extrapolated
+  * based on the cfs_rq's current util_avg:
+@@ -863,8 +861,6 @@ void post_init_entity_util_avg(struct task_struct *p)
+ 		se->avg.last_update_time = cfs_rq_clock_pelt(cfs_rq);
+ 		return;
+ 	}
+-
+-	attach_entity_cfs_rq(se);
+ }
+ 
+ #else /* !CONFIG_SMP */
+@@ -3838,8 +3834,7 @@ static void migrate_se_pelt_lag(struct sched_entity *se) {}
+  * @cfs_rq: cfs_rq to update
+  *
+  * The cfs_rq avg is the direct sum of all its entities (blocked and runnable)
+- * avg. The immediate corollary is that all (fair) tasks must be attached, see
+- * post_init_entity_util_avg().
++ * avg. The immediate corollary is that all (fair) tasks must be attached.
+  *
+  * cfs_rq->avg is used for task_h_load() and update_cfs_share() for example.
+  *
+@@ -4072,8 +4067,8 @@ static void remove_entity_load_avg(struct sched_entity *se)
+ 
+ 	/*
+ 	 * tasks cannot exit without having gone through wake_up_new_task() ->
+-	 * post_init_entity_util_avg() which will have added things to the
+-	 * cfs_rq, so we can remove unconditionally.
++	 * enqueue_task_fair() which will have added things to the cfs_rq,
++	 * so we can remove unconditionally.
+ 	 */
+ 
+ 	sync_entity_load_avg(se);
+ 	
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Update comments in enqueue/dequeue_entity()
+Date: Tue, 23 Aug 2022 09:27:33 -0000	[thread overview]
+Message-ID: <166124685390.401.5685584934311093072.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-5-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     859f206290f345c151a6005de639ba9677bf3e18
+Gitweb:        https://git.kernel.org/tip/859f206290f345c151a6005de639ba9677bf3e18
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:48:00 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:18 +02:00
+
+sched/fair: Update comments in enqueue/dequeue_entity()
+
+When reading the sched_avg related code, I found the comments in
+enqueue/dequeue_entity() are not updated with the current code.
+
+We don't add/subtract entity's runnable_avg from cfs_rq->runnable_avg
+during enqueue/dequeue_entity(), those are done only for attach/detach.
+
+This patch updates the comments to reflect the current code working.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-5-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e4c0929..52de830 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -4434,7 +4434,8 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	/*
+ 	 * When enqueuing a sched_entity, we must:
+ 	 *   - Update loads to have both entity and cfs_rq synced with now.
+-	 *   - Add its load to cfs_rq->runnable_avg
++	 *   - For group_entity, update its runnable_weight to reflect the new
++	 *     h_nr_running of its group cfs_rq.
+ 	 *   - For group_entity, update its weight to reflect the new share of
+ 	 *     its group cfs_rq
+ 	 *   - Add its new weight to cfs_rq->load.weight
+@@ -4519,7 +4520,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	/*
+ 	 * When dequeuing a sched_entity, we must:
+ 	 *   - Update loads to have both entity and cfs_rq synced with now.
+-	 *   - Subtract its load from the cfs_rq->runnable_avg.
++	 *   - For group_entity, update its runnable_weight to reflect the new
++	 *     h_nr_running of its group cfs_rq.
+ 	 *   - Subtract its previous weight from cfs_rq->load.weight.
+ 	 *   - For group entity, update its weight to reflect the new share
+ 	 *     of its group cfs_rq.
+ 	 
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Vincent Guittot <vincent.guittot@linaro.org>,
+	Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Don't init util/runnable_avg for !fair task
+Date: Tue, 23 Aug 2022 09:27:28 -0000	[thread overview]
+Message-ID: <166124684880.401.13181895170938824207.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-10-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     e4fe074d6c359c19b74564fa1364fe48343cfa5d
+Gitweb:        https://git.kernel.org/tip/e4fe074d6c359c19b74564fa1364fe48343cfa5d
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:48:05 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:20 +02:00
+
+sched/fair: Don't init util/runnable_avg for !fair task
+
+post_init_entity_util_avg() init task util_avg according to the cpu util_avg
+at the time of fork, which will decay when switched_to_fair() some time later,
+we'd better to not set them at all in the case of !fair task.
+
+Suggested-by: Vincent Guittot <vincent.guittot@linaro.org>
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-10-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 28 ++++++++++++++--------------
+ 1 file changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ef325b5..e8c1b88 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -833,20 +833,6 @@ void post_init_entity_util_avg(struct task_struct *p)
+ 	long cpu_scale = arch_scale_cpu_capacity(cpu_of(rq_of(cfs_rq)));
+ 	long cap = (long)(cpu_scale - cfs_rq->avg.util_avg) / 2;
+ 
+-	if (cap > 0) {
+-		if (cfs_rq->avg.util_avg != 0) {
+-			sa->util_avg  = cfs_rq->avg.util_avg * se->load.weight;
+-			sa->util_avg /= (cfs_rq->avg.load_avg + 1);
+-
+-			if (sa->util_avg > cap)
+-				sa->util_avg = cap;
+-		} else {
+-			sa->util_avg = cap;
+-		}
+-	}
+-
+-	sa->runnable_avg = sa->util_avg;
+-
+ 	if (p->sched_class != &fair_sched_class) {
+ 		/*
+ 		 * For !fair tasks do:
+@@ -861,6 +847,20 @@ void post_init_entity_util_avg(struct task_struct *p)
+ 		se->avg.last_update_time = cfs_rq_clock_pelt(cfs_rq);
+ 		return;
+ 	}
++
++	if (cap > 0) {
++		if (cfs_rq->avg.util_avg != 0) {
++			sa->util_avg  = cfs_rq->avg.util_avg * se->load.weight;
++			sa->util_avg /= (cfs_rq->avg.load_avg + 1);
++
++			if (sa->util_avg > cap)
++				sa->util_avg = cap;
++		} else {
++			sa->util_avg = cap;
++		}
++	}
++
++	sa->runnable_avg = sa->util_avg;
+ }
+ 
+ #else /* !CONFIG_SMP */
+ 
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Fix another detach on unattached task corner case
+Date: Tue, 23 Aug 2022 09:27:31 -0000	[thread overview]
+Message-ID: <166124685193.401.15399973538235063707.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-7-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     7e2edaf61814fb6aa363989d718950c023b882d4
+Gitweb:        https://git.kernel.org/tip/7e2edaf61814fb6aa363989d718950c023b882d4
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:48:02 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:19 +02:00
+
+sched/fair: Fix another detach on unattached task corner case
+
+commit 7dc603c9028e ("sched/fair: Fix PELT integrity for new tasks")
+fixed two load tracking problems for new task, including detach on
+unattached new task problem.
+
+There still left another detach on unattached task problem for the task
+which has been woken up by try_to_wake_up() and waiting for actually
+being woken up by sched_ttwu_pending().
+
+try_to_wake_up(p)
+  cpu = select_task_rq(p)
+  if (task_cpu(p) != cpu)
+    set_task_cpu(p, cpu)
+      migrate_task_rq_fair()
+        remove_entity_load_avg()       --> unattached
+        se->avg.last_update_time = 0;
+      __set_task_cpu()
+  ttwu_queue(p, cpu)
+    ttwu_queue_wakelist()
+      __ttwu_queue_wakelist()
+
+task_change_group_fair()
+  detach_task_cfs_rq()
+    detach_entity_cfs_rq()
+      detach_entity_load_avg()   --> detach on unattached task
+  set_task_rq()
+  attach_task_cfs_rq()
+    attach_entity_cfs_rq()
+      attach_entity_load_avg()
+
+The reason of this problem is similar, we should check in detach_entity_cfs_rq()
+that se->avg.last_update_time != 0, before do detach_entity_load_avg().
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-7-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index f52e7dc..e92bc05 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11557,6 +11557,17 @@ static void detach_entity_cfs_rq(struct sched_entity *se)
+ {
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+ 
++#ifdef CONFIG_SMP
++	/*
++	 * In case the task sched_avg hasn't been attached:
++	 * - A forked task which hasn't been woken up by wake_up_new_task().
++	 * - A task which has been woken up by try_to_wake_up() but is
++	 *   waiting for actually being woken up by sched_ttwu_pending().
++	 */
++	if (!se->avg.last_update_time)
++		return;
++#endif
++
+ 	/* Catch up with the cfs_rq and remove our load when we leave */
+ 	update_load_avg(cfs_rq, se, 0);
+ 	detach_entity_load_avg(cfs_rq, se);
+ 	
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	Dietmar Eggemann <dietmar.eggemann@arm.com>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Reset sched_avg last_update_time before set_task_rq()
+Date: Tue, 23 Aug 2022 09:27:34 -0000	[thread overview]
+Message-ID: <166124685490.401.14854192796120212335.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-4-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     5d6da83c44af70ede7bfd0fd6d1ef8a3b3e0402c
+Gitweb:        https://git.kernel.org/tip/5d6da83c44af70ede7bfd0fd6d1ef8a3b3e0402c
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:47:59 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:18 +02:00
+
+sched/fair: Reset sched_avg last_update_time before set_task_rq()
+
+set_task_rq() -> set_task_rq_fair() will try to synchronize the blocked
+task's sched_avg when migrate, which is not needed for already detached
+task.
+
+task_change_group_fair() will detached the task sched_avg from prev cfs_rq
+first, so reset sched_avg last_update_time before set_task_rq() to avoid that.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-4-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 2c0eb2a..e4c0929 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11660,12 +11660,12 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ static void task_change_group_fair(struct task_struct *p)
+ {
+ 	detach_task_cfs_rq(p);
+-	set_task_rq(p, task_cpu(p));
+ 
+ #ifdef CONFIG_SMP
+ 	/* Tell se's cfs_rq has been changed -- migrated */
+ 	p->se.avg.last_update_time = 0;
+ #endif
++	set_task_rq(p, task_cpu(p));
+ 	attach_task_cfs_rq(p);
+ }
+ 
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Allow changing cgroup of new forked task
+Date: Tue, 23 Aug 2022 09:27:30 -0000	[thread overview]
+Message-ID: <166124685097.401.5171298774176649405.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-8-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     df16b71c686cb096774e30153c9ce6756450796c
+Gitweb:        https://git.kernel.org/tip/df16b71c686cb096774e30153c9ce6756450796c
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:48:03 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:19 +02:00
+
+sched/fair: Allow changing cgroup of new forked task
+
+commit 7dc603c9028e ("sched/fair: Fix PELT integrity for new tasks")
+introduce a TASK_NEW state and an unnessary limitation that would fail
+when changing cgroup of new forked task.
+
+Because at that time, we can't handle task_change_group_fair() for new
+forked fair task which hasn't been woken up by wake_up_new_task(),
+which will cause detach on an unattached task sched_avg problem.
+
+This patch delete this unnessary limitation by adding check before do
+detach or attach in task_change_group_fair().
+
+So cpu_cgrp_subsys.can_attach() has nothing to do for fair tasks,
+only define it in #ifdef CONFIG_RT_GROUP_SCHED.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-8-zhouchengming@bytedance.com
+---
+ kernel/sched/core.c | 25 +++++--------------------
+ kernel/sched/fair.c |  7 +++++++
+ 2 files changed, 12 insertions(+), 20 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index e74e79f..603a80e 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -10238,36 +10238,19 @@ static void cpu_cgroup_css_free(struct cgroup_subsys_state *css)
+ 	sched_unregister_group(tg);
+ }
+ 
++#ifdef CONFIG_RT_GROUP_SCHED
+ static int cpu_cgroup_can_attach(struct cgroup_taskset *tset)
+ {
+ 	struct task_struct *task;
+ 	struct cgroup_subsys_state *css;
+-	int ret = 0;
+ 
+ 	cgroup_taskset_for_each(task, css, tset) {
+-#ifdef CONFIG_RT_GROUP_SCHED
+ 		if (!sched_rt_can_attach(css_tg(css), task))
+ 			return -EINVAL;
+-#endif
+-		/*
+-		 * Serialize against wake_up_new_task() such that if it's
+-		 * running, we're sure to observe its full state.
+-		 */
+-		raw_spin_lock_irq(&task->pi_lock);
+-		/*
+-		 * Avoid calling sched_move_task() before wake_up_new_task()
+-		 * has happened. This would lead to problems with PELT, due to
+-		 * move wanting to detach+attach while we're not attached yet.
+-		 */
+-		if (READ_ONCE(task->__state) == TASK_NEW)
+-			ret = -EINVAL;
+-		raw_spin_unlock_irq(&task->pi_lock);
+-
+-		if (ret)
+-			break;
+ 	}
+-	return ret;
++	return 0;
+ }
++#endif
+ 
+ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
+ {
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e92bc05..fd1aa4c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11676,6 +11676,13 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ static void task_change_group_fair(struct task_struct *p)
+ {
++	/*
++	 * We couldn't detach or attach a forked task which
++	 * hasn't been woken up by wake_up_new_task().
++	 */
++	if (READ_ONCE(p->__state) == TASK_NEW)
++		return;
++
+ 	detach_task_cfs_rq(p);
+ 
+ #ifdef CONFIG_SMP
+ 
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	Dietmar Eggemann <dietmar.eggemann@arm.com>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Maintain task se depth in set_task_rq()
+Date: Tue, 23 Aug 2022 09:27:36 -0000	[thread overview]
+Message-ID: <166124685689.401.4486657040685089131.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-2-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     78b6b15770618efb60d84e2d605f6b93dc94051b
+Gitweb:        https://git.kernel.org/tip/78b6b15770618efb60d84e2d605f6b93dc94051b
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:47:57 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:17 +02:00
+
+sched/fair: Maintain task se depth in set_task_rq()
+
+Previously we only maintain task se depth in task_move_group_fair(),
+if a !fair task change task group, its se depth will not be updated,
+so commit eb7a59b2c888 ("sched/fair: Reset se-depth when task switched to FAIR")
+fix the problem by updating se depth in switched_to_fair() too.
+
+Then commit daa59407b558 ("sched/fair: Unify switched_{from,to}_fair()
+and task_move_group_fair()") unified these two functions, moved se.depth
+setting to attach_task_cfs_rq(), which further into attach_entity_cfs_rq()
+with commit df217913e72e ("sched/fair: Factorize attach/detach entity").
+
+This patch move task se depth maintenance from attach_entity_cfs_rq()
+to set_task_rq(), which will be called when CPU/cgroup change, so its
+depth will always be correct.
+
+This patch is preparation for the next patch.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-2-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c  | 8 --------
+ kernel/sched/sched.h | 1 +
+ 2 files changed, 1 insertion(+), 8 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index da38865..a3b0f8b 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11562,14 +11562,6 @@ static void attach_entity_cfs_rq(struct sched_entity *se)
+ {
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+ 
+-#ifdef CONFIG_FAIR_GROUP_SCHED
+-	/*
+-	 * Since the real-depth could have been changed (only FAIR
+-	 * class maintain depth value), reset depth properly.
+-	 */
+-	se->depth = se->parent ? se->parent->depth + 1 : 0;
+-#endif
+-
+ 	/* Synchronize entity with its cfs_rq */
+ 	update_load_avg(cfs_rq, se, sched_feat(ATTACH_AGE_LOAD) ? 0 : SKIP_AGE_LOAD);
+ 	attach_entity_load_avg(cfs_rq, se);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 3ccd35c..4c48221 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1930,6 +1930,7 @@ static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
+ 	set_task_rq_fair(&p->se, p->se.cfs_rq, tg->cfs_rq[cpu]);
+ 	p->se.cfs_rq = tg->cfs_rq[cpu];
+ 	p->se.parent = tg->se[cpu];
++	p->se.depth = tg->se[cpu] ? tg->se[cpu]->depth + 1 : 0;
+ #endif
+ 
+ #ifdef CONFIG_RT_GROUP_SCHED
+ 
+From: "tip-bot2 for Chengming Zhou" <tip-bot2@linutronix.de>
+To: linux-tip-commits@vger.kernel.org
+Cc: Chengming Zhou <zhouchengming@bytedance.com>,
+	"Peter Zijlstra (Intel)" <peterz@infradead.org>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	Dietmar Eggemann <dietmar.eggemann@arm.com>,
+	x86@kernel.org, linux-kernel@vger.kernel.org
+Subject: [tip: sched/core] sched/fair: Remove redundant cpu_cgrp_subsys->fork()
+Date: Tue, 23 Aug 2022 09:27:35 -0000	[thread overview]
+Message-ID: <166124685590.401.15944614410686814398.tip-bot2@tip-bot2> (raw)
+In-Reply-To: <20220818124805.601-3-zhouchengming@bytedance.com>
+
+The following commit has been merged into the sched/core branch of tip:
+
+Commit-ID:     39c4261191bf05e7eb310f852980a6d0afe5582a
+Gitweb:        https://git.kernel.org/tip/39c4261191bf05e7eb310f852980a6d0afe5582a
+Author:        Chengming Zhou <zhouchengming@bytedance.com>
+AuthorDate:    Thu, 18 Aug 2022 20:47:58 +08:00
+Committer:     Peter Zijlstra <peterz@infradead.org>
+CommitterDate: Tue, 23 Aug 2022 11:01:17 +02:00
+
+sched/fair: Remove redundant cpu_cgrp_subsys->fork()
+
+We use cpu_cgrp_subsys->fork() to set task group for the new fair task
+in cgroup_post_fork().
+
+Since commit b1e8206582f9 ("sched: Fix yet more sched_fork() races")
+has already set_task_rq() for the new fair task in sched_cgroup_fork(),
+so cpu_cgrp_subsys->fork() can be removed.
+
+  cgroup_can_fork()	--> pin parent's sched_task_group
+  sched_cgroup_fork()
+    __set_task_cpu()
+      set_task_rq()
+  cgroup_post_fork()
+    ss->fork() := cpu_cgroup_fork()
+      sched_change_group(..., TASK_SET_GROUP)
+        task_set_group_fair()
+          set_task_rq()  --> can be removed
+
+After this patch's change, task_change_group_fair() only need to
+care about task cgroup migration, make the code much simplier.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Link: https://lore.kernel.org/r/20220818124805.601-3-zhouchengming@bytedance.com
+---
+ kernel/sched/core.c  | 27 ++++-----------------------
+ kernel/sched/fair.c  | 23 +----------------------
+ kernel/sched/sched.h |  5 +----
+ 3 files changed, 6 insertions(+), 49 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 64c0899..e74e79f 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -481,8 +481,7 @@ sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags) { }
+  *				p->se.load, p->rt_priority,
+  *				p->dl.dl_{runtime, deadline, period, flags, bw, density}
+  *  - sched_setnuma():		p->numa_preferred_nid
+- *  - sched_move_task()/
+- *    cpu_cgroup_fork():	p->sched_task_group
++ *  - sched_move_task():	p->sched_task_group
+  *  - uclamp_update_active()	p->uclamp*
+  *
+  * p->state <- TASK_*:
+@@ -10114,7 +10113,7 @@ void sched_release_group(struct task_group *tg)
+ 	spin_unlock_irqrestore(&task_group_lock, flags);
+ }
+ 
+-static void sched_change_group(struct task_struct *tsk, int type)
++static void sched_change_group(struct task_struct *tsk)
+ {
+ 	struct task_group *tg;
+ 
+@@ -10130,7 +10129,7 @@ static void sched_change_group(struct task_struct *tsk, int type)
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	if (tsk->sched_class->task_change_group)
+-		tsk->sched_class->task_change_group(tsk, type);
++		tsk->sched_class->task_change_group(tsk);
+ 	else
+ #endif
+ 		set_task_rq(tsk, task_cpu(tsk));
+@@ -10161,7 +10160,7 @@ void sched_move_task(struct task_struct *tsk)
+ 	if (running)
+ 		put_prev_task(rq, tsk);
+ 
+-	sched_change_group(tsk, TASK_MOVE_GROUP);
++	sched_change_group(tsk);
+ 
+ 	if (queued)
+ 		enqueue_task(rq, tsk, queue_flags);
+@@ -10340,23 +10340,6 @@ static void cpu_cgroup_css_free(struct c
+ 	sched_unregister_group(tg);
+ }
+ 
+-/*
+- * This is called before wake_up_new_task(), therefore we really only
+- * have to set its group bits, all the other stuff does not apply.
+- */
+-static void cpu_cgroup_fork(struct task_struct *task)
+-{
+-	struct rq_flags rf;
+-	struct rq *rq;
+-
+-	rq = task_rq_lock(task, &rf);
+-
+-	update_rq_clock(rq);
+-	sched_change_group(task, TASK_SET_GROUP);
+-
+-	task_rq_unlock(rq, task, &rf);
+-}
+-
+ #ifdef CONFIG_RT_GROUP_SCHED
+ static int cpu_cgroup_can_attach(struct cgroup_taskset *tset)
+ {
+@@ -11121,7 +11103,6 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 	.css_released	= cpu_cgroup_css_released,
+ 	.css_free	= cpu_cgroup_css_free,
+ 	.css_extra_stat_show = cpu_extra_stat_show,
+-	.fork		= cpu_cgroup_fork,
+ 	.can_attach	= cpu_cgroup_can_attach,
+ 	.attach		= cpu_cgroup_attach,
+ 	.legacy_cftypes	= cpu_legacy_files,
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index a3b0f8b..2c0eb2a 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11657,15 +11657,7 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ }
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+-static void task_set_group_fair(struct task_struct *p)
+-{
+-	struct sched_entity *se = &p->se;
+-
+-	set_task_rq(p, task_cpu(p));
+-	se->depth = se->parent ? se->parent->depth + 1 : 0;
+-}
+-
+-static void task_move_group_fair(struct task_struct *p)
++static void task_change_group_fair(struct task_struct *p)
+ {
+ 	detach_task_cfs_rq(p);
+ 	set_task_rq(p, task_cpu(p));
+@@ -11677,19 +11669,6 @@ static void task_move_group_fair(struct task_struct *p)
+ 	attach_task_cfs_rq(p);
+ }
+ 
+-static void task_change_group_fair(struct task_struct *p, int type)
+-{
+-	switch (type) {
+-	case TASK_SET_GROUP:
+-		task_set_group_fair(p);
+-		break;
+-
+-	case TASK_MOVE_GROUP:
+-		task_move_group_fair(p);
+-		break;
+-	}
+-}
+-
+ void free_fair_sched_group(struct task_group *tg)
+ {
+ 	int i;
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 4c48221..74130a6 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2193,11 +2193,8 @@ struct sched_class {
+ 
+ 	void (*update_curr)(struct rq *rq);
+ 
+-#define TASK_SET_GROUP		0
+-#define TASK_MOVE_GROUP		1
+-
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+-	void (*task_change_group)(struct task_struct *p, int type);
++	void (*task_change_group)(struct task_struct *p);
+ #endif
+ };
+ 
+--- a/kernel/sched/core.c	2022-09-05 11:42:23.893576883 -0500
++++ b/kernel/sched/core.c	2022-09-05 11:41:43.327484266 -0500
+@@ -11188,7 +11188,9 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 	.css_released	= cpu_cgroup_css_released,
+ 	.css_free	= cpu_cgroup_css_free,
+ 	.css_extra_stat_show = cpu_extra_stat_show,
++#ifdef CONFIG_RT_GROUP_SCHED
+ 	.can_attach	= cpu_cgroup_can_attach,
++#endif
+ 	.attach		= cpu_cgroup_attach,
+ 	.legacy_cftypes	= cpu_legacy_files,
+ 	.dfl_cftypes	= cpu_files,
+
