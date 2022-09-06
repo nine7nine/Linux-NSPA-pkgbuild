@@ -107,7 +107,7 @@ _srcname=linux-${_stable}
 #_srcname=linux-${_major}
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=37
+pkgrel=38
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -175,6 +175,9 @@ source=(
  "0057-watchqueue-5.19.patch"
  "0058-pinctrl_amd-no_save-restore_irq_status_n_wake.patch"
  "0059-sched-fair_6.x-backports.patch"
+ "0060-hwrng-flexibility_avoid_suspend_race.patch"
+ "0061-PM-hibernate-defer_device_probing_when_resuming_from_hibernation.patch"
+ "0062-ALSA-use_fastsync_helpers_workaround.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -713,5 +716,8 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             'c68b39d60c410588609f7d0bc0cbe4dba4978394ad05d75fc588a592f45e924a'
             'a1edb15e66c1b5525aca56ae4729984b393f352fd71fa7674519d67877b360b6'
             'a307c5cc3a35c7d3e4c5b6ae464ab319f2e83c1f5e95111768426ad8c8827219'
-            '6344a588af7a6fa6de33552a83141a136ee1e5a0743a1367bfeb63d542b67a40')
+            '6344a588af7a6fa6de33552a83141a136ee1e5a0743a1367bfeb63d542b67a40'
+            '042eb0a2d2142ef7955182f4be3adcbddba72231f5766de1434fc2ff2c41036b'
+            '954cc8cac4f051c0115c2a8574246ad6babac82438c1e74740ae6ff534af5db6'
+            'fb179fc1a8c163db6c139d03aea41c1769763225e71ab89217a42138062e418a')
 
