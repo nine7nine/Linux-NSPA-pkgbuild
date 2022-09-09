@@ -107,7 +107,7 @@ _srcname=linux-${_stable}
 #_srcname=linux-${_major}
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=40
+pkgrel=42
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -182,6 +182,9 @@ source=(
  "0064-locking-rwsem_Disable_preemption_while_trying_for_rwsem_lock_V2.patch"
  "0066-mm-pagewalk_Fix_race_between_unmap_n_page_walker.patch"
  "0067-USB-core-Prevent_nested_device-reset_calls.patch"
+ "0068-Add_latency_priority_for_CFS_class.patch"
+ "0070-locking-semaphore-Use_wake_q_to_wake_up_processes_outside_lock_cs.patch"
+ "0071-sched-all_no_BUG_ON_warn_instead.patch"
 )
 
 if [ -n "$_use_llvm_lto" ]; then
@@ -727,5 +730,8 @@ sha256sums=('ef9ff2dfa5416a03e7e5fd9c308aaec385fe8ff9f4a62d957b167843849659a2'
             '73fcdd0c088067872d3d452e4505b05496f6c23cc2cd1b68333acc2897c56954'
             '3da077dd1ef979f76864426277882dfa8fe68f9711edd6561d89e4c0d6e02adc'
             '41a19f5a5c0d4fe932068bc568409a12424f7946bb9dc22ee68126691c2d3eca'
-            'bd53116dee6b641c7d6313a546873b6c5dc6a35621a0c6d0e33b78ba61fcdc4e')
+            'bd53116dee6b641c7d6313a546873b6c5dc6a35621a0c6d0e33b78ba61fcdc4e'
+            'b087b71946ffabee7cbf8e5caf5a6cd23a139bb890c8e61b46e0290f6884ffa4'
+            'b10a8f2280996dbd9658001d7ccb83ea22cfc79b8e5361cdbf8b94a2d7f821a6'
+            '8373f42c0d3e349983c486ee3ab78de7f2f71f225ee761cdf08f7e54e8430657')
 

@@ -1,0 +1,104 @@
+From: Waiman Long <longman@redhat.com>
+To: Peter Zijlstra <peterz@infradead.org>,
+	Ingo Molnar <mingo@redhat.com>, Will Deacon <will.deacon@arm.com>,
+	Boqun Feng <boqun.feng@gmail.com>
+Cc: linux-kernel@vger.kernel.org, Waiman Long <longman@redhat.com>
+Subject: [PATCH v2] locking/semaphore: Use wake_q to wake up processes outside lock critical section
+Date: Fri,  9 Sep 2022 15:28:48 -0400	[thread overview]
+Message-ID: <20220909192848.963982-1-longman@redhat.com> (raw)
+
+It was found that a circular lock dependency can happen with the
+following locking sequence:
+
+   +--> (console_sem).lock --> &p->pi_lock --> &rq->__lock --+
+   |                                                         |
+   +---------------------------------------------------------+
+
+The &p->pi_lock --> &rq->__lock sequence is very common in all the
+task_rq_lock() calls.
+
+The &rq->__lock --> (console_sem).lock sequence happens when the
+scheduler code calling printk() or more likely the various WARN*()
+macros while holding the rq lock. The (console_sem).lock is actually
+a raw spinlock guarding the semaphore. In the particular lockdep splat
+that I saw, it was caused by SCHED_WARN_ON() call in update_rq_clock().
+To work around this locking sequence, we may have to ban all WARN*()
+calls when the rq lock is held, which may be too restrictive, or we
+may have to add a WARN_DEFERRED() call and modify all the call sites
+to use it.
+
+Even then, a deferred printk or WARN function may still call
+console_trylock() which may, in turn, calls up_console_sem() leading
+to this locking sequence.
+
+The other ((console_sem).lock --> &p->pi_lock) locking sequence
+was caused by the fact that the semaphore up() function is calling
+wake_up_process() while holding the semaphore raw spinlock. This lockiing
+sequence can be easily eliminated by moving the wake_up_processs()
+call out of the raw spinlock critical section using wake_q which is
+what this patch implements. That is the easiest and the most certain
+way to break this circular locking sequence.
+
+v1: https://lore.kernel.org/lkml/20220118153254.358748-1-longman@redhat.com/
+
+Signed-off-by: Waiman Long <longman@redhat.com>
+---
+ kernel/locking/semaphore.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/locking/semaphore.c b/kernel/locking/semaphore.c
+index f2654d2fe43a..b4b817451dd7 100644
+--- a/kernel/locking/semaphore.c
++++ b/kernel/locking/semaphore.c
+@@ -29,6 +29,7 @@
+ #include <linux/export.h>
+ #include <linux/sched.h>
+ #include <linux/sched/debug.h>
++#include <linux/sched/wake_q.h>
+ #include <linux/semaphore.h>
+ #include <linux/spinlock.h>
+ #include <linux/ftrace.h>
+@@ -38,7 +39,7 @@ static noinline void __down(struct semaphore *sem);
+ static noinline int __down_interruptible(struct semaphore *sem);
+ static noinline int __down_killable(struct semaphore *sem);
+ static noinline int __down_timeout(struct semaphore *sem, long timeout);
+-static noinline void __up(struct semaphore *sem);
++static noinline void __up(struct semaphore *sem, struct wake_q_head *wake_q);
+ 
+ /**
+  * down - acquire the semaphore
+@@ -183,13 +184,16 @@ EXPORT_SYMBOL(down_timeout);
+ void up(struct semaphore *sem)
+ {
+ 	unsigned long flags;
++	DEFINE_WAKE_Q(wake_q);
+ 
+ 	raw_spin_lock_irqsave(&sem->lock, flags);
+ 	if (likely(list_empty(&sem->wait_list)))
+ 		sem->count++;
+ 	else
+-		__up(sem);
++		__up(sem, &wake_q);
+ 	raw_spin_unlock_irqrestore(&sem->lock, flags);
++	if (!wake_q_empty(&wake_q))
++		wake_up_q(&wake_q);
+ }
+ EXPORT_SYMBOL(up);
+ 
+@@ -269,11 +273,12 @@ static noinline int __sched __down_timeout(struct semaphore *sem, long timeout)
+ 	return __down_common(sem, TASK_UNINTERRUPTIBLE, timeout);
+ }
+ 
+-static noinline void __sched __up(struct semaphore *sem)
++static noinline void __sched __up(struct semaphore *sem,
++				  struct wake_q_head *wake_q)
+ {
+ 	struct semaphore_waiter *waiter = list_first_entry(&sem->wait_list,
+ 						struct semaphore_waiter, list);
+ 	list_del(&waiter->list);
+ 	waiter->up = true;
+-	wake_up_process(waiter->task);
++	wake_q_add(wake_q, waiter->task);
+ }
+-- 
+2.31.1

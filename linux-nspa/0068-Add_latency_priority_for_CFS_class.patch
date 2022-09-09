@@ -1,0 +1,1883 @@
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 845BDECAAA1
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:03:27 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S231346AbiIINDZ (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:03:25 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37066 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S230204AbiIINDQ (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:16 -0400
+Received: from mail-wm1-x32c.google.com (mail-wm1-x32c.google.com [IPv6:2a00:1450:4864:20::32c])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id C2B90696F5
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:15 -0700 (PDT)
+Received: by mail-wm1-x32c.google.com with SMTP id v185-20020a1cacc2000000b003b42e4f278cso1424260wme.5
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:15 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=message-id:date:subject:cc:to:from:from:to:cc:subject:date;
+        bh=WJQJQz6BCmTPtlYN0HtJCaopsH/vTitQdr1CCcoKyWI=;
+        b=t3R8C6EkP2t1Yr+tJLnQyoHyOVZTJ7QmZGrEvSPnaPUhv+u8TmEEAPtQ61L0lfrhq7
+         7f5iUrUEB9QtoqrnyDtDX1qUBEcNXKX3PuUbZGERGzpjHYAXjXCluDWIHt0S9M+R0hJH
+         7ieckAlsWP0yd5JKftj+HdoC4kKPnWIiB6HNYGHUsMM5Njrqdq4t/m9D3EIEG5GfVz86
+         mxwnAvBfJyqvSf6Qb9Z2aH9QGReUNtqrSUh7keUUWgcXm5KM2Igji0s4WfcMPftufQg4
+         QZMftDjZT01P8YYz7W+QwAW76GSkp0Y7uBudNVkdxMbCUL+Mz6osrFZlJ69OPTkI7EHo
+         HtKw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=message-id:date:subject:cc:to:from:x-gm-message-state:from:to:cc
+         :subject:date;
+        bh=WJQJQz6BCmTPtlYN0HtJCaopsH/vTitQdr1CCcoKyWI=;
+        b=UVz/KqY1rpDy7jPDla/p5wf6DP4qL8wkYymMkDBfcZtQenoIKp8G0yYPVDipUwFmUf
+         O5ff7fO0nRTq5SUgBrHsrDDlDwJ33yHxq7tRHsouuzh8jIwgWFK+MyFLH4uASgrXP2CK
+         5zTUsOdXnH2gqtptgjedoSk7x4rdynYjI8gecNlQWYf0MDScOTBOrsys+LJdUbX6J7jZ
+         GXrID+e7qVJSPJ4jGv7Cj2cLmXEEcpifP/b7QlJ5i77SRt+3QS+HVBihGJxAy61yfqXE
+         CvUvjJMXwfr9ta4iaCzekawuaGEp1ScTrwcY2aGsDyKJ7iNAj3OztooG3qSD0lWqZE4P
+         OfeQ==
+X-Gm-Message-State: ACgBeo381KzJOBqdsQNj5rJiJUpdJ+LWjkTBfse7DFk49ZmTxCgZKaGH
+        DPMso4JEAUXvcot+k1d9I0Bb1g==
+X-Google-Smtp-Source: AA6agR5GYISuf3bVqZMmGxgYgkJFHnSdmarI524SOFyjTY50C0ZNOWGYq5G0t4zWd9c+kzyXozeDFg==
+X-Received: by 2002:a05:600c:25ce:b0:3a5:a3b7:bbfe with SMTP id 14-20020a05600c25ce00b003a5a3b7bbfemr5671611wml.115.1662728593809;
+        Fri, 09 Sep 2022 06:03:13 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.12
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:12 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 0/8]  Add latency priority for CFS class
+Date:   Fri,  9 Sep 2022 15:03:01 +0200
+Message-Id: <20220909130309.25458-1-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+This patchset restarts the work about adding a latency priority to describe
+the latency tolerance of cfs tasks.
+
+The patches [1-4] have been done by Parth:
+https://lore.kernel.org/lkml/20200228090755.22829-1-parth@linux.ibm.com/
+
+I have just rebased and moved the set of latency priority outside the
+priority update. I have removed the reviewed tag because the patches
+are 2 years old.
+
+The patch [5] uses latency nice priority to define a latency offset
+and then to decide if a cfs task can preempt the current running task. The
+patch gives some tests results with cyclictests and hackbench to highlight
+the benefit of latency priority for short interactive task or
+long intensive tasks.
+
+Patch [6] adds the support of latency_offset to task group by adding a
+cpu.latency field. There were discussions for the last version about
+using a real unit for the field so I decided to expose directly the
+latency offset which reflects the time up to which we can preempt when the
+value is negative, or up to which we can defer the preemption when the
+value is positive.
+The range is [-sysctl_sched_latency:sysctl_sched_latency]
+
+Patch [7] makes sched_core taking into account the latency offset.
+
+Patch [8] adds a rb tree to cover some corner cases where the latency
+sensitive task is preempted by high priority task (RT/DL) or fails to
+preempt them. This patch ensures that tasks will have at least a
+slice of sched_min_granularity in priority at wakeup. The patch gives
+results to show the benefit in addition to patch 5
+
+I have also backported the patchset on a dragonboard RB3 with an android
+mainline kernel based on v5.18 for a quick test. I have used
+the TouchLatency app which is part of AOSP and described to be very good
+test to highlight jitter and jank frame sources of a system [1].
+In addition to the app, I have added some short running tasks waking-up
+regularly (to use the 8 cpus for 4 ms every 37777us) to stress the system
+without overloading it (and disabling EAS). The 1st results shows that the
+patchset helps to reduce the missed deadline frames from 5% to less than
+0.1% when the cpu.latency of task group are set.
+
+[1] https://source.android.com/docs/core/debug/eval_perf#touchlatency
+
+Change since v2:
+- Set a latency_offset field instead of saving a weight and computing it
+  on the fly.
+- Make latency_offset available for task group: cpu.latency
+- Fix some corner cases to make latency sensitive tasks schedule first and
+  add a rb tree for latency sensitive task.
+
+Change since v1:
+- fix typo
+- move some codes in the right patch to make bisect happy
+- simplify and fixed how the weight is computed
+- added support of sched core patch 7
+
+Parth Shah (4):
+  sched: Introduce latency-nice as a per-task attribute
+  sched/core: Propagate parent task's latency requirements to the child
+    task
+  sched: Allow sched_{get,set}attr to change latency_nice of the task
+  sched/core: Add permission checks for setting the latency_nice value
+
+Vincent Guittot (4):
+  sched/fair: Take into account latency priority at wakeup
+  sched/fair: Add sched group latency support
+  sched/core: support latency priority with sched core
+  sched/fair: Add latency list
+
+ include/linux/sched.h            |   5 +
+ include/uapi/linux/sched.h       |   4 +-
+ include/uapi/linux/sched/types.h |  19 ++++
+ init/init_task.c                 |   1 +
+ kernel/sched/core.c              |  81 +++++++++++++
+ kernel/sched/debug.c             |   1 +
+ kernel/sched/fair.c              | 189 ++++++++++++++++++++++++++++++-
+ kernel/sched/sched.h             |  35 ++++++
+ tools/include/uapi/linux/sched.h |   4 +-
+ 9 files changed, 332 insertions(+), 7 deletions(-)
+
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 9460CECAAD3
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:03:51 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S230143AbiIINDt (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:03:49 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37092 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S230509AbiIINDS (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:18 -0400
+Received: from mail-wm1-x32b.google.com (mail-wm1-x32b.google.com [IPv6:2a00:1450:4864:20::32b])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 1EC95B8F1E
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:17 -0700 (PDT)
+Received: by mail-wm1-x32b.google.com with SMTP id n23-20020a7bc5d7000000b003a62f19b453so4403200wmk.3
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:17 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=zREa4GRmzGBOIzgpCLdUUrk2ik+zgQmFE/1EecWF98s=;
+        b=NJSSbH4laihrup5pfaCYKDg8K6C8DbhDQr5QpZFUyEyCC9LZkIX6/+BA1A3F/ix1BX
+         gMc6lUK1qs0XoqT1sSze3zHEHRKEfFmsciTJtwAQc3jUFKXVy6xWno9cWHeps38FDC6O
+         o3EBTWU5Q4AR5SWzWnk/UnJ2Cn3BFQm4zq07FdbotpvRX81E+oJ2J5zd0/5m/7t8Mxol
+         Oo6EmN2d53s5CorKgvkgQx5tQQt1AeLrP6wQEaTS9gm3gKenqQBbbJ6bo7KXuCWrShKK
+         RXJZxQNwHEKYdzZGNliQCNM61WQsQCoDfxzddZTDMZSputZ/b4Xk6c6YcX+0BmnrHUrE
+         Kk0A==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=zREa4GRmzGBOIzgpCLdUUrk2ik+zgQmFE/1EecWF98s=;
+        b=kwiPDOqY7BAk+8uLndV3C0e8xoAkJ6voWTlz0I/4TJGapetUo7a+Wd36v6CM1uJq9m
+         tA22xon9hM7QK74RyNR3s+AR/eD1Bwe+wmHnT3BuVuI47yqy2jgQ8IF7VnZVJgBrLbsV
+         uFMfu8DIEsYPQr9suokeo7ldMwzRdn8q1I9welmYKp1E2ZRi7UtuvaEpBzHdHhTw/UyD
+         s1nq1ROYGuZvrOtp6C2gPYnH/ZEbZVq2LqMph//mzhgI1M7ZfcaKhlaGUW++yVpAzgja
+         4II0lgiieIzJa0Sm9nvOVjnN0/AlVWIHGb9xrWPvLeVfJG29Yu7ySkPQlS33qTIRPulZ
+         PoQA==
+X-Gm-Message-State: ACgBeo0ezJO+BwhqQ7uldasyDonvK19oBQGINh7RLDqHi8gh6uXhbcA7
+        Jy/3mg5/zsfYhdWdNrAb9ekUKg==
+X-Google-Smtp-Source: AA6agR6qCCPJOrw/4kBOZ9wBhNGB5IYvJMhF7B0Rh3diwo2uOj6ZQnX41ZZssaHKOTvh3g0s8tS2sQ==
+X-Received: by 2002:a05:600c:1694:b0:3b4:6205:1f95 with SMTP id k20-20020a05600c169400b003b462051f95mr822977wmn.151.1662728595449;
+        Fri, 09 Sep 2022 06:03:15 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.14
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:14 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 1/8] sched: Introduce latency-nice as a per-task attribute
+Date:   Fri,  9 Sep 2022 15:03:02 +0200
+Message-Id: <20220909130309.25458-2-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+From: Parth Shah <parth@linux.ibm.com>
+
+Latency-nice indicates the latency requirements of a task with respect
+to the other tasks in the system. The value of the attribute can be within
+the range of [-20, 19] both inclusive to be in-line with the values just
+like task nice values.
+
+latency_nice = -20 indicates the task to have the least latency as
+compared to the tasks having latency_nice = +19.
+
+The latency_nice may affect only the CFS SCHED_CLASS by getting
+latency requirements from the userspace.
+
+Additionally, add debugging bits for newly added latency_nice attribute.
+
+Signed-off-by: Parth Shah <parth@linux.ibm.com>
+[rebase]
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ include/linux/sched.h |  1 +
+ kernel/sched/debug.c  |  1 +
+ kernel/sched/sched.h  | 18 ++++++++++++++++++
+ 3 files changed, 20 insertions(+)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 88b8817b827d..a0adb55efa1c 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -773,6 +773,7 @@ struct task_struct {
+ 	int				static_prio;
+ 	int				normal_prio;
+ 	unsigned int			rt_priority;
++	int				latency_nice;
+ 
+ 	struct sched_entity		se;
+ 	struct sched_rt_entity		rt;
+diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
+index bb3d63bdf4ae..a3f7876217a6 100644
+--- a/kernel/sched/debug.c
++++ b/kernel/sched/debug.c
+@@ -1042,6 +1042,7 @@ void proc_sched_show_task(struct task_struct *p, struct pid_namespace *ns,
+ #endif
+ 	P(policy);
+ 	P(prio);
++	P(latency_nice);
+ 	if (task_has_dl_policy(p)) {
+ 		P(dl.runtime);
+ 		P(dl.deadline);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 74130a69d365..b927269b84f9 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -124,6 +124,24 @@ extern int sched_rr_timeslice;
+  */
+ #define NS_TO_JIFFIES(TIME)	((unsigned long)(TIME) / (NSEC_PER_SEC / HZ))
+ 
++/*
++ * Latency nice is meant to provide scheduler hints about the relative
++ * latency requirements of a task with respect to other tasks.
++ * Thus a task with latency_nice == 19 can be hinted as the task with no
++ * latency requirements, in contrast to the task with latency_nice == -20
++ * which should be given priority in terms of lower latency.
++ */
++#define MAX_LATENCY_NICE	19
++#define MIN_LATENCY_NICE	-20
++
++#define LATENCY_NICE_WIDTH	\
++	(MAX_LATENCY_NICE - MIN_LATENCY_NICE + 1)
++
++/*
++ * Default tasks should be treated as a task with latency_nice = 0.
++ */
++#define DEFAULT_LATENCY_NICE	0
++
+ /*
+  * Increase resolution of nice-level calculations for 64-bit architectures.
+  * The extra resolution improves shares distribution and load balancing of
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 6F1A7ECAAA1
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:09 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229687AbiIINEH (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:04:07 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37140 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S231298AbiIINDU (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:20 -0400
+Received: from mail-wm1-x32e.google.com (mail-wm1-x32e.google.com [IPv6:2a00:1450:4864:20::32e])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 5B2AC696F5
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:19 -0700 (PDT)
+Received: by mail-wm1-x32e.google.com with SMTP id e15so162215wmq.1
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:19 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=rlyri6gFQXbjH6qaw2UpG7VLO1J+noZ/tZbnqvT/NqA=;
+        b=hSQpx/vphpHkQs39vs9BDtqrWFMFnPic+HPynK8XcJzdxRGKV9EwhS4i3t+PofmJzd
+         b12BfAivvKi/iwuwFVGOyulbrtU0jObl35cg6XWYYtA14S+162Xhrj8iSL3N3d2dGClJ
+         VV43PPqpxWISAfoIiiPgPS8qP88oUg8lzOq9TofhhCV1KNJ3rDbx0mf0mJJqN/HCvoId
+         DDqPB2ISeRNbTCl7rN9rZHsqzreF8AtqfOoSwLLeR5UuJ46zBNngIiVfcfTbpsGSstz6
+         9RE4x22HGLyrP7sVFn1KDiNissQZQIgxu4gWIidnPrG0l0Ng22Q7Ib7eGxUivVkK5ElA
+         XHQg==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=rlyri6gFQXbjH6qaw2UpG7VLO1J+noZ/tZbnqvT/NqA=;
+        b=kcUiMFy6YiQPUDcjhQ6E8Pl3m8vDGNmYM988ih065Lzcpg3BjDAyzAPhhdLNrpCGq3
+         XiSk/kd1y7nBkNtfejE96HhfvnXu77bCQKYDLUcRLV7MWI1hZyKsprlAJkqMvxZxz9Ht
+         XC1fzyr5KgLiTitZuKBKVGuZwD9PtcipEAOX8mSDq+JYavsQV5Z257gciCngD8/RVXLA
+         VWzeYLqr2L87SU+NcshhOcCQ5R+5mqQrzbeS5biTBZthfMl3z3wGa4RnZL0mcIwytumG
+         yCATjrSmXrtDWGmY4ckR5kVJwp2rZi/V0qFPFlH583B8iRrWkOkE0weoNEmpyXeyZMB+
+         SMrg==
+X-Gm-Message-State: ACgBeo36043zO2ukbSVWti626EdiEwGRBs9VPOok+s7Y57uplykvQIBW
+        /8XZKQMUdDXjns4FMaspBkEcNg==
+X-Google-Smtp-Source: AA6agR76kOGvyPCMLTmHnGhkRdQAP3O/7XvJLAwjU1LsD0LXyUpQ1A4jr0gDj3JR1lXALEaZo3Cmhw==
+X-Received: by 2002:a05:600c:410d:b0:3a6:1db8:b419 with SMTP id j13-20020a05600c410d00b003a61db8b419mr5405856wmi.119.1662728597787;
+        Fri, 09 Sep 2022 06:03:17 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.15
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:16 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 2/8] sched/core: Propagate parent task's latency requirements to the child task
+Date:   Fri,  9 Sep 2022 15:03:03 +0200
+Message-Id: <20220909130309.25458-3-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+From: Parth Shah <parth@linux.ibm.com>
+
+Clone parent task's latency_nice attribute to the forked child task.
+
+Reset the latency_nice value to default value when the child task is
+set to sched_reset_on_fork.
+
+Also, initialize init_task.latency_nice value with DEFAULT_LATENCY_NICE
+value
+
+Signed-off-by: Parth Shah <parth@linux.ibm.com>
+[rebase]
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ init/init_task.c    | 1 +
+ kernel/sched/core.c | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/init/init_task.c b/init/init_task.c
+index 73cc8f03511a..225d11a39bc9 100644
+--- a/init/init_task.c
++++ b/init/init_task.c
+@@ -78,6 +78,7 @@ struct task_struct init_task
+ 	.prio		= MAX_PRIO - 20,
+ 	.static_prio	= MAX_PRIO - 20,
+ 	.normal_prio	= MAX_PRIO - 20,
++	.latency_nice	= DEFAULT_LATENCY_NICE,
+ 	.policy		= SCHED_NORMAL,
+ 	.cpus_ptr	= &init_task.cpus_mask,
+ 	.user_cpus_ptr	= NULL,
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 603a80ec9b0e..3c5fb04f00e1 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4511,6 +4511,9 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
+ 	 */
+ 	p->prio = current->normal_prio;
+ 
++	/* Propagate the parent's latency requirements to the child as well */
++	p->latency_nice = current->latency_nice;
++
+ 	uclamp_fork(p);
+ 
+ 	/*
+@@ -4527,6 +4530,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
+ 		p->prio = p->normal_prio = p->static_prio;
+ 		set_load_weight(p, false);
+ 
++		p->latency_nice = DEFAULT_LATENCY_NICE;
+ 		/*
+ 		 * We don't need the reset flag anymore after the fork. It has
+ 		 * fulfilled its duty:
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 692DDECAAD3
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:25 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S230471AbiIINEX (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:04:23 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37240 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S231332AbiIINDX (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:23 -0400
+Received: from mail-wr1-x42e.google.com (mail-wr1-x42e.google.com [IPv6:2a00:1450:4864:20::42e])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 57A7A72ECB
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:21 -0700 (PDT)
+Received: by mail-wr1-x42e.google.com with SMTP id bz13so2646414wrb.2
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:21 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=fAihZ8yLuSXoerd37QOKUB0JDX6tAV3dJZjXolbd6TA=;
+        b=cGpy5r81J1H4W7RT0j9tdRbUaPN1/9zI1/nIH3QPz140U8+PLfWGpR8uREBYzX7TL9
+         rJc7VPTE2FYdYAgql2+ZChlNHid+hsVIDXF3dDb5bh1HN3uBDRTS8CAVSMifZT25YCnf
+         VVvl2tIoNkeRPevAOCkiTDyyGOFU67KN116FAh5PCNa5/c8j1hJCwpZbkYh6D9V++uhJ
+         EXuqVmC41GZA7YIdsx5VqF2RY2dbUUIPfoV37Ll/rEYoBU7E+1vzMYYcU024StnnPWYi
+         PIhOoekzTIvJ8GqVI0ndeGs2cq8CTcYojPBGOKg1aOVEUc0MQytvZWxDD/qxe/xnuIJq
+         fCOw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=fAihZ8yLuSXoerd37QOKUB0JDX6tAV3dJZjXolbd6TA=;
+        b=7mE97QLjz6wHQveOr3yj4wUi7O3lPTy8oWNeQWq16VDtcgowxj1gDvEW+H8SDDyJvx
+         RImIbTqDlRwZV6GE3a8mRarApc+YqHPs7n+nOIHK8GtXbjKUeoeJSRxHQEUxAfwZBSFv
+         qhHI3iTbmFlVpEpentJ4xOBCPJyQ86AXQKRvaD47m1YnopQpMYOWji4fQ4fRJG3box4K
+         MCJgO2IqygokkUj5sA758r/LpHLkX9++RjVs6bhlfddPmXZyPByEZ8SfW+WkTvDZoR4B
+         VGc8azCN1cYyXuMk8FnUmu1NKWC/fn3/jC6fLPdSYc9IC4RrH6BccrCDGiN3axR7kqpU
+         dhuA==
+X-Gm-Message-State: ACgBeo0ecjKFqN396Ep3gkd/pC+gO8a8f9RjTLNuM31GGXcmBVC9E1FS
+        oieK+cwBNPYMl93ZSVFdVmdihg==
+X-Google-Smtp-Source: AA6agR7oE5faOze8yMkSqec4I6FVpmNjt+cZWW1xRnE546aDCK3az+HVMLnaCqaMIjFWj9/ZohaAIQ==
+X-Received: by 2002:adf:eb02:0:b0:227:1c:e760 with SMTP id s2-20020adfeb02000000b00227001ce760mr7842929wrn.635.1662728599512;
+        Fri, 09 Sep 2022 06:03:19 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.17
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:18 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 3/8] sched: Allow sched_{get,set}attr to change latency_nice of the task
+Date:   Fri,  9 Sep 2022 15:03:04 +0200
+Message-Id: <20220909130309.25458-4-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+From: Parth Shah <parth@linux.ibm.com>
+
+Introduce the latency_nice attribute to sched_attr and provide a
+mechanism to change the value with the use of sched_setattr/sched_getattr
+syscall.
+
+Also add new flag "SCHED_FLAG_LATENCY_NICE" to hint the change in
+latency_nice of the task on every sched_setattr syscall.
+
+Signed-off-by: Parth Shah <parth@linux.ibm.com>
+[rebase and add a dedicated __setscheduler_latency ]
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ include/uapi/linux/sched.h       |  4 +++-
+ include/uapi/linux/sched/types.h | 19 +++++++++++++++++++
+ kernel/sched/core.c              | 24 ++++++++++++++++++++++++
+ tools/include/uapi/linux/sched.h |  4 +++-
+ 4 files changed, 49 insertions(+), 2 deletions(-)
+
+diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
+index 3bac0a8ceab2..b2e932c25be6 100644
+--- a/include/uapi/linux/sched.h
++++ b/include/uapi/linux/sched.h
+@@ -132,6 +132,7 @@ struct clone_args {
+ #define SCHED_FLAG_KEEP_PARAMS		0x10
+ #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
+ #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
++#define SCHED_FLAG_LATENCY_NICE		0x80
+ 
+ #define SCHED_FLAG_KEEP_ALL	(SCHED_FLAG_KEEP_POLICY | \
+ 				 SCHED_FLAG_KEEP_PARAMS)
+@@ -143,6 +144,7 @@ struct clone_args {
+ 			 SCHED_FLAG_RECLAIM		| \
+ 			 SCHED_FLAG_DL_OVERRUN		| \
+ 			 SCHED_FLAG_KEEP_ALL		| \
+-			 SCHED_FLAG_UTIL_CLAMP)
++			 SCHED_FLAG_UTIL_CLAMP		| \
++			 SCHED_FLAG_LATENCY_NICE)
+ 
+ #endif /* _UAPI_LINUX_SCHED_H */
+diff --git a/include/uapi/linux/sched/types.h b/include/uapi/linux/sched/types.h
+index f2c4589d4dbf..db1e8199e8c8 100644
+--- a/include/uapi/linux/sched/types.h
++++ b/include/uapi/linux/sched/types.h
+@@ -10,6 +10,7 @@ struct sched_param {
+ 
+ #define SCHED_ATTR_SIZE_VER0	48	/* sizeof first published struct */
+ #define SCHED_ATTR_SIZE_VER1	56	/* add: util_{min,max} */
++#define SCHED_ATTR_SIZE_VER2	60	/* add: latency_nice */
+ 
+ /*
+  * Extended scheduling parameters data structure.
+@@ -98,6 +99,22 @@ struct sched_param {
+  * scheduled on a CPU with no more capacity than the specified value.
+  *
+  * A task utilization boundary can be reset by setting the attribute to -1.
++ *
++ * Latency Tolerance Attributes
++ * ===========================
++ *
++ * A subset of sched_attr attributes allows to specify the relative latency
++ * requirements of a task with respect to the other tasks running/queued in the
++ * system.
++ *
++ * @ sched_latency_nice	task's latency_nice value
++ *
++ * The latency_nice of a task can have any value in a range of
++ * [MIN_LATENCY_NICE..MAX_LATENCY_NICE].
++ *
++ * A task with latency_nice with the value of LATENCY_NICE_MIN can be
++ * taken for a task requiring a lower latency as opposed to the task with
++ * higher latency_nice.
+  */
+ struct sched_attr {
+ 	__u32 size;
+@@ -120,6 +137,8 @@ struct sched_attr {
+ 	__u32 sched_util_min;
+ 	__u32 sched_util_max;
+ 
++	/* latency requirement hints */
++	__s32 sched_latency_nice;
+ };
+ 
+ #endif /* _UAPI_LINUX_SCHED_TYPES_H */
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 3c5fb04f00e1..2015e7d1f8b2 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -7289,6 +7289,14 @@ static void __setscheduler_params(struct task_struct *p,
+ 	p->rt_priority = attr->sched_priority;
+ 	p->normal_prio = normal_prio(p);
+ 	set_load_weight(p, true);
++
++}
++
++static void __setscheduler_latency(struct task_struct *p,
++		const struct sched_attr *attr)
++{
++	if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE)
++		p->latency_nice = attr->sched_latency_nice;
+ }
+ 
+ /*
+@@ -7431,6 +7439,13 @@ static int __sched_setscheduler(struct task_struct *p,
+ 			return retval;
+ 	}
+ 
++	if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE) {
++		if (attr->sched_latency_nice > MAX_LATENCY_NICE)
++			return -EINVAL;
++		if (attr->sched_latency_nice < MIN_LATENCY_NICE)
++			return -EINVAL;
++	}
++
+ 	if (pi)
+ 		cpuset_read_lock();
+ 
+@@ -7465,6 +7480,9 @@ static int __sched_setscheduler(struct task_struct *p,
+ 			goto change;
+ 		if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP)
+ 			goto change;
++		if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE &&
++		    attr->sched_latency_nice != p->latency_nice)
++			goto change;
+ 
+ 		p->sched_reset_on_fork = reset_on_fork;
+ 		retval = 0;
+@@ -7553,6 +7571,7 @@ static int __sched_setscheduler(struct task_struct *p,
+ 		__setscheduler_params(p, attr);
+ 		__setscheduler_prio(p, newprio);
+ 	}
++	__setscheduler_latency(p, attr);
+ 	__setscheduler_uclamp(p, attr);
+ 
+ 	if (queued) {
+@@ -7763,6 +7782,9 @@ static int sched_copy_attr(struct sched_attr __user *uattr, struct sched_attr *a
+ 	    size < SCHED_ATTR_SIZE_VER1)
+ 		return -EINVAL;
+ 
++	if ((attr->sched_flags & SCHED_FLAG_LATENCY_NICE) &&
++	    size < SCHED_ATTR_SIZE_VER2)
++		return -EINVAL;
+ 	/*
+ 	 * XXX: Do we want to be lenient like existing syscalls; or do we want
+ 	 * to be strict and return an error on out-of-bounds values?
+@@ -8000,6 +8022,8 @@ SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
+ 	get_params(p, &kattr);
+ 	kattr.sched_flags &= SCHED_FLAG_ALL;
+ 
++	kattr.sched_latency_nice = p->latency_nice;
++
+ #ifdef CONFIG_UCLAMP_TASK
+ 	/*
+ 	 * This could race with another potential updater, but this is fine
+diff --git a/tools/include/uapi/linux/sched.h b/tools/include/uapi/linux/sched.h
+index 3bac0a8ceab2..ecc4884bfe4b 100644
+--- a/tools/include/uapi/linux/sched.h
++++ b/tools/include/uapi/linux/sched.h
+@@ -132,6 +132,7 @@ struct clone_args {
+ #define SCHED_FLAG_KEEP_PARAMS		0x10
+ #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
+ #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
++#define SCHED_FLAG_LATENCY_NICE		0X80
+ 
+ #define SCHED_FLAG_KEEP_ALL	(SCHED_FLAG_KEEP_POLICY | \
+ 				 SCHED_FLAG_KEEP_PARAMS)
+@@ -143,6 +144,7 @@ struct clone_args {
+ 			 SCHED_FLAG_RECLAIM		| \
+ 			 SCHED_FLAG_DL_OVERRUN		| \
+ 			 SCHED_FLAG_KEEP_ALL		| \
+-			 SCHED_FLAG_UTIL_CLAMP)
++			 SCHED_FLAG_UTIL_CLAMP		| \
++			 SCHED_FLAG_LATENCY_NICE)
+ 
+ #endif /* _UAPI_LINUX_SCHED_H */
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 86B55ECAAD3
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:32 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229494AbiIINE2 (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:04:28 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37286 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S231360AbiIINDZ (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:25 -0400
+Received: from mail-wm1-x329.google.com (mail-wm1-x329.google.com [IPv6:2a00:1450:4864:20::329])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 374C3B8F1E
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:23 -0700 (PDT)
+Received: by mail-wm1-x329.google.com with SMTP id az24-20020a05600c601800b003a842e4983cso1292855wmb.0
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:23 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=rr8CydEOaNyM9xcBRy/GQAgJhU9JrzFylVpY+2UJlqc=;
+        b=BXXDCATW8FCicXAPegf7TxK/MRjPGBirNYTBOaG35fj3fCN8rc6FFk5tKcl6Th0sJz
+         ps5UTQvcA/JKck2+gbM6HjCSn0/UXLoromLA6q/eZun3MUYSx1nCM/a6aUwUX2cL7aMO
+         mcN9hYt26Yk/nZqapJU6pu7sRxdP/He1+ssqQo6SyaY6FieHwKIhGbYFdAIgnenDeU+7
+         Y14fqmxKQ9RKAxfJEz+wFKArSA5d4LXsgx3wUyawm7LvN4vfN9GmXpZhYNsdeuzY2yxR
+         63elcw5igwnztGrnpld5Z3XcViNC3OUBy3N9O27eXn/JBrNCdksvM+6/Vh3H4fgG1T/i
+         vMAw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=rr8CydEOaNyM9xcBRy/GQAgJhU9JrzFylVpY+2UJlqc=;
+        b=LkzrbGo9Ckux+1neAPeK2mZRhw1JCKI6D3cofhLpETS4RdMraBwIuvQgdwa5oXLFuV
+         swARkG3Brb17jKHdZJtv+k6vAfKb0Oawy793+X6lfyPWwmCSE/e8lHA05zALAU2pVC50
+         9NdooFh8vs5qwZmA2tW1I8a6RZyryn/J318gRA3uwuOhJ3H253zgtBy3hW2ACJOa6Opo
+         mOrZV/5zO+eUM+6wunrasP2TjtbYsvVaqAIaDEdhzIOUl2JyD1JBTXTto5enOEnXEsRy
+         6I8S4Ib6MKCaCcJZeSRoFiFEA2ZN7IRMQVJrBdtmfUt8OuOVBBo+9EOoeCcNtdQVVsm7
+         C1BQ==
+X-Gm-Message-State: ACgBeo02oicXN4JxPO/eE51RJzmaLC3L4Y/djzBhm0ZjHg84ODtyf1B3
+        5uSZ6cYg71SUkEBJVUrUxsobdA==
+X-Google-Smtp-Source: AA6agR6OusN4WtlOo4S+R5/9VVC4/hRibDeBfmZkGYX4GSDAsN0z53rBY2vYWeufhM6UyzriY6AH+w==
+X-Received: by 2002:a1c:f217:0:b0:3a6:61f2:a9c2 with SMTP id s23-20020a1cf217000000b003a661f2a9c2mr5403171wmc.88.1662728601297;
+        Fri, 09 Sep 2022 06:03:21 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.19
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:20 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 4/8] sched/core: Add permission checks for setting the latency_nice value
+Date:   Fri,  9 Sep 2022 15:03:05 +0200
+Message-Id: <20220909130309.25458-5-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+From: Parth Shah <parth@linux.ibm.com>
+
+Since the latency_nice uses the similar infrastructure as NICE, use the
+already existing CAP_SYS_NICE security checks for the latency_nice. This
+should return -EPERM for the non-root user when trying to set the task
+latency_nice value to any lower than the current value.
+
+Signed-off-by: Parth Shah <parth@linux.ibm.com>
+[rebase]
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ kernel/sched/core.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 2015e7d1f8b2..3c79c5419d1b 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -7444,6 +7444,10 @@ static int __sched_setscheduler(struct task_struct *p,
+ 			return -EINVAL;
+ 		if (attr->sched_latency_nice < MIN_LATENCY_NICE)
+ 			return -EINVAL;
++		/* Use the same security checks as NICE */
++		if (attr->sched_latency_nice < p->latency_nice &&
++		    !capable(CAP_SYS_NICE))
++			return -EPERM;
+ 	}
+ 
+ 	if (pi)
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 78045ECAAD3
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:39 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S230458AbiIINEg (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:04:36 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37332 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S231321AbiIIND0 (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:26 -0400
+Received: from mail-wm1-x329.google.com (mail-wm1-x329.google.com [IPv6:2a00:1450:4864:20::329])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id C3C1D102D79
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:24 -0700 (PDT)
+Received: by mail-wm1-x329.google.com with SMTP id bd26-20020a05600c1f1a00b003a5e82a6474so1249978wmb.4
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:24 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=wp0sbaDX3sZeRzdBlGG2s9mKs+TvHFH+JM2i907NtFo=;
+        b=Wt2h/uXAsKJ9GKkinOv4GcusJBCdMiDtH7Vh54lWPrqHsWZc8l0k3wiz7+tJ2P/lkt
+         KXoVgSBHNpBXGhwTwV8X1QFL3IW0Y91bcRmnHZ2rYgBhvf22GAafz9BhdLwYEvY7/YIQ
+         qUefOJAzNhSjGcEiS8HhMqVylEv2Kh5290Yp0sou7OYo1BapaITxxFxMze8wiRgcQ5Oa
+         2EoSqatQ3vce4RDxCSxrXkM7gP+0G5jqvI3WNHjP5ecclik4L1ojsCf5/nN+BKeCD9SQ
+         rPd/Gy1HFZzmHyAu916ZbFE+EvYyUgkJBDHt35PxIg0ePIQ86cI2OkfTKL3k7VMSsX+n
+         z69w==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=wp0sbaDX3sZeRzdBlGG2s9mKs+TvHFH+JM2i907NtFo=;
+        b=4dOQKQ7E7D0udiwuRgFFXi2EWHUD/hbUddATgqCIbVJ4VC/XoE4OStjWmZazEcsJ5J
+         ywnP3qdXbaQPuHueh2zoC0XmwpR7JNdP17G6JI4m4AhV+mv4B70Uy1FkGDSuw/S1cGzi
+         SJkNNZNMDKM/JgCR5GQw4+UKe2ro9CV0zEE3kzy2GviN02csBhDJaZyG0xGE9e0tIWTW
+         rkTwTAh8PF7WLM4cV7WfzvdJdo9qU5CVZGY2vftGWm5qIzjifZG7IQmTlw68cgY73CCt
+         b7a/F+v1VNBwhqD64H3/5YZdiya50bCcYYJ5u6lBBQM7vFiSPrnWJscQwmq/GrGjGroW
+         W4yg==
+X-Gm-Message-State: ACgBeo00dRO5dU2i1ZmvZ0XVtY4wtbopsZ9wW3AcWKY0hGBLZk+Mj2pA
+        zkUw1lAIAlL4RScvog7dc2DC/w==
+X-Google-Smtp-Source: AA6agR6rvUh5hxFX8R2su/k482PmWLb8uMJjh4GkAzMaRouJiov+geQzC3j2mh07WVXmwKI9XpPOrQ==
+X-Received: by 2002:a05:600c:22d2:b0:3a8:3e8c:d914 with SMTP id 18-20020a05600c22d200b003a83e8cd914mr5377182wmg.128.1662728603054;
+        Fri, 09 Sep 2022 06:03:23 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.21
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:22 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 5/8] sched/fair: Take into account latency priority at wakeup
+Date:   Fri,  9 Sep 2022 15:03:06 +0200
+Message-Id: <20220909130309.25458-6-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+Take into account the latency priority of a thread when deciding to
+preempt the current running thread. We don't want to provide more CPU
+bandwidth to a thread but reorder the scheduling to run latency sensitive
+task first whenever possible.
+
+As long as a thread didn't use its bandwidth, it will be able to preempt
+the current thread.
+
+At the opposite, a thread with a low latency priority will preempt current
+thread at wakeup only to keep fair CPU bandwidth sharing. Otherwise it will
+wait for the tick to get its sched slice.
+
+                                   curr vruntime
+                                       |
+                      sysctl_sched_wakeup_granularity
+                                   <-->
+----------------------------------|----|-----------------------|---------------
+                                  |    |<--------------------->
+                                  |    .  sysctl_sched_latency
+                                  |    .
+default/current latency entity    |    .
+                                  |    .
+1111111111111111111111111111111111|0000|-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-
+se preempts curr at wakeup ------>|<- se doesn't preempt curr -----------------
+                                  |    .
+                                  |    .
+                                  |    .
+low latency entity                |    .
+                                   ---------------------->|
+                               % of sysctl_sched_latency  |
+1111111111111111111111111111111111111111111111111111111111|0000|-1-1-1-1-1-1-1-
+preempt ------------------------------------------------->|<- do not preempt --
+                                  |    .
+                                  |    .
+                                  |    .
+high latency entity               |    .
+         |<-----------------------|    .
+         | % of sysctl_sched_latency   .
+111111111|0000|-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1
+preempt->|<- se doesn't preempt curr ------------------------------------------
+
+Tests results of nice latency impact on heavy load like hackbench:
+
+hackbench -l (2560 / group) -g group
+group        latency 0             latency 19
+1            1.350(+/- 1.10%)      1.287(+/- 1.60%) + 5%
+4            1.392(+/- 1.67%)      1.248(+/- 1.51%) +11%
+8            1.294(+/- 1.56%)      1.254(+/- 1.96%) + 3%
+16           1.315(+/- 1.02%)      1.288(+/- 1.53%) + 2%
+
+hackbench -p -l (2560 / group) -g group
+group
+1            1.768(+/- 13%)      0.805(+/- 2%) +54%
+4            1.634(+/- 13%)      0.765(+/- 1%) +53%
+8            1.305(+/-  4%)      0.745(+/- 2%) +43%
+16           0.786(+/-  4%)      0.705(+/- 2%) +10%
+
+By deacreasing the latency prio, we reduce the number of preemption at
+wakeup and help hackbench making progress.
+
+Test results of nice latency impact on short live load like cyclictest
+while competing with heavy load like hackbench:
+
+hackbench -l 10000 -g $group &
+cyclictest --policy other -D 5 -q -n
+        latency 0           latency -20
+group   min  avg    max     min  avg    max
+0       17    18     28      16   18     28
+1       67   319   7369      63   76   2479
+4       64   453  51699      45   95   8788
+8       65   814  51699      63  116  19535
+16      64  1275  37744      63  159  51134
+
+group = 0 means that hackbench is not running.
+
+The avg is significantly improved with nice latency -20 especially with
+large number of groups but min and max remain quite similar. If we add the
+histogram parameter to get details of latency, we have :
+
+hackbench -l 10000 -g 16 &
+cyclictest --policy other -D 5 -q -n  -H 20000 --histfile data.txt
+              latency 0    latency -20
+Min Latencies:    63           63
+Avg Latencies:  1459          214
+Max Latencies: 58274        82358
+50% latencies:   164           87
+75% latencies:   848           91
+85% latencies:  1246           94
+90% latencies:  2149           96
+95% latencies:  8463           99
+99% latencies:>20000          120
+
+With percentile details, we see the benefit of nice latency -20 as
+only 1% of the latencies stays above 120us whereas the default latency
+has got 25% are above 848us, 10% over the 2ms and 1% above 20ms.
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ include/linux/sched.h |  4 +++-
+ init/init_task.c      |  2 +-
+ kernel/sched/core.c   | 39 ++++++++++++++++++++++++------
+ kernel/sched/debug.c  |  2 +-
+ kernel/sched/fair.c   | 56 +++++++++++++++++++++++++++++++++++++++++--
+ kernel/sched/sched.h  | 12 ++++++++++
+ 6 files changed, 103 insertions(+), 12 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index a0adb55efa1c..2d2a361d65ee 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -557,6 +557,8 @@ struct sched_entity {
+ 	/* cached value of my_q->h_nr_running */
+ 	unsigned long			runnable_weight;
+ #endif
++	/* preemption offset in ns */
++	long				latency_offset;
+ 
+ #ifdef CONFIG_SMP
+ 	/*
+@@ -773,7 +775,7 @@ struct task_struct {
+ 	int				static_prio;
+ 	int				normal_prio;
+ 	unsigned int			rt_priority;
+-	int				latency_nice;
++	int				latency_prio;
+ 
+ 	struct sched_entity		se;
+ 	struct sched_rt_entity		rt;
+diff --git a/init/init_task.c b/init/init_task.c
+index 225d11a39bc9..e98c71f24981 100644
+--- a/init/init_task.c
++++ b/init/init_task.c
+@@ -78,7 +78,7 @@ struct task_struct init_task
+ 	.prio		= MAX_PRIO - 20,
+ 	.static_prio	= MAX_PRIO - 20,
+ 	.normal_prio	= MAX_PRIO - 20,
+-	.latency_nice	= DEFAULT_LATENCY_NICE,
++	.latency_prio	= NICE_WIDTH - 20,
+ 	.policy		= SCHED_NORMAL,
+ 	.cpus_ptr	= &init_task.cpus_mask,
+ 	.user_cpus_ptr	= NULL,
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 3c79c5419d1b..13cf794708ee 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1288,6 +1288,13 @@ static void set_load_weight(struct task_struct *p, bool update_load)
+ 	}
+ }
+ 
++static void set_latency_offset(struct task_struct *p)
++{
++	long weight = sched_latency_to_weight[p->latency_prio];
++
++	p->se.latency_offset = (sysctl_sched_latency * weight) >> NICE_LATENCY_SHIFT;
++}
++
+ #ifdef CONFIG_UCLAMP_TASK
+ /*
+  * Serializes updates of utilization clamp values
+@@ -4512,7 +4519,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
+ 	p->prio = current->normal_prio;
+ 
+ 	/* Propagate the parent's latency requirements to the child as well */
+-	p->latency_nice = current->latency_nice;
++	p->latency_prio = current->latency_prio;
+ 
+ 	uclamp_fork(p);
+ 
+@@ -4530,7 +4537,9 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
+ 		p->prio = p->normal_prio = p->static_prio;
+ 		set_load_weight(p, false);
+ 
+-		p->latency_nice = DEFAULT_LATENCY_NICE;
++		p->latency_prio = NICE_TO_LATENCY(0);
++		set_latency_offset(p);
++
+ 		/*
+ 		 * We don't need the reset flag anymore after the fork. It has
+ 		 * fulfilled its duty:
+@@ -7295,8 +7304,10 @@ static void __setscheduler_params(struct task_struct *p,
+ static void __setscheduler_latency(struct task_struct *p,
+ 		const struct sched_attr *attr)
+ {
+-	if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE)
+-		p->latency_nice = attr->sched_latency_nice;
++	if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE) {
++		p->latency_prio = NICE_TO_LATENCY(attr->sched_latency_nice);
++		set_latency_offset(p);
++	}
+ }
+ 
+ /*
+@@ -7445,7 +7456,7 @@ static int __sched_setscheduler(struct task_struct *p,
+ 		if (attr->sched_latency_nice < MIN_LATENCY_NICE)
+ 			return -EINVAL;
+ 		/* Use the same security checks as NICE */
+-		if (attr->sched_latency_nice < p->latency_nice &&
++		if (attr->sched_latency_nice < LATENCY_TO_NICE(p->latency_prio) &&
+ 		    !capable(CAP_SYS_NICE))
+ 			return -EPERM;
+ 	}
+@@ -7485,7 +7496,7 @@ static int __sched_setscheduler(struct task_struct *p,
+ 		if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP)
+ 			goto change;
+ 		if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE &&
+-		    attr->sched_latency_nice != p->latency_nice)
++		    attr->sched_latency_nice != LATENCY_TO_NICE(p->latency_prio))
+ 			goto change;
+ 
+ 		p->sched_reset_on_fork = reset_on_fork;
+@@ -8026,7 +8037,7 @@ SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
+ 	get_params(p, &kattr);
+ 	kattr.sched_flags &= SCHED_FLAG_ALL;
+ 
+-	kattr.sched_latency_nice = p->latency_nice;
++	kattr.sched_latency_nice = LATENCY_TO_NICE(p->latency_prio);
+ 
+ #ifdef CONFIG_UCLAMP_TASK
+ 	/*
+@@ -11177,6 +11188,20 @@ const u32 sched_prio_to_wmult[40] = {
+  /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
+ };
+ 
++/*
++ * latency weight for wakeup preemption
++ */
++const int sched_latency_to_weight[40] = {
++ /* -20 */     -1024,     -973,     -922,      -870,      -819,
++ /* -15 */      -768,     -717,     -666,      -614,      -563,
++ /* -10 */      -512,     -461,     -410,      -358,      -307,
++ /*  -5 */      -256,     -205,     -154,      -102,       -51,
++ /*   0 */         0,       51,      102,       154,       205,
++ /*   5 */       256,      307,      358,       410,       461,
++ /*  10 */       512,      563,      614,       666,       717,
++ /*  15 */       768,      819,      870,       922,       973,
++};
++
+ void call_trace_sched_update_nr_running(struct rq *rq, int count)
+ {
+         trace_sched_update_nr_running_tp(rq, count);
+diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
+index a3f7876217a6..06aaa0c81d4b 100644
+--- a/kernel/sched/debug.c
++++ b/kernel/sched/debug.c
+@@ -1042,7 +1042,7 @@ void proc_sched_show_task(struct task_struct *p, struct pid_namespace *ns,
+ #endif
+ 	P(policy);
+ 	P(prio);
+-	P(latency_nice);
++	P(latency_prio);
+ 	if (task_has_dl_policy(p)) {
+ 		P(dl.runtime);
+ 		P(dl.deadline);
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e8c1b889dcbb..a20eadb0af97 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -4574,6 +4574,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 		update_idle_cfs_rq_clock_pelt(cfs_rq);
+ }
+ 
++static long wakeup_latency_gran(struct sched_entity *curr, struct sched_entity *se);
++
+ /*
+  * Preempt the current task with a newly woken task if needed:
+  */
+@@ -4606,6 +4608,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+ 
+ 	se = __pick_first_entity(cfs_rq);
+ 	delta = curr->vruntime - se->vruntime;
++	delta -= wakeup_latency_gran(curr, se);
+ 
+ 	if (delta < 0)
+ 		return;
+@@ -5732,6 +5735,35 @@ static int sched_idle_cpu(int cpu)
+ }
+ #endif
+ 
++static void set_next_buddy(struct sched_entity *se);
++
++static void check_preempt_from_others(struct cfs_rq *cfs, struct sched_entity *se)
++{
++	struct sched_entity *next;
++
++	if (se->latency_offset >= 0)
++		return;
++
++	if (cfs->nr_running <= 1)
++		return;
++	/*
++	 * When waking from idle, we don't need to check to preempt at wakeup
++	 * the idle thread and don't set next buddy as a candidate for being
++	 * picked in priority.
++	 * In case of simultaneous wakeup from idle, the latency sensitive tasks
++	 * lost opportunity to preempt non sensitive tasks which woke up
++	 * simultaneously.
++	 */
++
++	if (cfs->next)
++		next = cfs->next;
++	else
++		next = __pick_first_entity(cfs);
++
++	if (next && wakeup_preempt_entity(next, se) == 1)
++		set_next_buddy(se);
++}
++
+ /*
+  * The enqueue_task method is called before nr_running is
+  * increased. Here we update the fair scheduling stats and
+@@ -5818,14 +5850,15 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	if (!task_new)
+ 		update_overutilized_status(rq);
+ 
++	if (rq->curr->sched_class != &fair_sched_class)
++		check_preempt_from_others(cfs_rq_of(&p->se), &p->se);
++
+ enqueue_throttle:
+ 	assert_list_leaf_cfs_rq(rq);
+ 
+ 	hrtick_update(rq);
+ }
+ 
+-static void set_next_buddy(struct sched_entity *se);
+-
+ /*
+  * The dequeue_task method is called before nr_running is
+  * decreased. We remove the task from the rbtree and
+@@ -7148,6 +7181,22 @@ balance_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
+ }
+ #endif /* CONFIG_SMP */
+ 
++static long wakeup_latency_gran(struct sched_entity *curr, struct sched_entity *se)
++{
++	long latency_offset = se->latency_offset;
++
++	/*
++	 * A negative latency weigth means that the sched_entity has latency
++	 * requirement that needs to be evaluated versus other entity.
++	 * Otherwise, use the latency weight to evaluate how much scheduling
++	 * delay is acceptable by se.
++	 */
++	if ((se->latency_offset < 0) || (curr->latency_offset < 0))
++		latency_offset -= curr->latency_offset;
++
++	return latency_offset;
++}
++
+ static unsigned long wakeup_gran(struct sched_entity *se)
+ {
+ 	unsigned long gran = sysctl_sched_wakeup_granularity;
+@@ -7187,6 +7236,9 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
+ {
+ 	s64 gran, vdiff = curr->vruntime - se->vruntime;
+ 
++	/* Take into account latency priority */
++	vdiff -= wakeup_latency_gran(curr, se);
++
+ 	if (vdiff <= 0)
+ 		return -1;
+ 
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index b927269b84f9..c4beddb58ebd 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -141,6 +141,17 @@ extern int sched_rr_timeslice;
+  * Default tasks should be treated as a task with latency_nice = 0.
+  */
+ #define DEFAULT_LATENCY_NICE	0
++#define DEFAULT_LATENCY_PRIO	(DEFAULT_LATENCY_NICE + LATENCY_NICE_WIDTH/2)
++
++/*
++ * Convert user-nice values [ -20 ... 0 ... 19 ]
++ * to static latency [ 0..39 ],
++ * and back.
++ */
++#define NICE_TO_LATENCY(nice)	((nice) + DEFAULT_LATENCY_PRIO)
++#define LATENCY_TO_NICE(prio)	((prio) - DEFAULT_LATENCY_PRIO)
++#define NICE_LATENCY_SHIFT	(SCHED_FIXEDPOINT_SHIFT)
++#define NICE_LATENCY_WEIGHT_MAX	(1L << NICE_LATENCY_SHIFT)
+ 
+ /*
+  * Increase resolution of nice-level calculations for 64-bit architectures.
+@@ -2114,6 +2125,7 @@ static_assert(WF_TTWU == SD_BALANCE_WAKE);
+ 
+ extern const int		sched_prio_to_weight[40];
+ extern const u32		sched_prio_to_wmult[40];
++extern const int		sched_latency_to_weight[40];
+ 
+ /*
+  * {de,en}queue flags:
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 62C8EECAAD3
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:45 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S231515AbiIINEm (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:04:42 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37292 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S230434AbiIIND1 (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:27 -0400
+Received: from mail-wm1-x32e.google.com (mail-wm1-x32e.google.com [IPv6:2a00:1450:4864:20::32e])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 67FDE1023C6
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:26 -0700 (PDT)
+Received: by mail-wm1-x32e.google.com with SMTP id e15so162541wmq.1
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:26 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=Jcs+6ZlLyYHw9FZ1AFMfUXk9PpNg2BgTfj6tBszyRVU=;
+        b=UFxGNEstPxa21k3IArpKNLRgJqLfsyPG4/TX/yU6gyonDdKnIIUTc2b5/ObszOyMiN
+         SgMbl1XnoxfgQ9YdJLXqGGCGgK9idzBUN2Pguy5sl7LXPybxP8VY1a13B089GoalrO9d
+         anzzerxxkyO+MzQmajvKG2pfmTBev8mYwVv3V0Y8hqjN4BVDneWzM/hlq+c+CCeWMV0b
+         dVsezHL1EMS1LNbdCnw6dlH+QOT9wUKb3mWd/SekkTvMZTgwdXavMyPc5NiZLa42Bj7I
+         A9r+MqUCrJXaA6OigL1dqjNFdXItpiq+d4c9qap+Bdlhl0EqXImSP5jHoCaN0eOe55Qp
+         KHyg==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=Jcs+6ZlLyYHw9FZ1AFMfUXk9PpNg2BgTfj6tBszyRVU=;
+        b=UrSIpVxfW+l/YfyTUPh8ktgmEMWwvaC5zlAHUE+PMgdcIVleDVb7zSYXq2wLThnrJO
+         W22DRZYCa/HuFsHyJM5U5+D4cEhj9NoMkvRWW7wi83SUpZK6mCqQoYhPGQ1SJjpzRzzy
+         1W2fPAKP9ZnkNSPjcmuttD6b004qT4/KJiD97Jj+s1bOfGMQLQPpRbUEgscEz95BoeVM
+         21lK0gJJaomOpu4gL2JVKtwH5gj2r73/T1lsE9CJMVhgzo786Fx4F54bvmdA3pDywmQk
+         CJ/q8+pLKf2ZDPOBqxa+55UVMiRUtLfmRKx2EfSVap9eawi7jy8rLNd1nN2xDYVwWqc0
+         cXFw==
+X-Gm-Message-State: ACgBeo1xgosZDfDq+Ms6dkUoCy740dAwaA1EuV7TSbwnFEgeyOQBK+hU
+        xkgOjNvjJUz9Ak+OtPP7LfZMjA==
+X-Google-Smtp-Source: AA6agR5P3QhcE3DPZyQgW1JiWRSA2pMst2eXi520E3ZRp0G03fJgX3Rz9MfGsyFj6oaw6YEHfyaLLQ==
+X-Received: by 2002:a05:600c:1e8b:b0:3a6:1a09:2a89 with SMTP id be11-20020a05600c1e8b00b003a61a092a89mr5319379wmb.108.1662728605057;
+        Fri, 09 Sep 2022 06:03:25 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.23
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:24 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 6/8] sched/fair: Add sched group latency support
+Date:   Fri,  9 Sep 2022 15:03:07 +0200
+Message-Id: <20220909130309.25458-7-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+Task can set its latency priority, which is then used to decide to preempt
+the current running entity of the cfs, but sched group entities still have
+the default latency offset.
+
+Add a latency field in task group to set the latency offset of the
+sched_eneities of the group, which will be used against other entities in
+the parent cfs when deciding which entity to schedule first.
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ kernel/sched/core.c  | 24 ++++++++++++++++++++++++
+ kernel/sched/fair.c  | 33 +++++++++++++++++++++++++++++++++
+ kernel/sched/sched.h |  4 ++++
+ 3 files changed, 61 insertions(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 13cf794708ee..bfea862a3588 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -10860,6 +10860,19 @@ static int cpu_idle_write_s64(struct cgroup_subsys_state *css,
+ {
+ 	return sched_group_set_idle(css_tg(css), idle);
+ }
++
++static s64 cpu_latency_read_s64(struct cgroup_subsys_state *css,
++			       struct cftype *cft)
++{
++	return css_tg(css)->latency_offset;
++}
++
++static int cpu_latency_write_s64(struct cgroup_subsys_state *css,
++				struct cftype *cft, s64 latency)
++{
++	return sched_group_set_latency(css_tg(css), latency);
++}
++
+ #endif
+ 
+ static struct cftype cpu_legacy_files[] = {
+@@ -10874,6 +10887,11 @@ static struct cftype cpu_legacy_files[] = {
+ 		.read_s64 = cpu_idle_read_s64,
+ 		.write_s64 = cpu_idle_write_s64,
+ 	},
++	{
++		.name = "latency",
++		.read_s64 = cpu_latency_read_s64,
++		.write_s64 = cpu_latency_write_s64,
++	},
+ #endif
+ #ifdef CONFIG_CFS_BANDWIDTH
+ 	{
+@@ -11091,6 +11109,12 @@ static struct cftype cpu_files[] = {
+ 		.read_s64 = cpu_idle_read_s64,
+ 		.write_s64 = cpu_idle_write_s64,
+ 	},
++	{
++		.name = "latency",
++		.flags = CFTYPE_NOT_ON_ROOT,
++		.read_s64 = cpu_latency_read_s64,
++		.write_s64 = cpu_latency_write_s64,
++	},
+ #endif
+ #ifdef CONFIG_CFS_BANDWIDTH
+ 	{
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index a20eadb0af97..6cc4f2a9725d 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11769,6 +11769,7 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
+ 		goto err;
+ 
+ 	tg->shares = NICE_0_LOAD;
++	tg->latency_offset = 0;
+ 
+ 	init_cfs_bandwidth(tg_cfs_bandwidth(tg));
+ 
+@@ -11867,6 +11868,9 @@ void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
+ 	}
+ 
+ 	se->my_q = cfs_rq;
++
++	se->latency_offset = tg->latency_offset;
++
+ 	/* guarantee group entities always have weight */
+ 	update_load_set(&se->load, NICE_0_LOAD);
+ 	se->parent = parent;
+@@ -11997,6 +12001,35 @@ int sched_group_set_idle(struct task_group *tg, long idle)
+ 	return 0;
+ }
+ 
++int sched_group_set_latency(struct task_group *tg, long latency)
++{
++	int i;
++
++	if (tg == &root_task_group)
++		return -EINVAL;
++
++	if (abs(latency) > sysctl_sched_latency)
++		return -EINVAL;
++
++	mutex_lock(&shares_mutex);
++
++	if (tg->latency_offset == latency) {
++		mutex_unlock(&shares_mutex);
++		return 0;
++	}
++
++	tg->latency_offset = latency;
++
++	for_each_possible_cpu(i) {
++		struct sched_entity *se = tg->se[i];
++
++		WRITE_ONCE(se->latency_offset, latency);
++	}
++
++	mutex_unlock(&shares_mutex);
++	return 0;
++}
++
+ #else /* CONFIG_FAIR_GROUP_SCHED */
+ 
+ void free_fair_sched_group(struct task_group *tg) { }
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index c4beddb58ebd..117b23dfb912 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -406,6 +406,8 @@ struct task_group {
+ 
+ 	/* A positive value indicates that this is a SCHED_IDLE group. */
+ 	int			idle;
++	/* latency constraint of the group. */
++	int			latency_offset;
+ 
+ #ifdef	CONFIG_SMP
+ 	/*
+@@ -519,6 +521,8 @@ extern int sched_group_set_shares(struct task_group *tg, unsigned long shares);
+ 
+ extern int sched_group_set_idle(struct task_group *tg, long idle);
+ 
++extern int sched_group_set_latency(struct task_group *tg, long latency);
++
+ #ifdef CONFIG_SMP
+ extern void set_task_rq_fair(struct sched_entity *se,
+ 			     struct cfs_rq *prev, struct cfs_rq *next);
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 66471ECAAD3
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:51 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S231559AbiIINEs (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:04:48 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37292 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S230021AbiIINDa (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:30 -0400
+Received: from mail-wm1-x32a.google.com (mail-wm1-x32a.google.com [IPv6:2a00:1450:4864:20::32a])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id CDA8F10C98D
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:28 -0700 (PDT)
+Received: by mail-wm1-x32a.google.com with SMTP id n17-20020a05600c3b9100b003b3235574dbso1262933wms.2
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:28 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=ShOnvvH2vqswW8cX/k2qHv7+hfeakBkSeirHaU9mNjk=;
+        b=d4M6oTQTnjBsjWhNKa70McX6AvVURQd47g1V12uRxNdComNhjCeVuEODh+nV76IVxr
+         pOCD/PbU4wZ/mssNETspS/X+dFTTTSZ1cgmKNQXwuDNXiVzbb479GLFmTGQU5MMsHXmj
+         a7p5p0vDtv9HTPB/SasjUowr1S9W0tHsXYg6hP/Jy9SC3XANx9Cj64CLMxCkpibdrLtq
+         R2GLX7uF3qvv8//i93k6Q5zEeC+GDgJfIVFW69mC9xxMPYz2b6j9L9H+ENo7YkCARrLQ
+         GHHDPSfwTJrzastBddKuvsgQ3uze27W77we/RYzhR1OkKtlu+68exg0eBXCxMyQh/QWZ
+         srxw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=ShOnvvH2vqswW8cX/k2qHv7+hfeakBkSeirHaU9mNjk=;
+        b=ZGMzkY2qYRHc5/jtAthIGuF2hOtp9uhAmezktbYEpDSpCj1yDXr0mwXDBaXWQ8gRlK
+         tNk2qAJf4V5MW2HHtpBymUQNIFf30g0rbZHcpdkoOJ1Ix3kGe20RtLmXR8eohmCgAQ7m
+         O7wslBKOcQhaVWRMyKl8eUi/3V+rBUpV1bVDknnfTZx0G2Ve3kwZUy1qBt3/bodvcj06
+         F8Pvdgpx13UDM+4SInRXz6qsrdT1bCla8xRdq6RBcBc/8EMEd2480pMVBLPsRHATlbnv
+         JiMPRBTR9Vy2CuDCYMfhb1Fpb0zdj1C5ljrnknGf6i7EAqxg3JTg4vOdrc9ZShXoPqdK
+         X0IA==
+X-Gm-Message-State: ACgBeo1IuZrSzZU+2WlpkGClNGSh9jN8KUNn6f9Bia66KfhrLx2dQ6/3
+        zXMb3BlD6d0HXh4TUjkqwY3R8g==
+X-Google-Smtp-Source: AA6agR7hmyS9LSv3EJFIQ4+FDrc7/3egK7U8v+wC8ZsYhBP4S//sVJVQaoOWi5l1QMrqQ8pxzs1fmQ==
+X-Received: by 2002:a05:600c:3d19:b0:3a5:c6ef:a875 with SMTP id bh25-20020a05600c3d1900b003a5c6efa875mr5277822wmb.66.1662728606799;
+        Fri, 09 Sep 2022 06:03:26 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.25
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:26 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 7/8] sched/core: support latency priority with sched core
+Date:   Fri,  9 Sep 2022 15:03:08 +0200
+Message-Id: <20220909130309.25458-8-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+Take into account wakeup_latency_gran() when ordering the cfs threads.
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ kernel/sched/fair.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 6cc4f2a9725d..7563fb16aba1 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11444,6 +11444,10 @@ bool cfs_prio_less(struct task_struct *a, struct task_struct *b, bool in_fi)
+ 	delta = (s64)(sea->vruntime - seb->vruntime) +
+ 		(s64)(cfs_rqb->min_vruntime_fi - cfs_rqa->min_vruntime_fi);
+ 
++	/* Take into account latency prio */
++	delta -= wakeup_latency_gran(sea, seb);
++
++
+ 	return delta > 0;
+ }
+ #else
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 2A97BECAAA1
+	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:55 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S231609AbiIINEx (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 9 Sep 2022 09:04:53 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37490 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S231669AbiIINDi (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 9 Sep 2022 09:03:38 -0400
+Received: from mail-wm1-x334.google.com (mail-wm1-x334.google.com [IPv6:2a00:1450:4864:20::334])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 2EA7D1174A9
+        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:30 -0700 (PDT)
+Received: by mail-wm1-x334.google.com with SMTP id bg5-20020a05600c3c8500b003a7b6ae4eb2so4396454wmb.4
+        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:30 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=+yJ5UA3osJaE8In6k2eqSTVByQFti3MaFQ6QdbrD9SQ=;
+        b=yARDbhvlRO/J0Q88+bIt6nGh8mopYng+aeVP02JjPAKzTZdpayPzKFhguVxaQWKRGn
+         Y0CpK0lo5vvDyXARpH4K50Kbizk7eaDZt+zx1EMSIB1i0Y8+mj9k9wysAsnKgjpfy1nd
+         B4TAG+kjkkNGPHBtAjswB6WWpzTb3F8t2iJgfbx9R81cgCMsyJQCsZLuGV4kCRXmOBiq
+         3XAQ2R3PHKWsBL0UPVgb8Oj+G+Htxp09HQRkmz+mTJPKY0JoVev/l2lnP27W+jvRGO6B
+         C+1bppk0MJcMbcbbFADmRgw0BJ2y0LmfhInE0TgnzN4O3nNizz9S12yUaqIqSBojFRYH
+         3mZw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=+yJ5UA3osJaE8In6k2eqSTVByQFti3MaFQ6QdbrD9SQ=;
+        b=r2pC8XWiM4CsT8U7aspTjgoFWQ4bb6wmciAu+B0fUZzQ3MIJ8/llTlH/7bHpEdG0gr
+         6w+LGO5q23KYx/qNo0+v3G2Lw8nXSJcmNJcSvSLV8XQyeh53XIlvVtiQbaxsw73uBw7S
+         3ShKjnKQUqJIQj+NYeAu+lOncV6ngNhPvrXzds9nZf2sUr5aTXsvtNWZkpbJq5W5jh3O
+         qDtxcR1SLNDjYqM92qmd7OO77nOY8NCmymac0TaV+Idf2JK14eJOTItkTi7nqEv0ypQD
+         cBKOYqyNO5jCsrSU05bdmPyOrYLu6Z7q96MFT0NaqRzzw3anJeoIj70Z6a0Xp+6RGB9O
+         DniA==
+X-Gm-Message-State: ACgBeo23qxuTAffnqjjci5P0+tV5TsdutZYpeuyD4MG3oSun9SPVrMdX
+        vNCGO636IQt8WjtmSDZRYY/p2w==
+X-Google-Smtp-Source: AA6agR4UPpyTWkYlLB+ccSEG6+CXORLSYnzeYFEgBNuPQ7yRPFJNIYWZxovN5gPVxbtgaHOGsfvbXg==
+X-Received: by 2002:a05:600c:4fcf:b0:3a8:437a:8d28 with SMTP id o15-20020a05600c4fcf00b003a8437a8d28mr5436523wmq.197.1662728608483;
+        Fri, 09 Sep 2022 06:03:28 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
+        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.26
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 09 Sep 2022 06:03:27 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v3 8/8] sched/fair: Add latency list
+Date:   Fri,  9 Sep 2022 15:03:09 +0200
+Message-Id: <20220909130309.25458-9-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
+References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+Add a rb tree for latency sensitive entities so we can schedule the most
+sensitive one first even when it failed to preempt current at wakeup or
+when it got quickly preempted by another entity of higher priority.
+
+In order to keep fairness, the latency is used once at wakeup to get a
+minimum slice and not during the following scheduling slice to prevent
+long running entity to got more running time than allocated to his nice
+priority.
+
+The rb tree nebales to cover the last corner case where latency
+sensitive entity can't got schedule quickly after the wakeup.
+
+hackbench -l 10000 -g $group &
+cyclictest --policy other -D 5 -q -n
+        latency 0           latency -20
+group   min  avg    max     min  avg    max
+0       17    19     29      17   18     30
+1       65   306   7149      64   83    208
+4       50   395  15731      56   80    271
+8       56   781  41548      54   80    301
+16      60  1392  87237      59   86    490
+
+group = 0 means that hackbench is not running.
+
+Both avg and max are significantly improved with nice latency -20. If we
+add the histogram parameters to get details of latency, we have :
+
+hackbench -l 10000 -g 16 &
+cyclictest --policy other -D 5 -q -n  -H 20000 --histfile data.txt
+              latency 0    latency -20
+Min Latencies:    60           61
+Avg Latencies:  1077           86
+Max Latencies: 87311          444
+50% latencies:    92           85
+75% latencies:   554           90
+85% latencies:  1019           93
+90% latencies:  1346           96
+95% latencies:  5400          100
+99% latencies: 19044          110
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ include/linux/sched.h |  2 +
+ kernel/sched/fair.c   | 96 +++++++++++++++++++++++++++++++++++++++++--
+ kernel/sched/sched.h  |  1 +
+ 3 files changed, 96 insertions(+), 3 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 2d2a361d65ee..8b7bf0cb4ee9 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -537,6 +537,8 @@ struct sched_entity {
+ 	/* For load-balancing: */
+ 	struct load_weight		load;
+ 	struct rb_node			run_node;
++	struct rb_node			latency_node;
++	unsigned int			on_latency;
+ 	struct list_head		group_node;
+ 	unsigned int			on_rq;
+ 
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 7563fb16aba1..58657cafaa9b 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -664,7 +664,77 @@ struct sched_entity *__pick_last_entity(struct cfs_rq *cfs_rq)
+ 
+ 	return __node_2_se(last);
+ }
++#endif
+ 
++/**************************************************************
++ * Scheduling class tree data structure manipulation methods:
++ * for latency
++ */
++
++static inline bool latency_before(struct sched_entity *a,
++				struct sched_entity *b)
++{
++	return (s64)(a->vruntime + a->latency_offset - b->vruntime - b->latency_offset) < 0;
++}
++
++#define __latency_node_2_se(node) \
++	rb_entry((node), struct sched_entity, latency_node)
++
++static inline bool __latency_less(struct rb_node *a, const struct rb_node *b)
++{
++	return latency_before(__latency_node_2_se(a), __latency_node_2_se(b));
++}
++
++/*
++ * Enqueue an entity into the latency rb-tree:
++ */
++static void __enqueue_latency(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
++{
++
++	/* Only latency sensitive entity can be added to the list */
++	if (se->latency_offset >= 0)
++		return;
++
++	if (se->on_latency)
++		return;
++
++	/*
++	 * An execution time less than sysctl_sched_min_granularity means that
++	 * the entity has been preempted by a higher sched class or an entity
++	 * with higher latency constraint.
++	 * Put it back in the list so it gets a chance to run 1st during the
++	 * next slice.
++	 */
++	if (!(flags & ENQUEUE_WAKEUP)) {
++		u64 delta_exec = se->sum_exec_runtime - se->prev_sum_exec_runtime;
++
++		if (delta_exec >= sysctl_sched_min_granularity)
++			return;
++	}
++
++	rb_add_cached(&se->latency_node, &cfs_rq->latency_timeline, __latency_less);
++	se->on_latency = 1;
++}
++
++static void __dequeue_latency(struct cfs_rq *cfs_rq, struct sched_entity *se)
++{
++	if (se->on_latency) {
++		rb_erase_cached(&se->latency_node, &cfs_rq->latency_timeline);
++		se->on_latency = 0;
++	}
++}
++
++struct sched_entity *__pick_first_latency(struct cfs_rq *cfs_rq)
++{
++	struct rb_node *left = rb_first_cached(&cfs_rq->latency_timeline);
++
++	if (!left)
++		return NULL;
++
++	return __latency_node_2_se(left);
++}
++
++#ifdef CONFIG_SCHED_DEBUG
+ /**************************************************************
+  * Scheduling class statistics methods:
+  */
+@@ -4455,8 +4525,10 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	check_schedstat_required();
+ 	update_stats_enqueue_fair(cfs_rq, se, flags);
+ 	check_spread(cfs_rq, se);
+-	if (!curr)
++	if (!curr) {
+ 		__enqueue_entity(cfs_rq, se);
++		__enqueue_latency(cfs_rq, se, flags);
++	}
+ 	se->on_rq = 1;
+ 
+ 	if (cfs_rq->nr_running == 1) {
+@@ -4542,8 +4614,10 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 
+ 	clear_buddies(cfs_rq, se);
+ 
+-	if (se != cfs_rq->curr)
++	if (se != cfs_rq->curr) {
+ 		__dequeue_entity(cfs_rq, se);
++		__dequeue_latency(cfs_rq, se);
++	}
+ 	se->on_rq = 0;
+ 	account_entity_dequeue(cfs_rq, se);
+ 
+@@ -4631,6 +4705,7 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ 		 */
+ 		update_stats_wait_end_fair(cfs_rq, se);
+ 		__dequeue_entity(cfs_rq, se);
++		__dequeue_latency(cfs_rq, se);
+ 		update_load_avg(cfs_rq, se, UPDATE_TG);
+ 	}
+ 
+@@ -4669,7 +4744,7 @@ static struct sched_entity *
+ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+ {
+ 	struct sched_entity *left = __pick_first_entity(cfs_rq);
+-	struct sched_entity *se;
++	struct sched_entity *latency, *se;
+ 
+ 	/*
+ 	 * If curr is set we have to see if its left of the leftmost entity
+@@ -4711,6 +4786,12 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+ 		se = cfs_rq->last;
+ 	}
+ 
++	/* Check for latency sensitive entity waiting for running */
++	latency = __pick_first_latency(cfs_rq);
++	if (latency && (latency != se) &&
++	    wakeup_preempt_entity(latency, se) < 1)
++		se = latency;
++
+ 	return se;
+ }
+ 
+@@ -4734,6 +4815,7 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
+ 		update_stats_wait_start_fair(cfs_rq, prev);
+ 		/* Put 'current' back into the tree. */
+ 		__enqueue_entity(cfs_rq, prev);
++		__enqueue_latency(cfs_rq, prev, 0);
+ 		/* in !on_rq case, update occurred at dequeue */
+ 		update_load_avg(cfs_rq, prev, 0);
+ 	}
+@@ -11574,6 +11712,7 @@ static void set_next_task_fair(struct rq
+ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ {
+ 	cfs_rq->tasks_timeline = RB_ROOT_CACHED;
++	cfs_rq->latency_timeline = RB_ROOT_CACHED;
+ 	cfs_rq->min_vruntime = (u64)(-(1LL << 20));
+ #ifdef CONFIG_SMP
+ 	raw_spin_lock_init(&cfs_rq->removed.lock);
+@@ -12026,8 +12109,15 @@ int sched_group_set_latency(struct task_group *tg, long latency)
+ 
+ 	for_each_possible_cpu(i) {
+ 		struct sched_entity *se = tg->se[i];
++		struct rq *rq = cpu_rq(i);
++		struct rq_flags rf;
++
++		rq_lock_irqsave(rq, &rf);
+ 
++		__dequeue_latency(se->cfs_rq, se);
+ 		WRITE_ONCE(se->latency_offset, latency);
++
++		rq_unlock_irqrestore(rq, &rf);
+ 	}
+ 
+ 	mutex_unlock(&shares_mutex);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 117b23dfb912..294a4a39f3eb 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -597,6 +597,7 @@ struct cfs_rq {
+ #endif
+ 
+ 	struct rb_root_cached	tasks_timeline;
++	struct rb_root_cached	latency_timeline;
+ 
+ 	/*
+ 	 * 'curr' points to currently running entity on this cfs_rq.
+-- 
+2.17.1
+
+
