@@ -1,0 +1,585 @@
+From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
+  To: linux-kernel
+  Cc: Greg Kroah-Hartman, stable, Jaroslav Kysela, Takashi Iwai, butt3rflyh4ck
+
+From: Takashi Iwai <tiwai@suse.de>
+
+commit 8423f0b6d513b259fdab9c9bf4aaa6188d054c2d upstream.
+
+There is a small race window at snd_pcm_oss_sync() that is called from
+OSS PCM SNDCTL_DSP_SYNC ioctl; namely the function calls
+snd_pcm_oss_make_ready() at first, then takes the params_lock mutex
+for the rest.  When the stream is set up again by another thread
+between them, it leads to inconsistency, and may result in unexpected
+results such as NULL dereference of OSS buffer as a fuzzer spotted
+recently.
+
+The fix is simply to cover snd_pcm_oss_make_ready() call into the same
+params_lock mutex with snd_pcm_oss_make_ready_locked() variant.
+
+Reported-and-tested-by: butt3rflyh4ck <butterflyhuangxx@gmail.com>
+Reviewed-by: Jaroslav Kysela <perex@perex.cz>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/CAFcO6XN7JDM4xSXGhtusQfS2mSBcx50VJKwQpCq=WeLt57aaZA@mail.gmail.com
+Link: https://lore.kernel.org/r/20220905060714.22549-1-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/core/oss/pcm_oss.c |    6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+--- a/sound/core/oss/pcm_oss.c
++++ b/sound/core/oss/pcm_oss.c
+@@ -1672,14 +1672,14 @@ static int snd_pcm_oss_sync(struct snd_p
+ 		runtime = substream->runtime;
+ 		if (atomic_read(&substream->mmap_count))
+ 			goto __direct;
+-		err = snd_pcm_oss_make_ready(substream);
+-		if (err < 0)
+-			return err;
+ 		atomic_inc(&runtime->oss.rw_ref);
+ 		if (mutex_lock_interruptible(&runtime->oss.params_lock)) {
+ 			atomic_dec(&runtime->oss.rw_ref);
+ 			return -ERESTARTSYS;
+ 		}
++		err = snd_pcm_oss_make_ready_locked(substream);
++		if (err < 0)
++			goto unlock;
+ 		format = snd_pcm_oss_format_from(runtime->oss.format);
+ 		width = snd_pcm_format_physical_width(format);
+ 		if (runtime->oss.buffer_used > 0) {
+ 		
+From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
+  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, Tasos Sahanidis, Takashi Iwai
+
+From: Tasos Sahanidis <tasos@tasossah.com>
+
+commit d29f59051d3a07b81281b2df2b8c9dfe4716067f upstream.
+
+The voice allocator sometimes begins allocating from near the end of the
+array and then wraps around, however snd_emu10k1_pcm_channel_alloc()
+accesses the newly allocated voices as if it never wrapped around.
+
+This results in out of bounds access if the first voice has a high enough
+index so that first_voice + requested_voice_count > NUM_G (64).
+The more voices are requested, the more likely it is for this to occur.
+
+This was initially discovered using PipeWire, however it can be reproduced
+by calling aplay multiple times with 16 channels:
+aplay -r 48000 -D plughw:CARD=Live,DEV=3 -c 16 /dev/zero
+
+UBSAN: array-index-out-of-bounds in sound/pci/emu10k1/emupcm.c:127:40
+index 65 is out of range for type 'snd_emu10k1_voice [64]'
+CPU: 1 PID: 31977 Comm: aplay Tainted: G        W IOE      6.0.0-rc2-emu10k1+ #7
+Hardware name: ASUSTEK COMPUTER INC P5W DH Deluxe/P5W DH Deluxe, BIOS 3002    07/22/2010
+Call Trace:
+<TASK>
+dump_stack_lvl+0x49/0x63
+dump_stack+0x10/0x16
+ubsan_epilogue+0x9/0x3f
+__ubsan_handle_out_of_bounds.cold+0x44/0x49
+snd_emu10k1_playback_hw_params+0x3bc/0x420 [snd_emu10k1]
+snd_pcm_hw_params+0x29f/0x600 [snd_pcm]
+snd_pcm_common_ioctl+0x188/0x1410 [snd_pcm]
+? exit_to_user_mode_prepare+0x35/0x170
+? do_syscall_64+0x69/0x90
+? syscall_exit_to_user_mode+0x26/0x50
+? do_syscall_64+0x69/0x90
+? exit_to_user_mode_prepare+0x35/0x170
+snd_pcm_ioctl+0x27/0x40 [snd_pcm]
+__x64_sys_ioctl+0x95/0xd0
+do_syscall_64+0x5c/0x90
+? do_syscall_64+0x69/0x90
+? do_syscall_64+0x69/0x90
+entry_SYSCALL_64_after_hwframe+0x63/0xcd
+
+Signed-off-by: Tasos Sahanidis <tasos@tasossah.com>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/3707dcab-320a-62ff-63c0-73fc201ef756@tasossah.com
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/pci/emu10k1/emupcm.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/sound/pci/emu10k1/emupcm.c
++++ b/sound/pci/emu10k1/emupcm.c
+@@ -124,7 +124,7 @@ static int snd_emu10k1_pcm_channel_alloc
+ 	epcm->voices[0]->epcm = epcm;
+ 	if (voices > 1) {
+ 		for (i = 1; i < voices; i++) {
+-			epcm->voices[i] = &epcm->emu->voices[epcm->voices[0]->number + i];
++			epcm->voices[i] = &epcm->emu->voices[(epcm->voices[0]->number + i) % NUM_G];
+ 			epcm->voices[i]->epcm = epcm;
+ 		}
+ 	}
+
+
+
+From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
+  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, Mikhail Gavrilov, Takashi Iwai
+
+From: Takashi Iwai <tiwai@suse.de>
+
+commit 37137ec26c2c03039d8064c00f6eae176841ee0d upstream.
+
+The last fix for trying to recover the regression on AMD platforms,
+unfortunately, leaded to yet another regression: it turned out that
+IOMMUs don't like the usage of raw page allocations.
+
+This is yet another attempt for addressing the log saga; at this time,
+we re-use the existing buffer allocation mechanism with SG-pages
+although we require only single pages.  The SG buffer allocation
+itself was confirmed to work for stream buffers, so it's relatively
+easy to adapt for other places.
+
+The only problem is: although the HD-audio code is accessing the
+address directly via dmab->address field, SG-pages don't set up it.
+For the ease of adaption, we now set up the dmab->addr field from the
+address of the first page as default, so that it can run with the
+HD-audio driver code as-is without the excessive call of
+snd_sgbuf_get_addr() multiple times; that's the only change in the
+memalloc helper side.  The rest is nothing but a flip of the dma_type
+field in the HD-audio side.
+
+Fixes: a8d302a0b770 ("ALSA: memalloc: Revive x86-specific WC page allocations again")
+Reported-by: Mikhail Gavrilov <mikhail.v.gavrilov@gmail.com>
+Tested-by: Mikhail Gavrilov <mikhail.v.gavrilov@gmail.com>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/CABXGCsO+kB2t5QyHY-rUe76npr1m0-5JOtt8g8SiHUo34ur7Ww@mail.gmail.com
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216112
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216363
+Link: https://lore.kernel.org/r/20220906090319.23358-1-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/core/memalloc.c     |    9 +++++++--
+ sound/pci/hda/hda_intel.c |    2 +-
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+--- a/sound/core/memalloc.c
++++ b/sound/core/memalloc.c
+@@ -535,10 +535,13 @@ static void *snd_dma_noncontig_alloc(str
+ 	dmab->dev.need_sync = dma_need_sync(dmab->dev.dev,
+ 					    sg_dma_address(sgt->sgl));
+ 	p = dma_vmap_noncontiguous(dmab->dev.dev, size, sgt);
+-	if (p)
++	if (p) {
+ 		dmab->private_data = sgt;
+-	else
++		/* store the first page address for convenience */
++		dmab->addr = snd_sgbuf_get_addr(dmab, 0);
++	} else {
+ 		dma_free_noncontiguous(dmab->dev.dev, size, sgt, dmab->dev.dir);
++	}
+ 	return p;
+ }
+ 
+@@ -772,6 +775,8 @@ static void *snd_dma_sg_fallback_alloc(s
+ 	if (!p)
+ 		goto error;
+ 	dmab->private_data = sgbuf;
++	/* store the first page address for convenience */
++	dmab->addr = snd_sgbuf_get_addr(dmab, 0);
+ 	return p;
+ 
+  error:
+--- a/sound/pci/hda/hda_intel.c
++++ b/sound/pci/hda/hda_intel.c
+@@ -1817,7 +1817,7 @@ static int azx_create(struct snd_card *c
+ 
+ 	/* use the non-cached pages in non-snoop mode */
+ 	if (!azx_snoop(chip))
+-		azx_bus(chip)->dma_type = SNDRV_DMA_TYPE_DEV_WC;
++		azx_bus(chip)->dma_type = SNDRV_DMA_TYPE_DEV_WC_SG;
+ 
+ 	if (chip->driver_type == AZX_DRIVER_NVIDIA) {
+ 		dev_dbg(chip->card->dev, "Enable delay in RIRB handling\n");
+
+
+From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
+  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, Pattara Teerapong, Takashi Iwai
+
+From: Pattara Teerapong <pteerapong@chromium.org>
+
+commit 3e48940abee88b8dbbeeaf8a07e7b2b6be1271b3 upstream.
+
+In loopback_jiffies_timer_pos_update(), we are getting jiffies twice.
+First time for playback, second time for capture. Jiffies can be updated
+between these two calls and if the capture jiffies is larger, extra zeros
+will be filled in the capture buffer.
+
+Change to get jiffies once and use it for both playback and capture.
+
+Signed-off-by: Pattara Teerapong <pteerapong@chromium.org>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/20220901144036.4049060-1-pteerapong@chromium.org
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/drivers/aloop.c |    7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+--- a/sound/drivers/aloop.c
++++ b/sound/drivers/aloop.c
+@@ -605,17 +605,18 @@ static unsigned int loopback_jiffies_tim
+ 			cable->streams[SNDRV_PCM_STREAM_PLAYBACK];
+ 	struct loopback_pcm *dpcm_capt =
+ 			cable->streams[SNDRV_PCM_STREAM_CAPTURE];
+-	unsigned long delta_play = 0, delta_capt = 0;
++	unsigned long delta_play = 0, delta_capt = 0, cur_jiffies;
+ 	unsigned int running, count1, count2;
+ 
++	cur_jiffies = jiffies;
+ 	running = cable->running ^ cable->pause;
+ 	if (running & (1 << SNDRV_PCM_STREAM_PLAYBACK)) {
+-		delta_play = jiffies - dpcm_play->last_jiffies;
++		delta_play = cur_jiffies - dpcm_play->last_jiffies;
+ 		dpcm_play->last_jiffies += delta_play;
+ 	}
+ 
+ 	if (running & (1 << SNDRV_PCM_STREAM_CAPTURE)) {
+-		delta_capt = jiffies - dpcm_capt->last_jiffies;
++		delta_capt = cur_jiffies - dpcm_capt->last_jiffies;
+ 		dpcm_capt->last_jiffies += delta_capt;
+ 	}
+ 
+
+From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
+  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, chihhao chen, Takashi Iwai
+
+From: Takashi Iwai <tiwai@suse.de>
+
+commit ff878b408a03bef5d610b7e2302702e16a53636e upstream.
+
+One of the former changes for the endpoint management was the more
+consistent setup of endpoints at hw_params.
+snd_usb_endpoint_configure() is a single function that does the full
+setup, and it's called from both PCM hw_params and prepare callbacks.
+Although the EP setup at the prepare phase is usually skipped (by
+checking need_setup flag), it may be still effective in some cases
+like suspend/resume that requires the interface setup again.
+
+As it's a full and single setup, the invocation of
+snd_usb_endpoint_configure() includes not only the USB interface setup
+but also the buffer release and allocation.  OTOH, doing the buffer
+release and re-allocation at PCM prepare phase is rather superfluous,
+and better to be done only in the hw_params phase.
+
+For those optimizations, this patch splits the endpoint setup to two
+phases: snd_usb_endpoint_set_params() and snd_usb_endpoint_prepare(),
+to be called from hw_params and from prepare, respectively.
+
+Note that this patch changes the driver operation slightly,
+effectively moving the USB interface setup again to PCM prepare stage
+instead of hw_params stage, while the buffer allocation and such
+initializations are still done at hw_params stage.
+
+And, the change of the USB interface setup timing (moving to prepare)
+gave an interesting "fix", too: it was reported that the recent
+kernels caused silent output at the beginning on playbacks on some
+devices on Android, and this change casually fixed the regression.
+It seems that those devices are picky about the sample rate change (or
+the interface change?), and don't follow the too immediate rate
+changes.
+
+Meanwhile, Android operates the PCM in the following order:
+- open, then hw_params with the possibly highest sample rate
+- close without prepare
+- re-open, hw_params with the normal sample rate
+- prepare, and start streaming
+This procedure ended up the hw_params twice with different rates, and
+because the recent kernel did set up the sample rate twice one and
+after, it screwed up the device.  OTOH, the earlier kernels didn't set
+up the USB interface at hw_params, hence this problem didn't appear.
+
+Now, with this patch, the USB interface setup is again back to the
+prepare phase, and it works around the problem automagically.
+Although we should address the sample rate problem in a more solid
+way in future, let's keep things working as before for now.
+
+Fixes: bf6313a0ff76 ("ALSA: usb-audio: Refactor endpoint management")
+Cc: <stable@vger.kernel.org>
+Reported-by: chihhao chen <chihhao.chen@mediatek.com>
+Link: https://lore.kernel.org/r/87e6d6ae69d68dc588ac9acc8c0f24d6188375c3.camel@mediatek.com
+Link: https://lore.kernel.org/r/20220901124136.4984-1-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/usb/endpoint.c |   23 +++++++++--------------
+ sound/usb/endpoint.h |    6 ++++--
+ sound/usb/pcm.c      |   14 ++++++++++----
+ 3 files changed, 23 insertions(+), 20 deletions(-)
+
+--- a/sound/usb/endpoint.c
++++ b/sound/usb/endpoint.c
+@@ -758,7 +758,8 @@ bool snd_usb_endpoint_compatible(struct
+  * The endpoint needs to be closed via snd_usb_endpoint_close() later.
+  *
+  * Note that this function doesn't configure the endpoint.  The substream
+- * needs to set it up later via snd_usb_endpoint_configure().
++ * needs to set it up later via snd_usb_endpoint_set_params() and
++ * snd_usb_endpoint_prepare().
+  */
+ struct snd_usb_endpoint *
+ snd_usb_endpoint_open(struct snd_usb_audio *chip,
+@@ -1290,12 +1291,13 @@ out_of_memory:
+ /*
+  * snd_usb_endpoint_set_params: configure an snd_usb_endpoint
+  *
++ * It's called either from hw_params callback.
+  * Determine the number of URBs to be used on this endpoint.
+  * An endpoint must be configured before it can be started.
+  * An endpoint that is already running can not be reconfigured.
+  */
+-static int snd_usb_endpoint_set_params(struct snd_usb_audio *chip,
+-				       struct snd_usb_endpoint *ep)
++int snd_usb_endpoint_set_params(struct snd_usb_audio *chip,
++				struct snd_usb_endpoint *ep)
+ {
+ 	const struct audioformat *fmt = ep->cur_audiofmt;
+ 	int err;
+@@ -1378,18 +1380,18 @@ static int init_sample_rate(struct snd_u
+ }
+ 
+ /*
+- * snd_usb_endpoint_configure: Configure the endpoint
++ * snd_usb_endpoint_prepare: Prepare the endpoint
+  *
+  * This function sets up the EP to be fully usable state.
+- * It's called either from hw_params or prepare callback.
++ * It's called either from prepare callback.
+  * The function checks need_setup flag, and performs nothing unless needed,
+  * so it's safe to call this multiple times.
+  *
+  * This returns zero if unchanged, 1 if the configuration has changed,
+  * or a negative error code.
+  */
+-int snd_usb_endpoint_configure(struct snd_usb_audio *chip,
+-			       struct snd_usb_endpoint *ep)
++int snd_usb_endpoint_prepare(struct snd_usb_audio *chip,
++			     struct snd_usb_endpoint *ep)
+ {
+ 	bool iface_first;
+ 	int err = 0;
+@@ -1410,9 +1412,6 @@ int snd_usb_endpoint_configure(struct sn
+ 			if (err < 0)
+ 				goto unlock;
+ 		}
+-		err = snd_usb_endpoint_set_params(chip, ep);
+-		if (err < 0)
+-			goto unlock;
+ 		goto done;
+ 	}
+ 
+@@ -1440,10 +1439,6 @@ int snd_usb_endpoint_configure(struct sn
+ 	if (err < 0)
+ 		goto unlock;
+ 
+-	err = snd_usb_endpoint_set_params(chip, ep);
+-	if (err < 0)
+-		goto unlock;
+-
+ 	err = snd_usb_select_mode_quirk(chip, ep->cur_audiofmt);
+ 	if (err < 0)
+ 		goto unlock;
+--- a/sound/usb/endpoint.h
++++ b/sound/usb/endpoint.h
+@@ -17,8 +17,10 @@ snd_usb_endpoint_open(struct snd_usb_aud
+ 		      bool is_sync_ep);
+ void snd_usb_endpoint_close(struct snd_usb_audio *chip,
+ 			    struct snd_usb_endpoint *ep);
+-int snd_usb_endpoint_configure(struct snd_usb_audio *chip,
+-			       struct snd_usb_endpoint *ep);
++int snd_usb_endpoint_set_params(struct snd_usb_audio *chip,
++				struct snd_usb_endpoint *ep);
++int snd_usb_endpoint_prepare(struct snd_usb_audio *chip,
++			     struct snd_usb_endpoint *ep);
+ int snd_usb_endpoint_get_clock_rate(struct snd_usb_audio *chip, int clock);
+ 
+ bool snd_usb_endpoint_compatible(struct snd_usb_audio *chip,
+--- a/sound/usb/pcm.c
++++ b/sound/usb/pcm.c
+@@ -443,17 +443,17 @@ static int configure_endpoints(struct sn
+ 		if (stop_endpoints(subs, false))
+ 			sync_pending_stops(subs);
+ 		if (subs->sync_endpoint) {
+-			err = snd_usb_endpoint_configure(chip, subs->sync_endpoint);
++			err = snd_usb_endpoint_prepare(chip, subs->sync_endpoint);
+ 			if (err < 0)
+ 				return err;
+ 		}
+-		err = snd_usb_endpoint_configure(chip, subs->data_endpoint);
++		err = snd_usb_endpoint_prepare(chip, subs->data_endpoint);
+ 		if (err < 0)
+ 			return err;
+ 		snd_usb_set_format_quirk(subs, subs->cur_audiofmt);
+ 	} else {
+ 		if (subs->sync_endpoint) {
+-			err = snd_usb_endpoint_configure(chip, subs->sync_endpoint);
++			err = snd_usb_endpoint_prepare(chip, subs->sync_endpoint);
+ 			if (err < 0)
+ 				return err;
+ 		}
+@@ -551,7 +551,13 @@ static int snd_usb_hw_params(struct snd_
+ 	subs->cur_audiofmt = fmt;
+ 	mutex_unlock(&chip->mutex);
+ 
+-	ret = configure_endpoints(chip, subs);
++	if (subs->sync_endpoint) {
++		ret = snd_usb_endpoint_set_params(chip, subs->sync_endpoint);
++		if (ret < 0)
++			goto unlock;
++	}
++
++	ret = snd_usb_endpoint_set_params(chip, subs->data_endpoint);
+ 
+  unlock:
+ 	if (ret < 0)
+
+
+From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
+  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, Dongxiang Ke, Takashi Iwai
+
+From: Dongxiang Ke <kdx.glider@gmail.com>
+
+commit e53f47f6c1a56d2af728909f1cb894da6b43d9bf upstream.
+
+There may be a bad USB audio device with a USB ID of (0x04fa, 0x4201) and
+the number of it's interfaces less than 4, an out-of-bounds read bug occurs
+when parsing the interface descriptor for this device.
+
+Fix this by checking the number of interfaces.
+
+Signed-off-by: Dongxiang Ke <kdx.glider@gmail.com>
+Link: https://lore.kernel.org/r/20220906024928.10951-1-kdx.glider@gmail.com
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/usb/stream.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/sound/usb/stream.c
++++ b/sound/usb/stream.c
+@@ -1105,7 +1105,7 @@ static int __snd_usb_parse_audio_interfa
+ 	 * Dallas DS4201 workaround: It presents 5 altsettings, but the last
+ 	 * one misses syncpipe, and does not produce any sound.
+ 	 */
+-	if (chip->usb_id == USB_ID(0x04fa, 0x4201))
++	if (chip->usb_id == USB_ID(0x04fa, 0x4201) && num >= 4)
+ 		num = 4;
+ 
+ 	for (i = 0; i < num; i++) {
+
+From: Greg Kroah-Hartman @ 2022-09-13 14:03 UTC (permalink / raw)
+  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, Takashi Iwai, Sasha Levin
+
+From: Takashi Iwai <tiwai@suse.de>
+
+[ Upstream commit 7e1afce5866e02b45bf88c27dd7de1b9dfade1cc ]
+
+The info message that was added in the commit a4aad5636c72 ("ALSA:
+usb-audio: Inform devices that need delayed registration") is actually
+useful to know the need for the delayed registration.  However, it
+turned out that this doesn't catch the all cases; namely, this warned
+only when a PCM stream is attached onto the existing PCM instance, but
+it doesn't count for a newly created PCM instance.  This made
+confusion as if there were no further delayed registration.
+
+This patch moves the check to the code path for either adding a stream
+or creating a PCM instance.  Also, make it simpler by checking the
+card->registered flag instead of querying each snd_device state.
+
+Fixes: a4aad5636c72 ("ALSA: usb-audio: Inform devices that need delayed registration")
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216082
+Link: https://lore.kernel.org/r/20220831125901.4660-1-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ sound/usb/stream.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/sound/usb/stream.c b/sound/usb/stream.c
+index 40ce8a1cb318a..f10f4e6d3fb85 100644
+--- a/sound/usb/stream.c
++++ b/sound/usb/stream.c
+@@ -495,6 +495,10 @@ static int __snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+ 			return 0;
+ 		}
+ 	}
++
++	if (chip->card->registered)
++		chip->need_delayed_register = true;
++
+ 	/* look for an empty stream */
+ 	list_for_each_entry(as, &chip->pcm_list, list) {
+ 		if (as->fmt_type != fp->fmt_type)
+@@ -502,9 +506,6 @@ static int __snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+ 		subs = &as->substream[stream];
+ 		if (subs->ep_num)
+ 			continue;
+-		if (snd_device_get_state(chip->card, as->pcm) !=
+-		    SNDRV_DEV_BUILD)
+-			chip->need_delayed_register = true;
+ 		err = snd_pcm_new_stream(as->pcm, stream, 1);
+ 		if (err < 0)
+ 			return err;
+-- 
+2.35.1
+
+From: Greg Kroah-Hartman @ 2022-09-13 14:03 UTC (permalink / raw)
+  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, Takashi Iwai, Sasha Levin
+
+From: Takashi Iwai <tiwai@suse.de>
+
+[ Upstream commit 2027f114686e0f3f1f39971964dfc618637c88c2 ]
+
+When the delayed registration is specified via either delayed_register
+option or the quirk, we delay the invocation of snd_card_register()
+until the given interface.  But if a wrong value has been set there
+and there are more interfaces over the given interface number,
+snd_card_register() call would be missing for those interfaces.
+
+This patch catches up those missing calls by fixing the comparison of
+the interface number.  Now the call is skipped only if the processed
+interface is less than the given interface, instead of the exact
+match.
+
+Fixes: b70038ef4fea ("ALSA: usb-audio: Add delayed_register option")
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216082
+Link: https://lore.kernel.org/r/20220831125901.4660-2-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ sound/usb/card.c   | 2 +-
+ sound/usb/quirks.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/sound/usb/card.c b/sound/usb/card.c
+index d356743de2ff9..706d249a9ad6b 100644
+--- a/sound/usb/card.c
++++ b/sound/usb/card.c
+@@ -699,7 +699,7 @@ static bool check_delayed_register_option(struct snd_usb_audio *chip, int iface)
+ 		if (delayed_register[i] &&
+ 		    sscanf(delayed_register[i], "%x:%x", &id, &inum) == 2 &&
+ 		    id == chip->usb_id)
+-			return inum != iface;
++			return iface < inum;
+ 	}
+ 
+ 	return false;
+diff --git a/sound/usb/quirks.c b/sound/usb/quirks.c
+index 9bfead5efc4c1..5b4d8f5eade20 100644
+--- a/sound/usb/quirks.c
++++ b/sound/usb/quirks.c
+@@ -1764,7 +1764,7 @@ bool snd_usb_registration_quirk(struct snd_usb_audio *chip, int iface)
+ 
+ 	for (q = registration_quirks; q->usb_id; q++)
+ 		if (chip->usb_id == q->usb_id)
+-			return iface != q->interface;
++			return iface < q->interface;
+ 
+ 	/* Register as normal */
+ 	return false;
+-- 
+2.35.1
