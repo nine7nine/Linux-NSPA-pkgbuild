@@ -3,205 +3,52 @@ Return-Path: <linux-kernel-owner@kernel.org>
 X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
 	aws-us-west-2-korg-lkml-1.web.codeaurora.org
 Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 845BDECAAA1
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:03:27 +0000 (UTC)
+	by smtp.lore.kernel.org (Postfix) with ESMTP id E292AC54EE9
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:03:28 +0000 (UTC)
 Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S231346AbiIINDZ (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:03:25 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37066 "EHLO
+        id S229765AbiIPID0 (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:03:26 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43378 "EHLO
         lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S230204AbiIINDQ (ORCPT
+        with ESMTP id S229688AbiIPIDR (ORCPT
         <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:16 -0400
-Received: from mail-wm1-x32c.google.com (mail-wm1-x32c.google.com [IPv6:2a00:1450:4864:20::32c])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id C2B90696F5
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:15 -0700 (PDT)
-Received: by mail-wm1-x32c.google.com with SMTP id v185-20020a1cacc2000000b003b42e4f278cso1424260wme.5
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:15 -0700 (PDT)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
-        d=linaro.org; s=google;
-        h=message-id:date:subject:cc:to:from:from:to:cc:subject:date;
-        bh=WJQJQz6BCmTPtlYN0HtJCaopsH/vTitQdr1CCcoKyWI=;
-        b=t3R8C6EkP2t1Yr+tJLnQyoHyOVZTJ7QmZGrEvSPnaPUhv+u8TmEEAPtQ61L0lfrhq7
-         7f5iUrUEB9QtoqrnyDtDX1qUBEcNXKX3PuUbZGERGzpjHYAXjXCluDWIHt0S9M+R0hJH
-         7ieckAlsWP0yd5JKftj+HdoC4kKPnWIiB6HNYGHUsMM5Njrqdq4t/m9D3EIEG5GfVz86
-         mxwnAvBfJyqvSf6Qb9Z2aH9QGReUNtqrSUh7keUUWgcXm5KM2Igji0s4WfcMPftufQg4
-         QZMftDjZT01P8YYz7W+QwAW76GSkp0Y7uBudNVkdxMbCUL+Mz6osrFZlJ69OPTkI7EHo
-         HtKw==
-X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
-        d=1e100.net; s=20210112;
-        h=message-id:date:subject:cc:to:from:x-gm-message-state:from:to:cc
-         :subject:date;
-        bh=WJQJQz6BCmTPtlYN0HtJCaopsH/vTitQdr1CCcoKyWI=;
-        b=UVz/KqY1rpDy7jPDla/p5wf6DP4qL8wkYymMkDBfcZtQenoIKp8G0yYPVDipUwFmUf
-         O5ff7fO0nRTq5SUgBrHsrDDlDwJ33yHxq7tRHsouuzh8jIwgWFK+MyFLH4uASgrXP2CK
-         5zTUsOdXnH2gqtptgjedoSk7x4rdynYjI8gecNlQWYf0MDScOTBOrsys+LJdUbX6J7jZ
-         GXrID+e7qVJSPJ4jGv7Cj2cLmXEEcpifP/b7QlJ5i77SRt+3QS+HVBihGJxAy61yfqXE
-         CvUvjJMXwfr9ta4iaCzekawuaGEp1ScTrwcY2aGsDyKJ7iNAj3OztooG3qSD0lWqZE4P
-         OfeQ==
-X-Gm-Message-State: ACgBeo381KzJOBqdsQNj5rJiJUpdJ+LWjkTBfse7DFk49ZmTxCgZKaGH
-        DPMso4JEAUXvcot+k1d9I0Bb1g==
-X-Google-Smtp-Source: AA6agR5GYISuf3bVqZMmGxgYgkJFHnSdmarI524SOFyjTY50C0ZNOWGYq5G0t4zWd9c+kzyXozeDFg==
-X-Received: by 2002:a05:600c:25ce:b0:3a5:a3b7:bbfe with SMTP id 14-20020a05600c25ce00b003a5a3b7bbfemr5671611wml.115.1662728593809;
-        Fri, 09 Sep 2022 06:03:13 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.12
-        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:12 -0700 (PDT)
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 0/8]  Add latency priority for CFS class
-Date:   Fri,  9 Sep 2022 15:03:01 +0200
-Message-Id: <20220909130309.25458-1-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-This patchset restarts the work about adding a latency priority to describe
-the latency tolerance of cfs tasks.
-
-The patches [1-4] have been done by Parth:
-https://lore.kernel.org/lkml/20200228090755.22829-1-parth@linux.ibm.com/
-
-I have just rebased and moved the set of latency priority outside the
-priority update. I have removed the reviewed tag because the patches
-are 2 years old.
-
-The patch [5] uses latency nice priority to define a latency offset
-and then to decide if a cfs task can preempt the current running task. The
-patch gives some tests results with cyclictests and hackbench to highlight
-the benefit of latency priority for short interactive task or
-long intensive tasks.
-
-Patch [6] adds the support of latency_offset to task group by adding a
-cpu.latency field. There were discussions for the last version about
-using a real unit for the field so I decided to expose directly the
-latency offset which reflects the time up to which we can preempt when the
-value is negative, or up to which we can defer the preemption when the
-value is positive.
-The range is [-sysctl_sched_latency:sysctl_sched_latency]
-
-Patch [7] makes sched_core taking into account the latency offset.
-
-Patch [8] adds a rb tree to cover some corner cases where the latency
-sensitive task is preempted by high priority task (RT/DL) or fails to
-preempt them. This patch ensures that tasks will have at least a
-slice of sched_min_granularity in priority at wakeup. The patch gives
-results to show the benefit in addition to patch 5
-
-I have also backported the patchset on a dragonboard RB3 with an android
-mainline kernel based on v5.18 for a quick test. I have used
-the TouchLatency app which is part of AOSP and described to be very good
-test to highlight jitter and jank frame sources of a system [1].
-In addition to the app, I have added some short running tasks waking-up
-regularly (to use the 8 cpus for 4 ms every 37777us) to stress the system
-without overloading it (and disabling EAS). The 1st results shows that the
-patchset helps to reduce the missed deadline frames from 5% to less than
-0.1% when the cpu.latency of task group are set.
-
-[1] https://source.android.com/docs/core/debug/eval_perf#touchlatency
-
-Change since v2:
-- Set a latency_offset field instead of saving a weight and computing it
-  on the fly.
-- Make latency_offset available for task group: cpu.latency
-- Fix some corner cases to make latency sensitive tasks schedule first and
-  add a rb tree for latency sensitive task.
-
-Change since v1:
-- fix typo
-- move some codes in the right patch to make bisect happy
-- simplify and fixed how the weight is computed
-- added support of sched core patch 7
-
-Parth Shah (4):
-  sched: Introduce latency-nice as a per-task attribute
-  sched/core: Propagate parent task's latency requirements to the child
-    task
-  sched: Allow sched_{get,set}attr to change latency_nice of the task
-  sched/core: Add permission checks for setting the latency_nice value
-
-Vincent Guittot (4):
-  sched/fair: Take into account latency priority at wakeup
-  sched/fair: Add sched group latency support
-  sched/core: support latency priority with sched core
-  sched/fair: Add latency list
-
- include/linux/sched.h            |   5 +
- include/uapi/linux/sched.h       |   4 +-
- include/uapi/linux/sched/types.h |  19 ++++
- init/init_task.c                 |   1 +
- kernel/sched/core.c              |  81 +++++++++++++
- kernel/sched/debug.c             |   1 +
- kernel/sched/fair.c              | 189 ++++++++++++++++++++++++++++++-
- kernel/sched/sched.h             |  35 ++++++
- tools/include/uapi/linux/sched.h |   4 +-
- 9 files changed, 332 insertions(+), 7 deletions(-)
-
--- 
-2.17.1
-
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Return-Path: <linux-kernel-owner@kernel.org>
-X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
-	aws-us-west-2-korg-lkml-1.web.codeaurora.org
-Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 9460CECAAD3
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:03:51 +0000 (UTC)
-Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S230143AbiIINDt (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:03:49 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37092 "EHLO
-        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S230509AbiIINDS (ORCPT
-        <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:18 -0400
-Received: from mail-wm1-x32b.google.com (mail-wm1-x32b.google.com [IPv6:2a00:1450:4864:20::32b])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 1EC95B8F1E
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:17 -0700 (PDT)
-Received: by mail-wm1-x32b.google.com with SMTP id n23-20020a7bc5d7000000b003a62f19b453so4403200wmk.3
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:17 -0700 (PDT)
+        Fri, 16 Sep 2022 04:03:17 -0400
+Received: from mail-wr1-x42d.google.com (mail-wr1-x42d.google.com [IPv6:2a00:1450:4864:20::42d])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 4C1FC901B1
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:16 -0700 (PDT)
+Received: by mail-wr1-x42d.google.com with SMTP id h8so27741962wrf.3
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:16 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=linaro.org; s=google;
         h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
          :cc:subject:date;
         bh=zREa4GRmzGBOIzgpCLdUUrk2ik+zgQmFE/1EecWF98s=;
-        b=NJSSbH4laihrup5pfaCYKDg8K6C8DbhDQr5QpZFUyEyCC9LZkIX6/+BA1A3F/ix1BX
-         gMc6lUK1qs0XoqT1sSze3zHEHRKEfFmsciTJtwAQc3jUFKXVy6xWno9cWHeps38FDC6O
-         o3EBTWU5Q4AR5SWzWnk/UnJ2Cn3BFQm4zq07FdbotpvRX81E+oJ2J5zd0/5m/7t8Mxol
-         Oo6EmN2d53s5CorKgvkgQx5tQQt1AeLrP6wQEaTS9gm3gKenqQBbbJ6bo7KXuCWrShKK
-         RXJZxQNwHEKYdzZGNliQCNM61WQsQCoDfxzddZTDMZSputZ/b4Xk6c6YcX+0BmnrHUrE
-         Kk0A==
+        b=IjWcihR8x/pv9hp6TJ1LwlTrgXv4ROqNYEeTSIjUfeZxoavGR2jLtb3MOqjTWkpOOD
+         PxfA20mvMboBK4Bg1SXSdPdlM7zNz0voiUQf0xNc0PLaWeeUdNfhrghuAg7qA7gBE4hf
+         AOlT7gYE4bOPFA7L6zifortH5ul6yWkej/t53n8wQZxcyuxHLhDM5O8sEi99meW/uMXY
+         VNnu9EySyBC/LQ3mQPFy1ps7Wfuky4N/YOcD7jFUsAMaiSKzD4VGmuiCfOckeX06qsck
+         DOA+UfXkbMZ+7trJbNpIOWpM5fOMlEliuIPjSwCJ326AEei3wg5qFaJy/0wzCk1YrOzc
+         OQFg==
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20210112;
         h=references:in-reply-to:message-id:date:subject:cc:to:from
          :x-gm-message-state:from:to:cc:subject:date;
         bh=zREa4GRmzGBOIzgpCLdUUrk2ik+zgQmFE/1EecWF98s=;
-        b=kwiPDOqY7BAk+8uLndV3C0e8xoAkJ6voWTlz0I/4TJGapetUo7a+Wd36v6CM1uJq9m
-         tA22xon9hM7QK74RyNR3s+AR/eD1Bwe+wmHnT3BuVuI47yqy2jgQ8IF7VnZVJgBrLbsV
-         uFMfu8DIEsYPQr9suokeo7ldMwzRdn8q1I9welmYKp1E2ZRi7UtuvaEpBzHdHhTw/UyD
-         s1nq1ROYGuZvrOtp6C2gPYnH/ZEbZVq2LqMph//mzhgI1M7ZfcaKhlaGUW++yVpAzgja
-         4II0lgiieIzJa0Sm9nvOVjnN0/AlVWIHGb9xrWPvLeVfJG29Yu7ySkPQlS33qTIRPulZ
-         PoQA==
-X-Gm-Message-State: ACgBeo0ezJO+BwhqQ7uldasyDonvK19oBQGINh7RLDqHi8gh6uXhbcA7
-        Jy/3mg5/zsfYhdWdNrAb9ekUKg==
-X-Google-Smtp-Source: AA6agR6qCCPJOrw/4kBOZ9wBhNGB5IYvJMhF7B0Rh3diwo2uOj6ZQnX41ZZssaHKOTvh3g0s8tS2sQ==
-X-Received: by 2002:a05:600c:1694:b0:3b4:6205:1f95 with SMTP id k20-20020a05600c169400b003b462051f95mr822977wmn.151.1662728595449;
-        Fri, 09 Sep 2022 06:03:15 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.14
+        b=fOoBWkztBzAgw8jn+OrZr53BZ3mW10qDioAkfSYDdIM4PBYGOa+r+cSVbAJx5KBT+x
+         p1W2omUpGIH3vS0L5YIltjA4NN0e9h7fIsiKm3wberUAJqfx36zDVT2E5oKlTx95qtrN
+         wmrxFpQi5KMrFd93A1OqVFDTTKToY7jHyGWpWQVyqjwX0qUAW7uSFc+YNJHwQnN4pbxd
+         A6dJaeI3ZMIvSGT+BHvxaCzlWofuf84NTnCRBY2mCi1p7BUG3bwW5fnkogQoHThhsoio
+         pfV2kP3DKRIJuMo486fFH0RrtZsCyPXd7ijafDyqma36MczGljTtBAlNt5Z0SnR4nSoL
+         a9cg==
+X-Gm-Message-State: ACrzQf2946oKGi/1xlMmcADxkMaJjFXcRtWLGTlNkjQFNaLoB31PrKKi
+        PX/AX61GntlMEh6ovRziruz9+g==
+X-Google-Smtp-Source: AMsMyM7iYasWvi0FhMzg8jSYSngsyPmNZ9M0SFLmnengM93KXWz61rIkWhXJgSjIaQMgvQvcUrhWFQ==
+X-Received: by 2002:adf:f8ca:0:b0:226:e456:1896 with SMTP id f10-20020adff8ca000000b00226e4561896mr2051981wrq.177.1663315394724;
+        Fri, 16 Sep 2022 01:03:14 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.12
         (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:14 -0700 (PDT)
+        Fri, 16 Sep 2022 01:03:13 -0700 (PDT)
 From:   Vincent Guittot <vincent.guittot@linaro.org>
 To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
         dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
@@ -212,12 +59,12 @@ Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
         David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
         tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
         joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 1/8] sched: Introduce latency-nice as a per-task attribute
-Date:   Fri,  9 Sep 2022 15:03:02 +0200
-Message-Id: <20220909130309.25458-2-vincent.guittot@linaro.org>
+Subject: [PATCH v4 1/8] sched: Introduce latency-nice as a per-task attribute
+Date:   Fri, 16 Sep 2022 10:02:58 +0200
+Message-Id: <20220916080305.29574-2-vincent.guittot@linaro.org>
 X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
 Precedence: bulk
 List-ID: <linux-kernel.vger.kernel.org>
 X-Mailing-List: linux-kernel@vger.kernel.org
@@ -308,52 +155,52 @@ Return-Path: <linux-kernel-owner@kernel.org>
 X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
 	aws-us-west-2-korg-lkml-1.web.codeaurora.org
 Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 6F1A7ECAAA1
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:09 +0000 (UTC)
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 4AD7EC54EE9
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:04:11 +0000 (UTC)
 Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S229687AbiIINEH (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:04:07 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37140 "EHLO
+        id S230081AbiIPIDb (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:03:31 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43404 "EHLO
         lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S231298AbiIINDU (ORCPT
+        with ESMTP id S229773AbiIPIDT (ORCPT
         <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:20 -0400
-Received: from mail-wm1-x32e.google.com (mail-wm1-x32e.google.com [IPv6:2a00:1450:4864:20::32e])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 5B2AC696F5
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:19 -0700 (PDT)
-Received: by mail-wm1-x32e.google.com with SMTP id e15so162215wmq.1
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:19 -0700 (PDT)
+        Fri, 16 Sep 2022 04:03:19 -0400
+Received: from mail-wr1-x42c.google.com (mail-wr1-x42c.google.com [IPv6:2a00:1450:4864:20::42c])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 4D51776965
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:18 -0700 (PDT)
+Received: by mail-wr1-x42c.google.com with SMTP id t14so34716611wrx.8
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:17 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=linaro.org; s=google;
         h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
          :cc:subject:date;
         bh=rlyri6gFQXbjH6qaw2UpG7VLO1J+noZ/tZbnqvT/NqA=;
-        b=hSQpx/vphpHkQs39vs9BDtqrWFMFnPic+HPynK8XcJzdxRGKV9EwhS4i3t+PofmJzd
-         b12BfAivvKi/iwuwFVGOyulbrtU0jObl35cg6XWYYtA14S+162Xhrj8iSL3N3d2dGClJ
-         VV43PPqpxWISAfoIiiPgPS8qP88oUg8lzOq9TofhhCV1KNJ3rDbx0mf0mJJqN/HCvoId
-         DDqPB2ISeRNbTCl7rN9rZHsqzreF8AtqfOoSwLLeR5UuJ46zBNngIiVfcfTbpsGSstz6
-         9RE4x22HGLyrP7sVFn1KDiNissQZQIgxu4gWIidnPrG0l0Ng22Q7Ib7eGxUivVkK5ElA
-         XHQg==
+        b=cbtlwBIw8fDZIrc6VcwUJDfMN81nSv2ZxE381xoq9sSmwXyFCTYnkEzjUjuxm10YI/
+         jNoPibgJ8dccGjo8++yZJwIJo5SBOx1xPrSAbhaA4fp/kEyENqgXm0z/YPYp478oUAvi
+         8jhs4dpemuhW70lRypnIgokER6fTQz5Y5mR+ggDICgSKE1uv4y7MKpIX5Xgq7rzeGN0v
+         CbJSvinKuTzFvrh30V1pN55Vpt30bzAzGpLP7HRfBFkjE9fHXXxBwzb0hFwFtagezHJz
+         W2tTwW4TFTsh7efH8Ugnzp6GQEELrOJqxKwMwG2me+g2uio4aPAdcs+Gb+VGY9tlLgKh
+         Zpgg==
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20210112;
         h=references:in-reply-to:message-id:date:subject:cc:to:from
          :x-gm-message-state:from:to:cc:subject:date;
         bh=rlyri6gFQXbjH6qaw2UpG7VLO1J+noZ/tZbnqvT/NqA=;
-        b=kcUiMFy6YiQPUDcjhQ6E8Pl3m8vDGNmYM988ih065Lzcpg3BjDAyzAPhhdLNrpCGq3
-         XiSk/kd1y7nBkNtfejE96HhfvnXu77bCQKYDLUcRLV7MWI1hZyKsprlAJkqMvxZxz9Ht
-         XC1fzyr5KgLiTitZuKBKVGuZwD9PtcipEAOX8mSDq+JYavsQV5Z257gciCngD8/RVXLA
-         VWzeYLqr2L87SU+NcshhOcCQ5R+5mqQrzbeS5biTBZthfMl3z3wGa4RnZL0mcIwytumG
-         yCATjrSmXrtDWGmY4ckR5kVJwp2rZi/V0qFPFlH583B8iRrWkOkE0weoNEmpyXeyZMB+
-         SMrg==
-X-Gm-Message-State: ACgBeo36043zO2ukbSVWti626EdiEwGRBs9VPOok+s7Y57uplykvQIBW
-        /8XZKQMUdDXjns4FMaspBkEcNg==
-X-Google-Smtp-Source: AA6agR76kOGvyPCMLTmHnGhkRdQAP3O/7XvJLAwjU1LsD0LXyUpQ1A4jr0gDj3JR1lXALEaZo3Cmhw==
-X-Received: by 2002:a05:600c:410d:b0:3a6:1db8:b419 with SMTP id j13-20020a05600c410d00b003a61db8b419mr5405856wmi.119.1662728597787;
-        Fri, 09 Sep 2022 06:03:17 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.15
+        b=E6kuWJi4I/zrFcXmfOw3ICrEmjk1qnuDs0uTrSbGWu677PraqM9T8sULSlmNn9La5X
+         4z/eqc10PdYjWto/aishAdecZmYMP7fI2lrYs338IcI8q9yirZzQIyo1tSZVGK2dtLyv
+         R2dy1gRQWuaayZsPrnVJcgHfxNypBNNZx/ELSork0lOjc0QJ8vtt7EpnI21NaIBYX4mo
+         9vuAEBzV+ocrt584dFGGw8VdrH1oVpnis1r67eOcs8+t1CHVD1pKP+uQVTlX3ZIlzHF0
+         WzRmeIaAKWGxa2yvOQiw3bd27I3hezmymKvBtJLU3IWmpBUvh92n1zgyPno04RbpzTlV
+         86yw==
+X-Gm-Message-State: ACrzQf3O2zmYQn4HP0kVzYcZDWNih5mRRXLAOWkhER5T1IqW74kHm9lO
+        V9fJg9DIBWs3a7JAlVMCgf58LA==
+X-Google-Smtp-Source: AMsMyM5lI+G1YA5QEH08DurxmDg/XogkbhgPk6QNlunzvc1YeuroQo6SHsFVXsBIb6x46kMV8y2j1g==
+X-Received: by 2002:a5d:6d8c:0:b0:22a:da71:a2f5 with SMTP id l12-20020a5d6d8c000000b0022ada71a2f5mr1898711wrs.527.1663315396434;
+        Fri, 16 Sep 2022 01:03:16 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.14
         (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:16 -0700 (PDT)
+        Fri, 16 Sep 2022 01:03:15 -0700 (PDT)
 From:   Vincent Guittot <vincent.guittot@linaro.org>
 To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
         dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
@@ -364,12 +211,12 @@ Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
         David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
         tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
         joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 2/8] sched/core: Propagate parent task's latency requirements to the child task
-Date:   Fri,  9 Sep 2022 15:03:03 +0200
-Message-Id: <20220909130309.25458-3-vincent.guittot@linaro.org>
+Subject: [PATCH v4 2/8] sched/core: Propagate parent task's latency requirements to the child task
+Date:   Fri, 16 Sep 2022 10:02:59 +0200
+Message-Id: <20220916080305.29574-3-vincent.guittot@linaro.org>
 X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
 Precedence: bulk
 List-ID: <linux-kernel.vger.kernel.org>
 X-Mailing-List: linux-kernel@vger.kernel.org
@@ -435,52 +282,52 @@ Return-Path: <linux-kernel-owner@kernel.org>
 X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
 	aws-us-west-2-korg-lkml-1.web.codeaurora.org
 Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 692DDECAAD3
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:25 +0000 (UTC)
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 79DC3ECAAD8
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:04:24 +0000 (UTC)
 Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S230471AbiIINEX (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:04:23 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37240 "EHLO
+        id S230046AbiIPIEW (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:04:22 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43430 "EHLO
         lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S231332AbiIINDX (ORCPT
+        with ESMTP id S229831AbiIPIDV (ORCPT
         <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:23 -0400
-Received: from mail-wr1-x42e.google.com (mail-wr1-x42e.google.com [IPv6:2a00:1450:4864:20::42e])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 57A7A72ECB
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:21 -0700 (PDT)
-Received: by mail-wr1-x42e.google.com with SMTP id bz13so2646414wrb.2
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:21 -0700 (PDT)
+        Fri, 16 Sep 2022 04:03:21 -0400
+Received: from mail-wr1-x433.google.com (mail-wr1-x433.google.com [IPv6:2a00:1450:4864:20::433])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id B4562A2AAF
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:19 -0700 (PDT)
+Received: by mail-wr1-x433.google.com with SMTP id k9so34756888wri.0
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:19 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=linaro.org; s=google;
         h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
          :cc:subject:date;
         bh=fAihZ8yLuSXoerd37QOKUB0JDX6tAV3dJZjXolbd6TA=;
-        b=cGpy5r81J1H4W7RT0j9tdRbUaPN1/9zI1/nIH3QPz140U8+PLfWGpR8uREBYzX7TL9
-         rJc7VPTE2FYdYAgql2+ZChlNHid+hsVIDXF3dDb5bh1HN3uBDRTS8CAVSMifZT25YCnf
-         VVvl2tIoNkeRPevAOCkiTDyyGOFU67KN116FAh5PCNa5/c8j1hJCwpZbkYh6D9V++uhJ
-         EXuqVmC41GZA7YIdsx5VqF2RY2dbUUIPfoV37Ll/rEYoBU7E+1vzMYYcU024StnnPWYi
-         PIhOoekzTIvJ8GqVI0ndeGs2cq8CTcYojPBGOKg1aOVEUc0MQytvZWxDD/qxe/xnuIJq
-         fCOw==
+        b=TtY9qDmY83ivADoJifI34Fn6ySLL5ggtD042CpsFOl/W7CrtdN/L+5j+1R3u1GR99T
+         kcIALeXBgukrFGgZzuwmh93JCfD+xE8NDxiJ6/oNu5TQUU9/dahUA4mPWmDq4OfADuzM
+         ZLZbV5aGsvtWNPgjyqHMiancnlVFsuYaIuMxqSYq6kR7dpFOE7NcNz34k+YFZKYNzpmM
+         DtzWGQww21IderhokVPaI2vyVdLg1BRJEK7PTSEYpYxMoNvs+2gJwl1Qf2GpUd5HKr1L
+         4BkyGgEOR60R7EP+aHm+Qf0+iMRbAY2Rhg78voEglTnw9nhuNzWozKHolO4st3oGyXqH
+         iTog==
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20210112;
         h=references:in-reply-to:message-id:date:subject:cc:to:from
          :x-gm-message-state:from:to:cc:subject:date;
         bh=fAihZ8yLuSXoerd37QOKUB0JDX6tAV3dJZjXolbd6TA=;
-        b=7mE97QLjz6wHQveOr3yj4wUi7O3lPTy8oWNeQWq16VDtcgowxj1gDvEW+H8SDDyJvx
-         RImIbTqDlRwZV6GE3a8mRarApc+YqHPs7n+nOIHK8GtXbjKUeoeJSRxHQEUxAfwZBSFv
-         qhHI3iTbmFlVpEpentJ4xOBCPJyQ86AXQKRvaD47m1YnopQpMYOWji4fQ4fRJG3box4K
-         MCJgO2IqygokkUj5sA758r/LpHLkX9++RjVs6bhlfddPmXZyPByEZ8SfW+WkTvDZoR4B
-         VGc8azCN1cYyXuMk8FnUmu1NKWC/fn3/jC6fLPdSYc9IC4RrH6BccrCDGiN3axR7kqpU
-         dhuA==
-X-Gm-Message-State: ACgBeo0ecjKFqN396Ep3gkd/pC+gO8a8f9RjTLNuM31GGXcmBVC9E1FS
-        oieK+cwBNPYMl93ZSVFdVmdihg==
-X-Google-Smtp-Source: AA6agR7oE5faOze8yMkSqec4I6FVpmNjt+cZWW1xRnE546aDCK3az+HVMLnaCqaMIjFWj9/ZohaAIQ==
-X-Received: by 2002:adf:eb02:0:b0:227:1c:e760 with SMTP id s2-20020adfeb02000000b00227001ce760mr7842929wrn.635.1662728599512;
-        Fri, 09 Sep 2022 06:03:19 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.17
+        b=p7fTJ3i/V7sKSahbRro37TODKxpQK5cgoK5w72b8zfc+qHpZOr1sDJ1xQuZC46GEla
+         8lrm7NJw6mYMc37eqXHhv35l47VfqeK5NoRb1hroXKtjJkrC1cLTrNpBQrQx1LrwRusj
+         xY+2ba7QXZ08r8fyf21q4k+rDvj8WXl4fgiLEkljgI564sb1tSWYMghgdUTHbPvrPPOh
+         3fy4XGmuMZ5OqJgITwQuEYHSLu1x1Cg2ETT9ynHeijOc4uxQTSq1hCVUutRJg9WRDz5K
+         ZJmtbgx5UulvORmP3+9W1mEIzBboauvxGatiY8gNv5Mh//PAeiFExCjfQI6NNV1Ais/+
+         /Ugg==
+X-Gm-Message-State: ACrzQf0UyDkCxNqxxUBYwrqbZFKr6Pwrg1tgWjuJTd20/nVtI4cdPhpX
+        Nwhk/3U6cIoX/Xc4Jk/Pac4UsA==
+X-Google-Smtp-Source: AMsMyM5Ld5D4Un+3uos0zGOZ//4uOsk5KKD5AtldhLAs+zPBKwauABdMKrmq5SJtjKd/Ekau6yye8Q==
+X-Received: by 2002:a5d:5273:0:b0:228:b382:8ea0 with SMTP id l19-20020a5d5273000000b00228b3828ea0mr1961331wrc.347.1663315398185;
+        Fri, 16 Sep 2022 01:03:18 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.16
         (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:18 -0700 (PDT)
+        Fri, 16 Sep 2022 01:03:17 -0700 (PDT)
 From:   Vincent Guittot <vincent.guittot@linaro.org>
 To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
         dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
@@ -491,12 +338,12 @@ Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
         David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
         tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
         joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 3/8] sched: Allow sched_{get,set}attr to change latency_nice of the task
-Date:   Fri,  9 Sep 2022 15:03:04 +0200
-Message-Id: <20220909130309.25458-4-vincent.guittot@linaro.org>
+Subject: [PATCH v4 3/8] sched: Allow sched_{get,set}attr to change latency_nice of the task
+Date:   Fri, 16 Sep 2022 10:03:00 +0200
+Message-Id: <20220916080305.29574-4-vincent.guittot@linaro.org>
 X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
 Precedence: bulk
 List-ID: <linux-kernel.vger.kernel.org>
 X-Mailing-List: linux-kernel@vger.kernel.org
@@ -685,52 +532,52 @@ Return-Path: <linux-kernel-owner@kernel.org>
 X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
 	aws-us-west-2-korg-lkml-1.web.codeaurora.org
 Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 86B55ECAAD3
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:32 +0000 (UTC)
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 95BFDC54EE9
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:04:29 +0000 (UTC)
 Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S229494AbiIINE2 (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:04:28 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37286 "EHLO
+        id S229773AbiIPIE1 (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:04:27 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43480 "EHLO
         lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S231360AbiIINDZ (ORCPT
+        with ESMTP id S229877AbiIPIDX (ORCPT
         <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:25 -0400
-Received: from mail-wm1-x329.google.com (mail-wm1-x329.google.com [IPv6:2a00:1450:4864:20::329])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 374C3B8F1E
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:23 -0700 (PDT)
-Received: by mail-wm1-x329.google.com with SMTP id az24-20020a05600c601800b003a842e4983cso1292855wmb.0
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:23 -0700 (PDT)
+        Fri, 16 Sep 2022 04:03:23 -0400
+Received: from mail-wm1-x32f.google.com (mail-wm1-x32f.google.com [IPv6:2a00:1450:4864:20::32f])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id C73E5A2D95
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:21 -0700 (PDT)
+Received: by mail-wm1-x32f.google.com with SMTP id r3-20020a05600c35c300b003b4b5f6c6bdso1895029wmq.2
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:21 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=linaro.org; s=google;
         h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
          :cc:subject:date;
         bh=rr8CydEOaNyM9xcBRy/GQAgJhU9JrzFylVpY+2UJlqc=;
-        b=BXXDCATW8FCicXAPegf7TxK/MRjPGBirNYTBOaG35fj3fCN8rc6FFk5tKcl6Th0sJz
-         ps5UTQvcA/JKck2+gbM6HjCSn0/UXLoromLA6q/eZun3MUYSx1nCM/a6aUwUX2cL7aMO
-         mcN9hYt26Yk/nZqapJU6pu7sRxdP/He1+ssqQo6SyaY6FieHwKIhGbYFdAIgnenDeU+7
-         Y14fqmxKQ9RKAxfJEz+wFKArSA5d4LXsgx3wUyawm7LvN4vfN9GmXpZhYNsdeuzY2yxR
-         63elcw5igwnztGrnpld5Z3XcViNC3OUBy3N9O27eXn/JBrNCdksvM+6/Vh3H4fgG1T/i
-         vMAw==
+        b=SO6hBAy2jSqFrTLGjKa6u8ikfVsyDBHVqkX5OiSKWGFdD5nO1231ycehUzPDkoGCgh
+         iaS17+5VgVGv0GYRxVXkDseADbaic2d9snnqV5oL1F5pnIv9gmi6bdPhwcljr6mQJ7GA
+         F0rI3JB4fqqyKD5LZTuYJusRfZAZdYyfjzOV4mgZqVYgsqM59IlG/SNcIjLu9ZQ42yk9
+         PibGRKzaxDSDfMMu4BFDHEtLQ2BkmUEHAG33e26Jt/lqXNPWMqNLNbDQOgGNlRrlbx6g
+         f0KgttndVs9t3sZ3p3IaiAS1ehbQ8UYfvBM8cYKw3NA11TCiKBbmMuOgJl/dLrJoz/x0
+         Pk0Q==
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20210112;
         h=references:in-reply-to:message-id:date:subject:cc:to:from
          :x-gm-message-state:from:to:cc:subject:date;
         bh=rr8CydEOaNyM9xcBRy/GQAgJhU9JrzFylVpY+2UJlqc=;
-        b=LkzrbGo9Ckux+1neAPeK2mZRhw1JCKI6D3cofhLpETS4RdMraBwIuvQgdwa5oXLFuV
-         swARkG3Brb17jKHdZJtv+k6vAfKb0Oawy793+X6lfyPWwmCSE/e8lHA05zALAU2pVC50
-         9NdooFh8vs5qwZmA2tW1I8a6RZyryn/J318gRA3uwuOhJ3H253zgtBy3hW2ACJOa6Opo
-         mOrZV/5zO+eUM+6wunrasP2TjtbYsvVaqAIaDEdhzIOUl2JyD1JBTXTto5enOEnXEsRy
-         6I8S4Ib6MKCaCcJZeSRoFiFEA2ZN7IRMQVJrBdtmfUt8OuOVBBo+9EOoeCcNtdQVVsm7
-         C1BQ==
-X-Gm-Message-State: ACgBeo02oicXN4JxPO/eE51RJzmaLC3L4Y/djzBhm0ZjHg84ODtyf1B3
-        5uSZ6cYg71SUkEBJVUrUxsobdA==
-X-Google-Smtp-Source: AA6agR6OusN4WtlOo4S+R5/9VVC4/hRibDeBfmZkGYX4GSDAsN0z53rBY2vYWeufhM6UyzriY6AH+w==
-X-Received: by 2002:a1c:f217:0:b0:3a6:61f2:a9c2 with SMTP id s23-20020a1cf217000000b003a661f2a9c2mr5403171wmc.88.1662728601297;
-        Fri, 09 Sep 2022 06:03:21 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.19
+        b=uKW/7uNaCedgoI+Xp4VGYGNXaKt/Ave7Z94JBIb4f2OMagmKN9XlNO82IsJ7KxcoUN
+         HxsOz/n8h6NfnzyzuBP1SUsAxBWCG+v5BFWV8q3zKhcTUTiHrJdRamOcksrfI3Y6HbKG
+         gLxoTjOsW1UBDjpBgIcIvUkpxWy0Br+mOzHXpT1Sk6Zdz7fNZyX3QhjArBy4+bQH3Kw9
+         e4VBt2/Abqz7C3nXSb9I1OlicilEsefL5SnpXu7OeaBQaX8ov+EF05eRPj0pzIooPkUe
+         457r7j+73XdJq1e422FZQPk9Y4/Jq6XGsBdiAa9YJdGxZTt5WjhdMKH6XKLtpjTMfpVK
+         1cZA==
+X-Gm-Message-State: ACrzQf3U4wixqNN8xqaMyIHCcIwCTnGK+AnnC/25ew1MOzToa/btoUwx
+        wFqLU7cmRTiXj23VoSm4y7oRkA==
+X-Google-Smtp-Source: AMsMyM41YE7jJwwkNHvG1nSEhfCWxwTLTe4MVDjDEh2oSypNyy9RunkD2eXuo3b4U0EdsMQu14Cscw==
+X-Received: by 2002:a7b:ce99:0:b0:3b4:9031:fc02 with SMTP id q25-20020a7bce99000000b003b49031fc02mr2469023wmj.154.1663315400274;
+        Fri, 16 Sep 2022 01:03:20 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.18
         (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:20 -0700 (PDT)
+        Fri, 16 Sep 2022 01:03:19 -0700 (PDT)
 From:   Vincent Guittot <vincent.guittot@linaro.org>
 To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
         dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
@@ -741,12 +588,12 @@ Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
         David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
         tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
         joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 4/8] sched/core: Add permission checks for setting the latency_nice value
-Date:   Fri,  9 Sep 2022 15:03:05 +0200
-Message-Id: <20220909130309.25458-5-vincent.guittot@linaro.org>
+Subject: [PATCH v4 4/8] sched/core: Add permission checks for setting the latency_nice value
+Date:   Fri, 16 Sep 2022 10:03:01 +0200
+Message-Id: <20220916080305.29574-5-vincent.guittot@linaro.org>
 X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
 Precedence: bulk
 List-ID: <linux-kernel.vger.kernel.org>
 X-Mailing-List: linux-kernel@vger.kernel.org
@@ -789,52 +636,52 @@ Return-Path: <linux-kernel-owner@kernel.org>
 X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
 	aws-us-west-2-korg-lkml-1.web.codeaurora.org
 Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 78045ECAAD3
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:39 +0000 (UTC)
+	by smtp.lore.kernel.org (Postfix) with ESMTP id EDE2DC54EE9
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:04:37 +0000 (UTC)
 Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S230458AbiIINEg (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:04:36 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37332 "EHLO
+        id S230142AbiIPIEc (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:04:32 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43706 "EHLO
         lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S231321AbiIIND0 (ORCPT
+        with ESMTP id S230109AbiIPIDc (ORCPT
         <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:26 -0400
-Received: from mail-wm1-x329.google.com (mail-wm1-x329.google.com [IPv6:2a00:1450:4864:20::329])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id C3C1D102D79
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:24 -0700 (PDT)
-Received: by mail-wm1-x329.google.com with SMTP id bd26-20020a05600c1f1a00b003a5e82a6474so1249978wmb.4
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:24 -0700 (PDT)
+        Fri, 16 Sep 2022 04:03:32 -0400
+Received: from mail-wr1-x42b.google.com (mail-wr1-x42b.google.com [IPv6:2a00:1450:4864:20::42b])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 5CD42A4B30
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:24 -0700 (PDT)
+Received: by mail-wr1-x42b.google.com with SMTP id e16so34687370wrx.7
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:24 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=linaro.org; s=google;
         h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
          :cc:subject:date;
-        bh=wp0sbaDX3sZeRzdBlGG2s9mKs+TvHFH+JM2i907NtFo=;
-        b=Wt2h/uXAsKJ9GKkinOv4GcusJBCdMiDtH7Vh54lWPrqHsWZc8l0k3wiz7+tJ2P/lkt
-         KXoVgSBHNpBXGhwTwV8X1QFL3IW0Y91bcRmnHZ2rYgBhvf22GAafz9BhdLwYEvY7/YIQ
-         qUefOJAzNhSjGcEiS8HhMqVylEv2Kh5290Yp0sou7OYo1BapaITxxFxMze8wiRgcQ5Oa
-         2EoSqatQ3vce4RDxCSxrXkM7gP+0G5jqvI3WNHjP5ecclik4L1ojsCf5/nN+BKeCD9SQ
-         rPd/Gy1HFZzmHyAu916ZbFE+EvYyUgkJBDHt35PxIg0ePIQ86cI2OkfTKL3k7VMSsX+n
-         z69w==
+        bh=7xCFBgFTOWFPGz0fkdQnzhLrl99Sda3Rg9hYgdSgxLY=;
+        b=HYA3RPLbfEEeZaybbiWEKmkJ5Xcgdtv42Zw4t1+8X33NoNQND7AUVIgz9jCW0YneDc
+         dG3Q41i+xRf0niRuL/vZ0g/7tkAFXHuuRXyegQWPaIFFKKjIV+bebeGewhsmaUXHeDKR
+         wFEBAZMDMQl2dS2q4rv2n3bewrqcMUnorYn8Pbv0ffu+gDImFVHnqi4X1zdfnXqQ7wMn
+         cFp0XweHgZ/zlidM0dIrTmYz1JFeBEmEBaNXqLZba91MFLQTCVIHhGZejPhQC6BpS7Mi
+         1U2LCShIdLD+0AAQFm7xi/7dpWp6mKP068g5cyjhpQPLYA886QdtrMzQU5zhjETlZ1xf
+         y3qg==
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20210112;
         h=references:in-reply-to:message-id:date:subject:cc:to:from
          :x-gm-message-state:from:to:cc:subject:date;
-        bh=wp0sbaDX3sZeRzdBlGG2s9mKs+TvHFH+JM2i907NtFo=;
-        b=4dOQKQ7E7D0udiwuRgFFXi2EWHUD/hbUddATgqCIbVJ4VC/XoE4OStjWmZazEcsJ5J
-         ywnP3qdXbaQPuHueh2zoC0XmwpR7JNdP17G6JI4m4AhV+mv4B70Uy1FkGDSuw/S1cGzi
-         SJkNNZNMDKM/JgCR5GQw4+UKe2ro9CV0zEE3kzy2GviN02csBhDJaZyG0xGE9e0tIWTW
-         rkTwTAh8PF7WLM4cV7WfzvdJdo9qU5CVZGY2vftGWm5qIzjifZG7IQmTlw68cgY73CCt
-         b7a/F+v1VNBwhqD64H3/5YZdiya50bCcYYJ5u6lBBQM7vFiSPrnWJscQwmq/GrGjGroW
-         W4yg==
-X-Gm-Message-State: ACgBeo00dRO5dU2i1ZmvZ0XVtY4wtbopsZ9wW3AcWKY0hGBLZk+Mj2pA
-        zkUw1lAIAlL4RScvog7dc2DC/w==
-X-Google-Smtp-Source: AA6agR6rvUh5hxFX8R2su/k482PmWLb8uMJjh4GkAzMaRouJiov+geQzC3j2mh07WVXmwKI9XpPOrQ==
-X-Received: by 2002:a05:600c:22d2:b0:3a8:3e8c:d914 with SMTP id 18-20020a05600c22d200b003a83e8cd914mr5377182wmg.128.1662728603054;
-        Fri, 09 Sep 2022 06:03:23 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.21
+        bh=7xCFBgFTOWFPGz0fkdQnzhLrl99Sda3Rg9hYgdSgxLY=;
+        b=6rLzPhT0g6FhyVHLbPTGzWvFi0K7iJuUL0iiMYMk7eEQ0m4WD5NAjsMUibMLQ9/93q
+         OyCP7Pa6s7MhPHvb9/aSQ7CZjtDdSrlnrnY5cxZUM4vF91j1l1OfD3rwmfc42R7scJCn
+         MAiaPzTZhR8vNWWO8yd4iNECIDpsbKmOmTlpjrlB/4YXPz76beHy2ahDmtLtjHrPOG9C
+         gKlsCOqXo8DmXhNwNouKUN+M8I6q6UvXorPeHUV0To3DBmok5Qmt1Rv/UANR8ZIopiSx
+         0v+LItTGhqaZOhHe7YJq2mJPdiCgOdX7w1lu1HvSBzGxaD273BcY3vTSkqA51DmaCWvh
+         2pwQ==
+X-Gm-Message-State: ACrzQf2BvL52Xl7PPBCYXesXScTiHK90NjZbvKhXoKZ87jBzonlPrYpo
+        XvYvRd0dmKZJjX8IInDb6MD//g==
+X-Google-Smtp-Source: AMsMyM6dD3WznlEBry1apqJP37TeRoP4yk+hIuRdEJJdMb0guLdSrusn63xtsCgU89PrfHjX5IMHJw==
+X-Received: by 2002:a5d:5289:0:b0:225:4852:4248 with SMTP id c9-20020a5d5289000000b0022548524248mr1918568wrv.228.1663315402738;
+        Fri, 16 Sep 2022 01:03:22 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.20
         (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:22 -0700 (PDT)
+        Fri, 16 Sep 2022 01:03:21 -0700 (PDT)
 From:   Vincent Guittot <vincent.guittot@linaro.org>
 To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
         dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
@@ -845,12 +692,12 @@ Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
         David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
         tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
         joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 5/8] sched/fair: Take into account latency priority at wakeup
-Date:   Fri,  9 Sep 2022 15:03:06 +0200
-Message-Id: <20220909130309.25458-6-vincent.guittot@linaro.org>
+Subject: [PATCH v4 5/8] sched/fair: Take into account latency priority at wakeup
+Date:   Fri, 16 Sep 2022 10:03:02 +0200
+Message-Id: <20220916080305.29574-6-vincent.guittot@linaro.org>
 X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
 Precedence: bulk
 List-ID: <linux-kernel.vger.kernel.org>
 X-Mailing-List: linux-kernel@vger.kernel.org
@@ -958,8 +805,8 @@ Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
  kernel/sched/core.c   | 39 ++++++++++++++++++++++++------
  kernel/sched/debug.c  |  2 +-
  kernel/sched/fair.c   | 56 +++++++++++++++++++++++++++++++++++++++++--
- kernel/sched/sched.h  | 12 ++++++++++
- 6 files changed, 103 insertions(+), 12 deletions(-)
+ kernel/sched/sched.h  | 14 ++++++++++-
+ 6 files changed, 104 insertions(+), 13 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index a0adb55efa1c..2d2a361d65ee 100644
@@ -1217,7 +1064,7 @@ index e8c1b889dcbb..a20eadb0af97 100644
  		return -1;
  
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index b927269b84f9..c4beddb58ebd 100644
+index b927269b84f9..a4cb8058f1b2 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -141,6 +141,17 @@ extern int sched_rr_timeslice;
@@ -1246,6 +1093,16 @@ index b927269b84f9..c4beddb58ebd 100644
  
  /*
   * {de,en}queue flags:
+@@ -2442,8 +2454,8 @@ extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
+ extern const_debug unsigned int sysctl_sched_nr_migrate;
+ extern const_debug unsigned int sysctl_sched_migration_cost;
+ 
+-#ifdef CONFIG_SCHED_DEBUG
+ extern unsigned int sysctl_sched_latency;
++#ifdef CONFIG_SCHED_DEBUG
+ extern unsigned int sysctl_sched_min_granularity;
+ extern unsigned int sysctl_sched_idle_min_granularity;
+ extern unsigned int sysctl_sched_wakeup_granularity;
 -- 
 2.17.1
 
@@ -1255,52 +1112,52 @@ Return-Path: <linux-kernel-owner@kernel.org>
 X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
 	aws-us-west-2-korg-lkml-1.web.codeaurora.org
 Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 62C8EECAAD3
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:45 +0000 (UTC)
+	by smtp.lore.kernel.org (Postfix) with ESMTP id AAC29C54EE9
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:04:44 +0000 (UTC)
 Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S231515AbiIINEm (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:04:42 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37292 "EHLO
+        id S230324AbiIPIEm (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:04:42 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43484 "EHLO
         lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S230434AbiIIND1 (ORCPT
+        with ESMTP id S230231AbiIPIDe (ORCPT
         <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:27 -0400
-Received: from mail-wm1-x32e.google.com (mail-wm1-x32e.google.com [IPv6:2a00:1450:4864:20::32e])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 67FDE1023C6
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:26 -0700 (PDT)
-Received: by mail-wm1-x32e.google.com with SMTP id e15so162541wmq.1
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:26 -0700 (PDT)
+        Fri, 16 Sep 2022 04:03:34 -0400
+Received: from mail-wr1-x42f.google.com (mail-wr1-x42f.google.com [IPv6:2a00:1450:4864:20::42f])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 5CC02A5717
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:28 -0700 (PDT)
+Received: by mail-wr1-x42f.google.com with SMTP id z12so16386313wrp.9
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:28 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=linaro.org; s=google;
         h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
          :cc:subject:date;
-        bh=Jcs+6ZlLyYHw9FZ1AFMfUXk9PpNg2BgTfj6tBszyRVU=;
-        b=UFxGNEstPxa21k3IArpKNLRgJqLfsyPG4/TX/yU6gyonDdKnIIUTc2b5/ObszOyMiN
-         SgMbl1XnoxfgQ9YdJLXqGGCGgK9idzBUN2Pguy5sl7LXPybxP8VY1a13B089GoalrO9d
-         anzzerxxkyO+MzQmajvKG2pfmTBev8mYwVv3V0Y8hqjN4BVDneWzM/hlq+c+CCeWMV0b
-         dVsezHL1EMS1LNbdCnw6dlH+QOT9wUKb3mWd/SekkTvMZTgwdXavMyPc5NiZLa42Bj7I
-         A9r+MqUCrJXaA6OigL1dqjNFdXItpiq+d4c9qap+Bdlhl0EqXImSP5jHoCaN0eOe55Qp
-         KHyg==
+        bh=ShOnvvH2vqswW8cX/k2qHv7+hfeakBkSeirHaU9mNjk=;
+        b=nWn4K98smKU8rTj/exgiA9q/eWysrRh4iSpKFUaWG0C4NyUTRbNMuLCc0Q3aLBwiYf
+         i6OQbis1h7HJR4LJo24ROd3I3jm611tEFi1nnu5pqIBMxlQmSF+6DFVvWZNfPp8FrUHf
+         Qlstp+9BNYfdrpHHYgHB+wNvPAogmce7QW7KuR5EXFaAROXdktPNfNBmaSyTG7BJmo2j
+         eKMaWr0iYcuq1SQkkY8t0E6Qbw/+cDtfK9ji2zNXZ0fMvL6tb4HBweI3Y2Ks8FkgxjBe
+         PHmHaG6n2d6m1nTXRJJRl1sPzoQpkUVO+Z635W8cVsoCCZq9E7wioJSZskGE75Lxcunz
+         GSyw==
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20210112;
         h=references:in-reply-to:message-id:date:subject:cc:to:from
          :x-gm-message-state:from:to:cc:subject:date;
-        bh=Jcs+6ZlLyYHw9FZ1AFMfUXk9PpNg2BgTfj6tBszyRVU=;
-        b=UrSIpVxfW+l/YfyTUPh8ktgmEMWwvaC5zlAHUE+PMgdcIVleDVb7zSYXq2wLThnrJO
-         W22DRZYCa/HuFsHyJM5U5+D4cEhj9NoMkvRWW7wi83SUpZK6mCqQoYhPGQ1SJjpzRzzy
-         1W2fPAKP9ZnkNSPjcmuttD6b004qT4/KJiD97Jj+s1bOfGMQLQPpRbUEgscEz95BoeVM
-         21lK0gJJaomOpu4gL2JVKtwH5gj2r73/T1lsE9CJMVhgzo786Fx4F54bvmdA3pDywmQk
-         CJ/q8+pLKf2ZDPOBqxa+55UVMiRUtLfmRKx2EfSVap9eawi7jy8rLNd1nN2xDYVwWqc0
-         cXFw==
-X-Gm-Message-State: ACgBeo1xgosZDfDq+Ms6dkUoCy740dAwaA1EuV7TSbwnFEgeyOQBK+hU
-        xkgOjNvjJUz9Ak+OtPP7LfZMjA==
-X-Google-Smtp-Source: AA6agR5P3QhcE3DPZyQgW1JiWRSA2pMst2eXi520E3ZRp0G03fJgX3Rz9MfGsyFj6oaw6YEHfyaLLQ==
-X-Received: by 2002:a05:600c:1e8b:b0:3a6:1a09:2a89 with SMTP id be11-20020a05600c1e8b00b003a61a092a89mr5319379wmb.108.1662728605057;
-        Fri, 09 Sep 2022 06:03:25 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.23
+        bh=ShOnvvH2vqswW8cX/k2qHv7+hfeakBkSeirHaU9mNjk=;
+        b=p7GYqv22+CTF8TNuPVPMEW1qdbcBlIAKOfwt+zWLFLlZdbAhNDq+/FH5POlXO/CjO9
+         iqxxvvNehYAlhfHtjRJfbV7FUjRp8WwSfZ/reKC//I/WMiKkGxngbdumt9X62YhgfqxE
+         7LqHRULJSJ9dQ4p9JRCjtQNo5IyEnOKUJ6I3rtQxHOz7e7oMxrEJ/QrVVI4mD82isIzy
+         OwObjmx+V4tryNK0JtU74MWwxOw3wX2tpd9HtNVvJwpFC/E9qdxgEQDVBcMTsL5lZBer
+         nQs9Vfl4vl995Rg/3sdGra7r+7V1Utvg+hup2RebY+cuwfBsjudQSE6V7OWBpwVuW609
+         on4A==
+X-Gm-Message-State: ACrzQf2rxm1JOz2fFlBZrTSacKnXKGjjntAX/g8uCg7w8UpqKVAl7a/F
+        hsWWpKBZtXQftw5wFjpZYFJTpLL8JzNMzyVK
+X-Google-Smtp-Source: AMsMyM5bZFrApBftBWKyAHJtdil0L36X58rCbV5yTP9e8DBlnEnRqZft4r2H2uxeBBPKi0jbeZNRzA==
+X-Received: by 2002:adf:f8ca:0:b0:226:e456:1896 with SMTP id f10-20020adff8ca000000b00226e4561896mr2052765wrq.177.1663315406781;
+        Fri, 16 Sep 2022 01:03:26 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.24
         (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:24 -0700 (PDT)
+        Fri, 16 Sep 2022 01:03:25 -0700 (PDT)
 From:   Vincent Guittot <vincent.guittot@linaro.org>
 To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
         dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
@@ -1311,12 +1168,109 @@ Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
         David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
         tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
         joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 6/8] sched/fair: Add sched group latency support
-Date:   Fri,  9 Sep 2022 15:03:07 +0200
-Message-Id: <20220909130309.25458-7-vincent.guittot@linaro.org>
+Subject: [PATCH v4 7/8] sched/core: support latency priority with sched core
+Date:   Fri, 16 Sep 2022 10:03:04 +0200
+Message-Id: <20220916080305.29574-8-vincent.guittot@linaro.org>
 X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+X-Mailing-List: linux-kernel@vger.kernel.org
+
+Take into account wakeup_latency_gran() when ordering the cfs threads.
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+---
+ kernel/sched/fair.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 6cc4f2a9725d..7563fb16aba1 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11444,6 +11444,10 @@ bool cfs_prio_less(struct task_struct *a, struct task_struct *b, bool in_fi)
+ 	delta = (s64)(sea->vruntime - seb->vruntime) +
+ 		(s64)(cfs_rqb->min_vruntime_fi - cfs_rqa->min_vruntime_fi);
+ 
++	/* Take into account latency prio */
++	delta -= wakeup_latency_gran(sea, seb);
++
++
+ 	return delta > 0;
+ }
+ #else
+-- 
+2.17.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-kernel-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 4D2A0C54EE9
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:04:50 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S230332AbiIPIEs (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:04:48 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43468 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S230190AbiIPIDd (ORCPT
+        <rfc822;linux-kernel@vger.kernel.org>);
+        Fri, 16 Sep 2022 04:03:33 -0400
+Received: from mail-wr1-x429.google.com (mail-wr1-x429.google.com [IPv6:2a00:1450:4864:20::429])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 51E53A50F8
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:26 -0700 (PDT)
+Received: by mail-wr1-x429.google.com with SMTP id g3so13801654wrq.13
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:26 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=linaro.org; s=google;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
+         :cc:subject:date;
+        bh=tKt+6OFmIt3Z0xnB+vzUXObwuSdNapz5e2blq4g9QGQ=;
+        b=Ll/VfUsKJx+YkFaTpFXyr99e2u1OICPXG8rEdBFbQDJKr8bNQ1ueCKgydggbMunYWJ
+         RqP8wtXW2t5/JjF0yGqNWPD+Jp++VCePswHtCWvCpPTzQf9j+fP24sGKek8GTyhcFdKi
+         /L+3GLrMRW0knpkuYvqBZ5L8G1DpAAK3yZd6GUyAaMfHE5P930wOl1SJAW5wkS7NKEL/
+         bfGDkw6xOBXeqbifbweMxb2ch3umYwe8MlcsiyQU2V0V/V1TmuUFoMsbyqKGel48rAXD
+         Jeala/WM9kmOaCFS/PRIHgWQXfsQZSb/e4opsbQMLrGs0poFpmqNQR/6R4R1uYS/KXzo
+         i/4A==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20210112;
+        h=references:in-reply-to:message-id:date:subject:cc:to:from
+         :x-gm-message-state:from:to:cc:subject:date;
+        bh=tKt+6OFmIt3Z0xnB+vzUXObwuSdNapz5e2blq4g9QGQ=;
+        b=JXeJWg/aonnnX8hAz2J+f0LKQElrs5/YRsxhP0Uwj5+6jDgy1pgqm+aKi1pWQefZij
+         5XptZbr2vMkVzu1GxpQFs+YNkQIkarZ8NQIc2ldXa2lYbmRPJiblqqgs+s3ahsaHT0RA
+         AoPmNElFjKNTU7VgACRcb+1EE05PKQtqNQVo/3UwBLLLADB4IO7gOQbUV6jEG7NNA2dl
+         SVIYYo/M45nIj+E0QwVc4RpK79g0JGcjv+EVNmLFJ7KZtqqv3LFTdQan9YJ8qrv0HCVO
+         StkgP6/CQi+pGLDPOk3t/ATlG7V/vSgMJQvN/RrBivuJ6vhbOBS4Eimw5OPJTJ/J1l+E
+         Lxxg==
+X-Gm-Message-State: ACrzQf0Fy55BdK3HQmrXWr4kFnBnx0NWEo+/cy6DQPEv7zHbgLv6NHXt
+        N04JApK1vqNPNIuBbR217IryHQ==
+X-Google-Smtp-Source: AMsMyM5544La3lNG4clTsASzgNQneqKZeBHDPi4P3eVPIU9yTe8oxohxpPwShzUCgoMKf73he/YFGg==
+X-Received: by 2002:a05:6000:10d2:b0:228:d60b:6d5a with SMTP id b18-20020a05600010d200b00228d60b6d5amr1932207wrx.146.1663315404718;
+        Fri, 16 Sep 2022 01:03:24 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.22
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Fri, 16 Sep 2022 01:03:23 -0700 (PDT)
+From:   Vincent Guittot <vincent.guittot@linaro.org>
+To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
+        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
+        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
+        linux-kernel@vger.kernel.org, parth@linux.ibm.com
+Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
+        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
+        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
+        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
+        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
+Subject: [PATCH v4 6/8] sched/fair: Add sched group latency support
+Date:   Fri, 16 Sep 2022 10:03:03 +0200
+Message-Id: <20220916080305.29574-7-vincent.guittot@linaro.org>
+X-Mailer: git-send-email 2.17.1
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
 Precedence: bulk
 List-ID: <linux-kernel.vger.kernel.org>
 X-Mailing-List: linux-kernel@vger.kernel.org
@@ -1444,7 +1398,7 @@ index a20eadb0af97..6cc4f2a9725d 100644
  
  void free_fair_sched_group(struct task_group *tg) { }
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index c4beddb58ebd..117b23dfb912 100644
+index a4cb8058f1b2..619132f4f480 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -406,6 +406,8 @@ struct task_group {
@@ -1474,52 +1428,52 @@ Return-Path: <linux-kernel-owner@kernel.org>
 X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
 	aws-us-west-2-korg-lkml-1.web.codeaurora.org
 Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 66471ECAAD3
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:51 +0000 (UTC)
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 1CFF5C54EE9
+	for <linux-kernel@archiver.kernel.org>; Fri, 16 Sep 2022 08:04:58 +0000 (UTC)
 Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S231559AbiIINEs (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:04:48 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37292 "EHLO
+        id S230340AbiIPIEy (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
+        Fri, 16 Sep 2022 04:04:54 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:43706 "EHLO
         lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S230021AbiIINDa (ORCPT
+        with ESMTP id S230262AbiIPIDg (ORCPT
         <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:30 -0400
-Received: from mail-wm1-x32a.google.com (mail-wm1-x32a.google.com [IPv6:2a00:1450:4864:20::32a])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id CDA8F10C98D
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:28 -0700 (PDT)
-Received: by mail-wm1-x32a.google.com with SMTP id n17-20020a05600c3b9100b003b3235574dbso1262933wms.2
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:28 -0700 (PDT)
+        Fri, 16 Sep 2022 04:03:36 -0400
+Received: from mail-wr1-x433.google.com (mail-wr1-x433.google.com [IPv6:2a00:1450:4864:20::433])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 6AF86A572F
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:29 -0700 (PDT)
+Received: by mail-wr1-x433.google.com with SMTP id k9so34757597wri.0
+        for <linux-kernel@vger.kernel.org>; Fri, 16 Sep 2022 01:03:29 -0700 (PDT)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=linaro.org; s=google;
         h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
          :cc:subject:date;
-        bh=ShOnvvH2vqswW8cX/k2qHv7+hfeakBkSeirHaU9mNjk=;
-        b=d4M6oTQTnjBsjWhNKa70McX6AvVURQd47g1V12uRxNdComNhjCeVuEODh+nV76IVxr
-         pOCD/PbU4wZ/mssNETspS/X+dFTTTSZ1cgmKNQXwuDNXiVzbb479GLFmTGQU5MMsHXmj
-         a7p5p0vDtv9HTPB/SasjUowr1S9W0tHsXYg6hP/Jy9SC3XANx9Cj64CLMxCkpibdrLtq
-         R2GLX7uF3qvv8//i93k6Q5zEeC+GDgJfIVFW69mC9xxMPYz2b6j9L9H+ENo7YkCARrLQ
-         GHHDPSfwTJrzastBddKuvsgQ3uze27W77we/RYzhR1OkKtlu+68exg0eBXCxMyQh/QWZ
-         srxw==
+        bh=LW8Dc4mZS/RzZdRw8deDoWwyjghRJ0WvxlTe7jOh9Po=;
+        b=DqKpQKFZUvVEZrJhsqegSOy2JqVZClrydyhlK5N7V6HqIu6nvjwWVEqUFxro6lgc36
+         CifEDez3l05Lgq78m8ZZ5k2AEB9L4fBgbKfG/pQQeW73xNweH+srdrN3M2vxk5LiNsqF
+         0tcMCJadV6U8EfsW7ZT150+gnXPT+tWm9aS3GYjHR9/NkH8kQ40wH5CAwKhLKnLVjN+C
+         B/aByzrXZy9NNbxffpIPx87q0Db/4jlongJzIo3QiMWooqX76G3zAwusog9Pr5JYJwyW
+         3cpFJLc5e4ozkro19wpippYN2s4sOD2EYoe0Y0yrgPn78fXKc3HCwQUmYgpsclDQNUYz
+         AX0w==
 X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
         d=1e100.net; s=20210112;
         h=references:in-reply-to:message-id:date:subject:cc:to:from
          :x-gm-message-state:from:to:cc:subject:date;
-        bh=ShOnvvH2vqswW8cX/k2qHv7+hfeakBkSeirHaU9mNjk=;
-        b=ZGMzkY2qYRHc5/jtAthIGuF2hOtp9uhAmezktbYEpDSpCj1yDXr0mwXDBaXWQ8gRlK
-         tNk2qAJf4V5MW2HHtpBymUQNIFf30g0rbZHcpdkoOJ1Ix3kGe20RtLmXR8eohmCgAQ7m
-         O7wslBKOcQhaVWRMyKl8eUi/3V+rBUpV1bVDknnfTZx0G2Ve3kwZUy1qBt3/bodvcj06
-         F8Pvdgpx13UDM+4SInRXz6qsrdT1bCla8xRdq6RBcBc/8EMEd2480pMVBLPsRHATlbnv
-         JiMPRBTR9Vy2CuDCYMfhb1Fpb0zdj1C5ljrnknGf6i7EAqxg3JTg4vOdrc9ZShXoPqdK
-         X0IA==
-X-Gm-Message-State: ACgBeo1IuZrSzZU+2WlpkGClNGSh9jN8KUNn6f9Bia66KfhrLx2dQ6/3
-        zXMb3BlD6d0HXh4TUjkqwY3R8g==
-X-Google-Smtp-Source: AA6agR7hmyS9LSv3EJFIQ4+FDrc7/3egK7U8v+wC8ZsYhBP4S//sVJVQaoOWi5l1QMrqQ8pxzs1fmQ==
-X-Received: by 2002:a05:600c:3d19:b0:3a5:c6ef:a875 with SMTP id bh25-20020a05600c3d1900b003a5c6efa875mr5277822wmb.66.1662728606799;
-        Fri, 09 Sep 2022 06:03:26 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.25
+        bh=LW8Dc4mZS/RzZdRw8deDoWwyjghRJ0WvxlTe7jOh9Po=;
+        b=CpoPDvNyqqkSEWtntEcVDTCGKSTdG0TQXycYM9jdv1jZxmE2CGIQF7Flw5p/J72fdf
+         CUhjLZ/9QrX5J39ydUxU3u3nLApiybth3oyvomHOSdhX/ngxitKqjScjAsMeUG9rhpws
+         e2+qu/c7FoxaN99E4MmkVkol/XB5a9LOEHGfsCJpcqw6y/gkFSdjsxz26dYy1cokzOf7
+         iApkUUSZPEjfpZDcLypJk4TAfiAOk3DNhtgo5ymH3bztxa3A2xiAXcAn/LS3/DY0XAjU
+         aU3+mWrvv6KRtA2iD1nwk34y1JYn0hLgW6RLq5xKISTnY8RP2Bmcbl6hwCURMtJxFtNp
+         TR7Q==
+X-Gm-Message-State: ACrzQf0/pdgn5FsskxpUwfD8NY4ZL/YXKTgmjuGn+UOBmvHn7Ts+c3rN
+        bp+bHuovZob3iFMNAA/xtQK4vQ==
+X-Google-Smtp-Source: AMsMyM6PiBRNRZfyRIyWDCuJRRWTGvpVzw5jZ7UtvKkoqQSLWkUPzkS57d+XWTwhKSZEiVRAsN+GEg==
+X-Received: by 2002:a5d:678a:0:b0:22a:c9d9:443d with SMTP id v10-20020a5d678a000000b0022ac9d9443dmr1924784wru.129.1663315408697;
+        Fri, 16 Sep 2022 01:03:28 -0700 (PDT)
+Received: from localhost.localdomain ([2a01:e0a:f:6020:9ab:1164:827a:1548])
+        by smtp.gmail.com with ESMTPSA id c9-20020adffb49000000b00228dbf15072sm4418116wrs.62.2022.09.16.01.03.26
         (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:26 -0700 (PDT)
+        Fri, 16 Sep 2022 01:03:27 -0700 (PDT)
 From:   Vincent Guittot <vincent.guittot@linaro.org>
 To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
         dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
@@ -1530,109 +1484,12 @@ Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
         David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
         tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
         joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 7/8] sched/core: support latency priority with sched core
-Date:   Fri,  9 Sep 2022 15:03:08 +0200
-Message-Id: <20220909130309.25458-8-vincent.guittot@linaro.org>
+Subject: [PATCH v4 8/8] sched/fair: Add latency list
+Date:   Fri, 16 Sep 2022 10:03:05 +0200
+Message-Id: <20220916080305.29574-9-vincent.guittot@linaro.org>
 X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-Take into account wakeup_latency_gran() when ordering the cfs threads.
-
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- kernel/sched/fair.c | 4 ++++
- 1 file changed, 4 insertions(+)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 6cc4f2a9725d..7563fb16aba1 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -11444,6 +11444,10 @@ bool cfs_prio_less(struct task_struct *a, struct task_struct *b, bool in_fi)
- 	delta = (s64)(sea->vruntime - seb->vruntime) +
- 		(s64)(cfs_rqb->min_vruntime_fi - cfs_rqa->min_vruntime_fi);
- 
-+	/* Take into account latency prio */
-+	delta -= wakeup_latency_gran(sea, seb);
-+
-+
- 	return delta > 0;
- }
- #else
--- 
-2.17.1
-
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Return-Path: <linux-kernel-owner@kernel.org>
-X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
-	aws-us-west-2-korg-lkml-1.web.codeaurora.org
-Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
-	by smtp.lore.kernel.org (Postfix) with ESMTP id 2A97BECAAA1
-	for <linux-kernel@archiver.kernel.org>; Fri,  9 Sep 2022 13:04:55 +0000 (UTC)
-Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
-        id S231609AbiIINEx (ORCPT <rfc822;linux-kernel@archiver.kernel.org>);
-        Fri, 9 Sep 2022 09:04:53 -0400
-Received: from lindbergh.monkeyblade.net ([23.128.96.19]:37490 "EHLO
-        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
-        with ESMTP id S231669AbiIINDi (ORCPT
-        <rfc822;linux-kernel@vger.kernel.org>);
-        Fri, 9 Sep 2022 09:03:38 -0400
-Received: from mail-wm1-x334.google.com (mail-wm1-x334.google.com [IPv6:2a00:1450:4864:20::334])
-        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 2EA7D1174A9
-        for <linux-kernel@vger.kernel.org>; Fri,  9 Sep 2022 06:03:30 -0700 (PDT)
-Received: by mail-wm1-x334.google.com with SMTP id bg5-20020a05600c3c8500b003a7b6ae4eb2so4396454wmb.4
-        for <linux-kernel@vger.kernel.org>; Fri, 09 Sep 2022 06:03:30 -0700 (PDT)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
-        d=linaro.org; s=google;
-        h=references:in-reply-to:message-id:date:subject:cc:to:from:from:to
-         :cc:subject:date;
-        bh=+yJ5UA3osJaE8In6k2eqSTVByQFti3MaFQ6QdbrD9SQ=;
-        b=yARDbhvlRO/J0Q88+bIt6nGh8mopYng+aeVP02JjPAKzTZdpayPzKFhguVxaQWKRGn
-         Y0CpK0lo5vvDyXARpH4K50Kbizk7eaDZt+zx1EMSIB1i0Y8+mj9k9wysAsnKgjpfy1nd
-         B4TAG+kjkkNGPHBtAjswB6WWpzTb3F8t2iJgfbx9R81cgCMsyJQCsZLuGV4kCRXmOBiq
-         3XAQ2R3PHKWsBL0UPVgb8Oj+G+Htxp09HQRkmz+mTJPKY0JoVev/l2lnP27W+jvRGO6B
-         C+1bppk0MJcMbcbbFADmRgw0BJ2y0LmfhInE0TgnzN4O3nNizz9S12yUaqIqSBojFRYH
-         3mZw==
-X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
-        d=1e100.net; s=20210112;
-        h=references:in-reply-to:message-id:date:subject:cc:to:from
-         :x-gm-message-state:from:to:cc:subject:date;
-        bh=+yJ5UA3osJaE8In6k2eqSTVByQFti3MaFQ6QdbrD9SQ=;
-        b=r2pC8XWiM4CsT8U7aspTjgoFWQ4bb6wmciAu+B0fUZzQ3MIJ8/llTlH/7bHpEdG0gr
-         6w+LGO5q23KYx/qNo0+v3G2Lw8nXSJcmNJcSvSLV8XQyeh53XIlvVtiQbaxsw73uBw7S
-         3ShKjnKQUqJIQj+NYeAu+lOncV6ngNhPvrXzds9nZf2sUr5aTXsvtNWZkpbJq5W5jh3O
-         qDtxcR1SLNDjYqM92qmd7OO77nOY8NCmymac0TaV+Idf2JK14eJOTItkTi7nqEv0ypQD
-         cBKOYqyNO5jCsrSU05bdmPyOrYLu6Z7q96MFT0NaqRzzw3anJeoIj70Z6a0Xp+6RGB9O
-         DniA==
-X-Gm-Message-State: ACgBeo23qxuTAffnqjjci5P0+tV5TsdutZYpeuyD4MG3oSun9SPVrMdX
-        vNCGO636IQt8WjtmSDZRYY/p2w==
-X-Google-Smtp-Source: AA6agR4UPpyTWkYlLB+ccSEG6+CXORLSYnzeYFEgBNuPQ7yRPFJNIYWZxovN5gPVxbtgaHOGsfvbXg==
-X-Received: by 2002:a05:600c:4fcf:b0:3a8:437a:8d28 with SMTP id o15-20020a05600c4fcf00b003a8437a8d28mr5436523wmq.197.1662728608483;
-        Fri, 09 Sep 2022 06:03:28 -0700 (PDT)
-Received: from localhost.localdomain ([2a01:e0a:f:6020:c6e:e86:ab92:92b7])
-        by smtp.gmail.com with ESMTPSA id m10-20020a05600c3b0a00b003a5f4fccd4asm569909wms.35.2022.09.09.06.03.26
-        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Fri, 09 Sep 2022 06:03:27 -0700 (PDT)
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v3 8/8] sched/fair: Add latency list
-Date:   Fri,  9 Sep 2022 15:03:09 +0200
-Message-Id: <20220909130309.25458-9-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220909130309.25458-1-vincent.guittot@linaro.org>
-References: <20220909130309.25458-1-vincent.guittot@linaro.org>
+In-Reply-To: <20220916080305.29574-1-vincent.guittot@linaro.org>
+References: <20220916080305.29574-1-vincent.guittot@linaro.org>
 Precedence: bulk
 List-ID: <linux-kernel.vger.kernel.org>
 X-Mailing-List: linux-kernel@vger.kernel.org
@@ -1698,7 +1555,7 @@ index 2d2a361d65ee..8b7bf0cb4ee9 100644
  	unsigned int			on_rq;
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 7563fb16aba1..58657cafaa9b 100644
+index 7563fb16aba1..edec532bc89d 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -664,7 +664,77 @@ struct sched_entity *__pick_last_entity(struct cfs_rq *cfs_rq)
@@ -1765,7 +1622,7 @@ index 7563fb16aba1..58657cafaa9b 100644
 +	}
 +}
 +
-+struct sched_entity *__pick_first_latency(struct cfs_rq *cfs_rq)
++static struct sched_entity *__pick_first_latency(struct cfs_rq *cfs_rq)
 +{
 +	struct rb_node *left = rb_first_cached(&cfs_rq->latency_timeline);
 +
@@ -1866,7 +1723,7 @@ index 7563fb16aba1..58657cafaa9b 100644
  
  	mutex_unlock(&shares_mutex);
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 117b23dfb912..294a4a39f3eb 100644
+index 619132f4f480..cab1c241d6df 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -597,6 +597,7 @@ struct cfs_rq {
@@ -1879,5 +1736,4 @@ index 117b23dfb912..294a4a39f3eb 100644
  	 * 'curr' points to currently running entity on this cfs_rq.
 -- 
 2.17.1
-
 

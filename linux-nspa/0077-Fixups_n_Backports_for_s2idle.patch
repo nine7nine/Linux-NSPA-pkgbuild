@@ -1,0 +1,1388 @@
+From ec6c0503190417abf8b8f8e3e955ae583a4e50d4 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Thu, 21 Jul 2022 18:13:30 +0200
+Subject: [PATCH] ACPI: PM: x86: Print messages regarding LPS0 idle support
+
+Because suspend-to-idle is always supported and on x86 it is the only
+way to suspend the system if S3 is not supported by the platform, the
+kernel attempts to enter low-power S0 idle in the suspend-to-idle flow
+regardless of whether or not the ACPI_FADT_LOW_POWER_S0 flag is set in
+the FADT.  However, if that flag is not set, residency counters
+associated with low-power S0 idle may not count and the platform may
+refuse to put the EC into a low-power mode, for example.
+
+For this reason, print diagnostic messages when the platform should
+achieve significant energy savings in low-power S0 idle (because the
+ACPI_FADT_LOW_POWER_S0 flag is set in the FADT) and when
+suspend-to-idle becomes the default suspend method (because low-power
+S0 idle should be equally or more efficient than S3, if available).
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+ drivers/acpi/sleep.c      | 3 +++
+ drivers/acpi/x86/s2idle.c | 4 +++-
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/sleep.c b/drivers/acpi/sleep.c
+index 974746e6e59d93..ad4b2987b3d6ec 100644
+--- a/drivers/acpi/sleep.c
++++ b/drivers/acpi/sleep.c
+@@ -824,6 +824,9 @@ static const struct platform_s2idle_ops acpi_s2idle_ops = {
+ 
+ void __weak acpi_s2idle_setup(void)
+ {
++	if (acpi_gbl_FADT.flags & ACPI_FADT_LOW_POWER_S0)
++		pr_info("Efficient low-power S0 idle declared\n");
++
+ 	s2idle_set_ops(&acpi_s2idle_ops);
+ }
+ 
+
+From 1a2dcab517cbf8f58ebf1e12aea253f5df9cff80 Mon Sep 17 00:00:00 2001
+From: "Rafael J. Wysocki" <rafael.j.wysocki@intel.com>
+Date: Wed, 13 Jul 2022 20:51:13 +0200
+Subject: [PATCH] ACPI: PM: s2idle: Use LPS0 idle if ACPI_FADT_LOW_POWER_S0 is
+ unset
+
+If the PNP0D80 device is present and its _DSM appears to be valid,
+there is no reason to avoid using it even if ACPI_FADT_LOW_POWER_S0
+is unset in the FADT, because suspend-to-idle may be the only way to
+suspend the system if S3 is not supported by the platform, so do not
+return early from lps0_device_attach() in that case.
+
+However, still check ACPI_FADT_LOW_POWER_S0 when deciding whether or
+not suspend-to-idle should be the default system suspend method.
+
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+ drivers/acpi/x86/s2idle.c | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 392f75157f3466..c1e5c3de59f0a9 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -369,9 +369,6 @@ static int lps0_device_attach(struct acpi_device *adev,
+ 	if (lps0_device_handle)
+ 		return 0;
+ 
+-	if (!(acpi_gbl_FADT.flags & ACPI_FADT_LOW_POWER_S0))
+-		return 0;
+-
+ 	if (acpi_s2idle_vendor_amd()) {
+ 		/* AMD0004, AMD0005, AMDI0005:
+ 		 * - Should use rev_id 0x0
+@@ -419,11 +505,15 @@ static int lps0_device_attach(struct acp
+ 		lpi_device_get_constraints();
+ 
+ 	/*
+-	 * Use suspend-to-idle by default if the default suspend mode was not
+-	 * set from the command line.
++	 * Use suspend-to-idle by default if ACPI_FADT_LOW_POWER_S0 is set in
++	 * the FADT and the default suspend mode was not set from the command
++	 * line.
+ 	 */
+-	if (mem_sleep_default > PM_SUSPEND_MEM && !acpi_sleep_default_s3)
++	if ((acpi_gbl_FADT.flags & ACPI_FADT_LOW_POWER_S0) &&
++	    mem_sleep_default > PM_SUSPEND_MEM && !acpi_sleep_default_s3) {
+ 		mem_sleep_current = PM_SUSPEND_TO_IDLE;
++		pr_info("Low-power S0 idle used by default for system suspend\n");
++	}
+ 
+ 	/*
+ 	 * Some LPS0 systems, like ASUS Zenbook UX430UNR/i7-8550U, require the
+
+
+From ed470febf837dfb117601f0df058dcab02c8c570 Mon Sep 17 00:00:00 2001
+From: Shyam Sundar S K <Shyam-sundar.S-k@amd.com>
+Date: Mon, 4 Jul 2022 09:20:17 +0530
+Subject: [PATCH] ACPI: PM: s2idle: Add support for upcoming AMD uPEP HID
+ AMDI008
+
+New version of uPEP will have a separate ACPI id, add that
+to the support list.
+
+Signed-off-by: Shyam Sundar S K <Shyam-sundar.S-k@amd.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+Signed-off-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+---
+ drivers/acpi/x86/s2idle.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 2963229062f85a..392f75157f3466 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -397,7 +397,9 @@ static int lps0_device_attach(struct acpi_device *adev,
+ 			lps0_dsm_func_mask = (lps0_dsm_func_mask << 1) | 0x1;
+ 			acpi_handle_debug(adev->handle, "_DSM UUID %s: Adjusted function mask: 0x%x\n",
+ 					  ACPI_LPS0_DSM_UUID_AMD, lps0_dsm_func_mask);
+-		} else if (lps0_dsm_func_mask_microsoft > 0 && !strcmp(hid, "AMDI0007")) {
++		} else if (lps0_dsm_func_mask_microsoft > 0 &&
++				(!strcmp(hid, "AMDI0007") ||
++				 !strcmp(hid, "AMDI0008"))) {
+ 			lps0_dsm_func_mask_microsoft = -EINVAL;
+ 			acpi_handle_debug(adev->handle, "_DSM Using AMD method\n");
+ 		}
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 4D375ECAAD8
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:26:23 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229655AbiIPS0W (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:26:22 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40346 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229599AbiIPS0V (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:21 -0400
+Received: from NAM10-BN7-obe.outbound.protection.outlook.com (mail-bn7nam10on2087.outbound.protection.outlook.com [40.107.92.87])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id A0A7BB4E8D;
+        Fri, 16 Sep 2022 11:26:20 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=XP4qxwdwPNz4RusU+say+zwHpmSW1E2pqY9qfQIDb7xH1IxOeWlwpzDPKOu30tmj1jWwrEDw/+vgVaT1brICZfYpB9XlkL2aRjzkXQLLxLBa7AcNkmefH2C628kh+dEVkfqcEE6OiYQw/IpxDpqECeu+y4AZFPdFUs2yfDXRM3eIfFVkPzbl2NQ+OAGwF78YdDTUmYUnX4c64aua/oLxL3Tcr1wIQlZ0yzwBYk3ap+KpqaVjfRrMoYriOEpC8ACF6sZCQbH42+1w99eHfoTXLC03myWgtqME/Zm8uf7f3WDaeZ9MnJ+xxVNP6FNCGKWMQXEjW2abDDaQhc5lAYDkeg==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=0Us7N/QSuHQnzyOwQg4A487ax+zBoqjncvimXDfqEc0=;
+ b=f9n2PE0TRSY2GrGlET4xA4pEMacj413aORzW03lBUip4BZrcd5KQbmsjz3gqKSvSaERAUIR0XDhcdUtqnpgeDlAg0p6Qy5uRpgl6r8sNPjyZs9yHywzJNMQu58OmLA5kKSUk+hNIEgJi1Q0WyVBXHdvoHCtDsc4GIitYVXFPkEZwY6UudA09mBWf0O3H1LtWiDxHv2NuYW+rlDatxW2Yi40i+Cw/2pTWbTPP4vW4djyQTMpD6vYQdRIho67tXuGqtfaIItlnaYzDF2KMQ4ksRQaA1MOQDXkEBoKNrN7DSHrxd7j8/mf8T3BZwLhXzGinfPOKiqT5c0ZG+e2DFcjbIw==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=0Us7N/QSuHQnzyOwQg4A487ax+zBoqjncvimXDfqEc0=;
+ b=yAEl2bwtEeVoQFJr9kdlTyf4ftqyx3J1KKGuLVm675NznOPZbxYP4pEyJi1leQm1aokFkMg3UAWiCD2Xb6dnW8xKZIhKr4EsXGaYYzuDFc/+lP7sfFF/MECu+AjX1hDYpJlyY44yU3EGa/uK492YC1sag0wNoCHxsM7uCV4Svco=
+Received: from MW4PR04CA0121.namprd04.prod.outlook.com (2603:10b6:303:84::6)
+ by SA1PR12MB7104.namprd12.prod.outlook.com (2603:10b6:806:29e::7) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.15; Fri, 16 Sep
+ 2022 18:26:18 +0000
+Received: from CO1PEPF00001A63.namprd05.prod.outlook.com
+ (2603:10b6:303:84:cafe::68) by MW4PR04CA0121.outlook.office365.com
+ (2603:10b6:303:84::6) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:18 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A63.mail.protection.outlook.com (10.167.241.10) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.12 via Frontend Transport; Fri, 16 Sep 2022 18:26:18 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:16 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>,
+        <linux-kernel@vger.kernel.org>
+Subject: [PATCH v3 0/7] Fixups for s2idle on various Rembrandt laptops
+Date:   Fri, 16 Sep 2022 13:26:02 -0500
+Message-ID: <20220916182609.3039-1-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A63:EE_|SA1PR12MB7104:EE_
+X-MS-Office365-Filtering-Correlation-Id: b6b87b0f-344c-4eb4-d7db-08da9810f297
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: xOGLjkhV69geGEq3jcdp+kbk1TlWDZOOsUYHiOFby1bMmrxN/xJhRM2xArRbVPa5+Ng9Cb0BxT64QG7EWr9ixARTJR750hykda+o/lI7CUg746P8nSt+2olQymBerH5s3jHZ3MOdOG0uIiaDAMGP3iYSn9iqgrfl2xBGGg65RYVkQ+B3hge95iCDsR5JceN462pBzDlpCSS2oHf4zix7v13T6+0mmjKTU3lnf4OUSmz+fJGOtcQ1AvP1K7lnTlQrmnv2GzXytMGWA4yKmhCbjHuIH9NNOm6p0GnsKspcHs18MkkSNqs2EwrcASiXAz9CxpTlIzgd2eLNRX89GVFkcRHYJ8jT3Wsp02l+feewH+7WuzUNy9aODwzW8+efMZlkt7+9UQYS41yWMTHzDBndS4Y5IIVdQ0eO2tvNOwgRlsih9lNuU1x679XVoPmttZyevVfmsQNEUFv6Xfgxfb6oVUrBgRG8htIJ0Bz7L5rBPUMDF2UjGYINlsosFOkFkszFOgggPGiT7T+ys5wLotTCbM/75das0io2yLwZxw86ELuLQ3VL0fbCto4hueDCm+I3/I5Rwv7VmXGUAqwFseLd0dHmR7eXSX28dwN4t5Y1G0uoaJqb3Q5VJNMHOcirdzGnWZawflXEDbQTP7kW5WWwvIlB+DIsDk0zLLZ/2ni82YRAYh0ztBZYBEGayvFBHrwLMLsQZtX3kGX/nhKoCW1XfmZVMiOVkBDyKzgjcREgyqrvM+pGfILRf6DGpZuG0M3pBNXv9WDZMlQoENYzSETUkyXSPJQU7D9yz9OOurkXaZ2okp+CeK7n2diG4brGWpqq
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(136003)(396003)(376002)(346002)(39860400002)(451199015)(36840700001)(40470700004)(46966006)(356005)(81166007)(26005)(36860700001)(40480700001)(40460700003)(2906002)(36756003)(186003)(16526019)(47076005)(7416002)(2616005)(44832011)(5660300002)(83380400001)(8936002)(426003)(41300700001)(1076003)(336012)(6666004)(70206006)(70586007)(4326008)(8676002)(82310400005)(7696005)(86362001)(478600001)(82740400003)(316002)(6916009)(45080400002)(54906003)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:18.1563
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: b6b87b0f-344c-4eb4-d7db-08da9810f297
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A63.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: SA1PR12MB7104
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+It was reported that an ASUS Rembrandt laptop has problems with seemingly
+unrelated ACPI events after resuming from s2idle. Debugging the issue
+proved it's because ASUS has ASL that is only called when using the
+Microsoft GUID, not the AMD GUID.
+
+This is a bug from ASUS firmware but this series reworks the s2idle
+handling for AMD to allow accounting for this in a quirk.
+
+Additionally as this is a problem that may pop up again on other models
+add a module parameter that can be used to try the Microsoft GUID on a
+given system.
+
+This module parameter intentionally applies to both Intel and AMD systems
+as the same problem could potentially exist on Intel systems that support
+both the Intel GUID or the Microsoft GUID.
+
+v2->v3:
+ * Add more systems
+v1->v2:
+ * Add two more systems that are reported to be helped by this series.
+
+Mario Limonciello (7):
+  acpi/x86: s2idle: Move _HID handling for AMD systems into structures
+  acpi/x86: s2idle: If a new AMD _HID is missing assume Rembrandt
+  acpi/x86: s2idle: Add module parameter to prefer Microsoft GUID
+  acpi/x86: s2idle: Add a quirk for ASUS TUF Gaming A17 FA707RE
+  acpi/x86: s2idle: Add a quirk for ASUS ROG Zephyrus G14
+  acpi/x86: s2idle: Add a quirk for Lenovo Slim 7 Pro 14ARH7
+  acpi/x86: s2idle: Add a quirk for ASUSTeK COMPUTER INC. ROG Flow X13
+
+ drivers/acpi/x86/s2idle.c | 136 +++++++++++++++++++++++++++++++-------
+ 1 file changed, 112 insertions(+), 24 deletions(-)
+
+-- 
+2.34.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 84797ECAAD8
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:26:29 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229814AbiIPS00 (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:26:26 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40378 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229743AbiIPS0Y (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:24 -0400
+Received: from NAM10-BN7-obe.outbound.protection.outlook.com (mail-bn7nam10on2056.outbound.protection.outlook.com [40.107.92.56])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id BA247B4E8D;
+        Fri, 16 Sep 2022 11:26:22 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=l8nEmGDRmZafw+U/3L716eV0kCeYa8X3A1CDpHRWkYVyWP1AP7N5SIt3+XDgVz2nkirPkvoqihKJLGCnTIoyv7ruuSCBG8So4xjniIp74xpCNdu1ixbnhnsOaHupan/Q2X6hVW5L3c9nGzp5Q6FeOVrL44Yv8eY1tB2ygqbanoCFY6yY4mgEULxI5z0tFqN6pGsiqcctHhR/SnkkfduTsvwe8PZt1lJVbVvYy5ca5qshwLIiYZGn3UbG3l4hVrVBEomtlB4TZQLklTqhrX45IMuHPAffxsocGyR8dor2moW0+3H/BulQofKdf7I4cCIzAVspb3laKj2gq5AWsDpv2w==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=j08TOhv36F/p8hgL5sflLK730tx+jsN8nYOB5PstjXk=;
+ b=L5PzCQVFPfioe0Vp8cSS4QPoKl11eOUE2H4w1UpxlCHdmKNCXxIh++i5cKDmJJvwnvzWVKjoi37Jq5pQudFMSeUUrP0LW25mErbr1bRe338zdJdgjd+vN2C79DqIH9u/w0rsww1XbyujQpP/lZ4eGYLNrZO/i8GLJt4xGSxhg1GaUoYbAN8w/QCOOIp23xbQg4tPQdWlLqOptPwELKsMIL9JME3G01Srxx3Sd6HAnHiltURJOIgE194vsVjEOMW+H6LSJBVgMRVg/D6uijqLcoLqHM1s16N8pjs7aKCoXA4svPV01XMD/1Ssg7reS1X6yaLAPy/GSWnkpeWndqhaGw==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=j08TOhv36F/p8hgL5sflLK730tx+jsN8nYOB5PstjXk=;
+ b=ohKHAEQZSvwZc4RwnGrdS6MfaEuKH0tRB8zi0MD1GBnNkdnkRUD4ynskzgrvwTQJLK48L+uRgS1XKNVPK53r4qGnBTuDnDyQYqjf+z8GIKrTmeTXtoJZnm1FVqqoj2kBSDGUfJSypikZlOw53XRLbFYZ6h1zPY+LUrmtDu+viyo=
+Received: from BY5PR17CA0011.namprd17.prod.outlook.com (2603:10b6:a03:1b8::24)
+ by CH3PR12MB7523.namprd12.prod.outlook.com (2603:10b6:610:148::13) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16; Fri, 16 Sep
+ 2022 18:26:20 +0000
+Received: from CO1PEPF00001A60.namprd05.prod.outlook.com
+ (2603:10b6:a03:1b8:cafe::5a) by BY5PR17CA0011.outlook.office365.com
+ (2603:10b6:a03:1b8::24) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:19 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A60.mail.protection.outlook.com (10.167.241.7) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.11 via Frontend Transport; Fri, 16 Sep 2022 18:26:19 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:17 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>, <linux-kernel@vger.kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>
+Subject: [PATCH v3 1/7] acpi/x86: s2idle: Move _HID handling for AMD systems into structures
+Date:   Fri, 16 Sep 2022 13:26:03 -0500
+Message-ID: <20220916182609.3039-2-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+In-Reply-To: <20220916182609.3039-1-mario.limonciello@amd.com>
+References: <20220916182609.3039-1-mario.limonciello@amd.com>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A60:EE_|CH3PR12MB7523:EE_
+X-MS-Office365-Filtering-Correlation-Id: 63809304-0af5-4b1e-2d52-08da9810f378
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: RgaK/RZ9phmSMceXPv3x51V+ImOldzLJczR95cw7lizLHgW7FKUyNt3mvPxkdjxJEaIs1+5icwAaI7CmTqMwxLWbsuEoimi7OV5473GexdzjJVoa58mfsFCY8LaS2Xmnq71QaoPZIQ2XDsKgi5i8/Bg20otPlMPR0XenrASVbbrKSCmthcEySrRCkxVwOr8BJJ6q1XPdxRGQcPJERNzKjcXkwhWlY0vD6LWWfDk9FaFTR51uFVo7mDbvjBYvRpZAIQ/1nE0foQCW5z9yEkBtzmm1AulkJMsju/x6wajH+g19ah4dTybxBRRuKMfmv8HUW+7hGCHbxhQqahG+9L8leo82X4ZijbPmg5WEHLuPrgBmSpJ3eP8jm1XI506hWoAeUYzLhIUa0BJ1V+7i6m3tPDnvU7DtP/ReRNuVOhfOP+KgH/KWJpBMQEUfc+zGbddITzwnT/rfCFODWqghXEnTFpYb+YnguXk9AehSKGbKtJcrUlnQ6F4xAD3Hi3E3HcYHWfjqraPwqZvHrm/FyOR6SOthUxcLQW7z8Fw+QFgbAVDerzop7fNIJybjYBxgVEIvzl2lsBaVvXRajY411wAokQ+pR2YG3IrMsOIWnZw7ZZ0rG64Qwqsn6L8nSBlkNQ+qoRVSanPOyTPhFCBS6nllUhYF45q0YG6KNEwaRbHksnUM7L7GLr6OnbGrJVMaYgG++Ei19TpWj2C3jfqguqttt6PRjINgP0AZjOUn15eS18b3chZ+2b6om5rsJ/pQq1eObNv1nE+zje+a2mcfW4YFC7CLkEq+Dp679F4ZV8mrrJBFpyyoaqE8+KhfIhS/a3Pv
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(396003)(136003)(39860400002)(376002)(346002)(451199015)(46966006)(36840700001)(40470700004)(40480700001)(36756003)(2906002)(44832011)(82310400005)(70586007)(8676002)(70206006)(86362001)(4326008)(82740400003)(36860700001)(426003)(47076005)(5660300002)(7416002)(45080400002)(110136005)(54906003)(316002)(8936002)(16526019)(81166007)(336012)(1076003)(186003)(478600001)(26005)(2616005)(356005)(83380400001)(40460700003)(6666004)(7696005)(41300700001)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:19.5640
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 63809304-0af5-4b1e-2d52-08da9810f378
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A60.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: CH3PR12MB7523
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+Right now the information about which cases to use for what are in a
+comment, but this is error prone.  Instead move all information into
+a dedicated structure.
+
+Tested-by: catalin@antebit.com
+Reviewed-by: Philipp Zabel <philipp.zabel@gmail.com>
+Tested-by: Philipp Zabel <philipp.zabel@gmail.com> # GA402RJ
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+v2->v3:
+ * Add tags
+ * Don't check for != NULL
+---
+ drivers/acpi/x86/s2idle.c | 63 ++++++++++++++++++++++++++++-----------
+ 1 file changed, 46 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index f9ac12b778e6..28a3ef9a6bc1 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -363,6 +363,39 @@ static int validate_dsm(acpi_handle handle, const char *uuid, int rev, guid_t *d
+ 	return ret;
+ }
+ 
++struct amd_lps0_hid_device_data {
++	const unsigned int rev_id;
++	const bool check_off_by_one;
++	const bool prefer_amd_guid;
++};
++
++static const struct amd_lps0_hid_device_data amd_picasso = {
++	.rev_id = 0,
++	.check_off_by_one = true,
++	.prefer_amd_guid = false,
++};
++
++static const struct amd_lps0_hid_device_data amd_cezanne = {
++	.rev_id = 0,
++	.check_off_by_one = false,
++	.prefer_amd_guid = false,
++};
++
++static const struct amd_lps0_hid_device_data amd_rembrandt = {
++	.rev_id = 2,
++	.check_off_by_one = false,
++	.prefer_amd_guid = true,
++};
++
++static const struct acpi_device_id amd_hid_ids[] = {
++	{"AMD0004",	(kernel_ulong_t)&amd_picasso,	},
++	{"AMD0005",	(kernel_ulong_t)&amd_picasso,	},
++	{"AMDI0005",	(kernel_ulong_t)&amd_picasso,	},
++	{"AMDI0006",	(kernel_ulong_t)&amd_cezanne,	},
++	{"AMDI0007",	(kernel_ulong_t)&amd_rembrandt,	},
++	{}
++};
++
+ static int lps0_device_attach(struct acpi_device *adev,
+ 			      const struct acpi_device_id *not_used)
+ {
+@@ -370,31 +403,27 @@ static int lps0_device_attach(struct acpi_device *adev,
+ 		return 0;
+ 
+ 	if (acpi_s2idle_vendor_amd()) {
+-		/* AMD0004, AMD0005, AMDI0005:
+-		 * - Should use rev_id 0x0
+-		 * - function mask > 0x3: Should use AMD method, but has off by one bug
+-		 * - function mask = 0x3: Should use Microsoft method
+-		 * AMDI0006:
+-		 * - should use rev_id 0x0
+-		 * - function mask = 0x3: Should use Microsoft method
+-		 * AMDI0007:
+-		 * - Should use rev_id 0x2
+-		 * - Should only use AMD method
+-		 */
+-		const char *hid = acpi_device_hid(adev);
+-		rev_id = strcmp(hid, "AMDI0007") ? 0 : 2;
++		static const struct acpi_device_id *dev_id;
++		const struct amd_lps0_hid_device_data *data;
++
++		for (dev_id = &amd_hid_ids[0]; dev_id->id[0]; dev_id++)
++			if (acpi_dev_hid_uid_match(adev, dev_id->id, NULL))
++				break;
++		if (dev_id)
++			data = (const struct amd_lps0_hid_device_data *) dev_id->driver_data;
++		else
++			return 0;
++		rev_id = data->rev_id;
+ 		lps0_dsm_func_mask = validate_dsm(adev->handle,
+ 					ACPI_LPS0_DSM_UUID_AMD, rev_id, &lps0_dsm_guid);
+ 		lps0_dsm_func_mask_microsoft = validate_dsm(adev->handle,
+ 					ACPI_LPS0_DSM_UUID_MICROSOFT, 0,
+ 					&lps0_dsm_guid_microsoft);
+-		if (lps0_dsm_func_mask > 0x3 && (!strcmp(hid, "AMD0004") ||
+-						 !strcmp(hid, "AMD0005") ||
+-						 !strcmp(hid, "AMDI0005"))) {
++		if (lps0_dsm_func_mask > 0x3 && data->check_off_by_one) {
+ 			lps0_dsm_func_mask = (lps0_dsm_func_mask << 1) | 0x1;
+ 			acpi_handle_debug(adev->handle, "_DSM UUID %s: Adjusted function mask: 0x%x\n",
+ 					  ACPI_LPS0_DSM_UUID_AMD, lps0_dsm_func_mask);
+-		} else if (lps0_dsm_func_mask_microsoft > 0 &&
++		} else if (lps0_dsm_func_mask_microsoft > 0 && data->prefer_amd_guid &&
+ 				(!strcmp(hid, "AMDI0007") ||
+ 				 !strcmp(hid, "AMDI0008"))) {
+ 			lps0_dsm_func_mask_microsoft = -EINVAL;
+-- 
+2.34.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id CA763ECAAA1
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:26:29 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229968AbiIPS01 (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:26:27 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40380 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229591AbiIPS0Y (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:24 -0400
+Received: from NAM02-BN1-obe.outbound.protection.outlook.com (mail-bn1nam07on2041.outbound.protection.outlook.com [40.107.212.41])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 1FBD7B4EB2;
+        Fri, 16 Sep 2022 11:26:23 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=PgIlOSDj9p+pPwYTeZ8+u+XdN99HC2QwaFFECtOLL23lVaeAaoxXiAn/sW0ExYFIlDpj+qvPRIiCiN2A2CLDEMvSG5F1s/jzEdKB7iezlLJyhWTF+P73nnuBVSuIzcJEn61W+ZhLxoiQZn79iZ469gk/3+uqqW/ZdreauXoey/ei9l2Mfez2DYCWZobvKlCcWsIX0mczffg6qIkz+PJtVd+EsJMlX8H9hlVk9L/cqeMTpNNEJ26R8jVTLJh5OXAPWD698SyQVXbsJEBMnU2E4W7tO7uVopFx+Ds7u82Md6ec2sq8IJcHg6MmymQxPMcUmznuc8kk9gZ8Au8Bckyvtw==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=WX01IQsh1BxsH+c5+jv84ywbcDBl7HEozausjPBN5W4=;
+ b=Ex0iuXCEFt/68Mi8QwQo+SC/ChbjJpkYD6NCylk/QNJlSHTaZ8GI2UpjyrgOLJp/k37WJEZRDklc2bKrCTubWXTyTwjOzH3gd3lpP116BkNCoJRqBYq/RLT3LaFZ7cUkSxogJnr35WQQceHfqmT5cTnn4YZXYleY3548qR63JSDNUXJ0FOycid6S4TXuPDGVu51Iay86WPbUDDS0ztcN2YS5fWZLXFiGB7aTO1Y6ARO84PsgF/cifAm7qYpUF0piiI8QBZlHyBmsD4s8451+aA9WfVF3uK2+I6GTbzRVQu1V9fuql5iGniRQYCl4jPwchVnFK1/iwn7WtceKfyRBOg==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=WX01IQsh1BxsH+c5+jv84ywbcDBl7HEozausjPBN5W4=;
+ b=nLOvpbnxXLgSXfOoiXpgcTzJ1Oi2Cm7mHYNTKj20ctkc2Jpn+0RB7K9qR68m76zxC0xLAseapzJRrQPq1pL/ydDWCL/ASRU8yZ/GkElIj0RJkkYayO/rYIPHgGV5SAEJwtqtfKW/1LxzEbjP5+l7dg6Cs33aQ5zKmUmcllmB7e4=
+Received: from BY5PR17CA0002.namprd17.prod.outlook.com (2603:10b6:a03:1b8::15)
+ by SJ0PR12MB6781.namprd12.prod.outlook.com (2603:10b6:a03:44b::22) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.15; Fri, 16 Sep
+ 2022 18:26:20 +0000
+Received: from CO1PEPF00001A60.namprd05.prod.outlook.com
+ (2603:10b6:a03:1b8:cafe::20) by BY5PR17CA0002.outlook.office365.com
+ (2603:10b6:a03:1b8::15) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:20 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A60.mail.protection.outlook.com (10.167.241.7) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.11 via Frontend Transport; Fri, 16 Sep 2022 18:26:20 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:19 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>, <linux-kernel@vger.kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>
+Subject: [PATCH v3 2/7] acpi/x86: s2idle: If a new AMD _HID is missing assume Rembrandt
+Date:   Fri, 16 Sep 2022 13:26:04 -0500
+Message-ID: <20220916182609.3039-3-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+In-Reply-To: <20220916182609.3039-1-mario.limonciello@amd.com>
+References: <20220916182609.3039-1-mario.limonciello@amd.com>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A60:EE_|SJ0PR12MB6781:EE_
+X-MS-Office365-Filtering-Correlation-Id: 77be53ac-0684-4818-020a-08da9810f40c
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: jgZIpM5gTZyy4+AaDsc7bN0yYr1BWQcO2kfCX9Fd1pxJvy12r8PixbsZwgWj3ZeO8AI6Z+xytgNZAVcYpEE7isXh7vmCnZppg5mkXAThfRo4yMjErvqgWbvsxkTHdDcUXzXi952+8xGrInGPRNQb+VA1z12qb5NtZyhGNgxIfQJ7rDVw0aP/hOdJBg+FCw1Rti70PNUIXGjDpCqDh96RI2BtjgMBpRWf/GgB+aO9TVgrUoSZrJOyBAoW22Cvy5lJG5SQtVK7x7CCxgoMlQPAdwCEhqTKidGvkPoKrRC9+fu3hicE4RpjGPezACkquFp1BoiBbzZs96hMZE6iyLVmOVtKmnKjTMqXn+42PkoxVzUd3tPjdPkMr9BFtNMJfdCn8T9FnWYGD5VwrdJWuKvLhJnJdnm6UvSsrqZ4RRIaXnjriPWwco0R48Xy8XHD7rGgosn7BITG45PHnOJBGozm5KKh0QF1wR1qQsYvaL6iTfJ3PC4R7B+bzZ3eMfCjDF/Q3LRAXX3DdR+KFsiK7QMeWuADmwTIivlm8MHdXFj6WIIWTzbpBIWlKKWH4sEsz2Swaf08Mb6XcBmYrK5jHWW1uihDVMz1apqCQt9ACrXhzTux1tU9nCALWgvjgCUvk75L3q3PQdkKw7NjskWq+ZMEgfd+/STkL8RJnTLnGWDEIOTmisTpaT5vqHE8kCqFvIehj1JrJXTEyYjqvJSK95S2DJJXy0HumIOLeoO+IyE7Zoe36klE4ff6qlwsoKPfTkObts8OLDTh/MEbb1YFhd76DDFU0RCuRVMxrh2PnpbsGN31arzMsLccB7xo+HcytQEH
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(346002)(376002)(136003)(39860400002)(396003)(451199015)(40470700004)(36840700001)(46966006)(81166007)(82310400005)(82740400003)(44832011)(6666004)(426003)(41300700001)(40480700001)(2906002)(356005)(186003)(1076003)(7696005)(26005)(336012)(83380400001)(36860700001)(16526019)(36756003)(478600001)(47076005)(70586007)(70206006)(316002)(8936002)(8676002)(5660300002)(110136005)(7416002)(86362001)(54906003)(4326008)(40460700003)(2616005)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:20.5953
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 77be53ac-0684-4818-020a-08da9810f40c
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A60.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: SJ0PR12MB6781
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+A mistake was made that only AMDI0007 was set to rev of "2", but
+it should have been also set for AMDI008. If an ID is missing from
+the _HID table, then assume it matches Rembrandt behavior.
+
+This implicitly means that if any other behavior changes happen
+in the future missing IDs must be added to that table.
+
+Tested-by: catalin@antebit.com
+Reviewed-by: Philipp Zabel <philipp.zabel@gmail.com>
+Tested-by: Philipp Zabel <philipp.zabel@gmail.com> # GA402RJ
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+v2->v3:
+ * Add tags
+---
+ drivers/acpi/x86/s2idle.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 28a3ef9a6bc1..2c5931d247a2 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -412,7 +412,7 @@ static int lps0_device_attach(struct acpi_device *adev,
+ 		if (dev_id)
+ 			data = (const struct amd_lps0_hid_device_data *) dev_id->driver_data;
+ 		else
+-			return 0;
++			data = &amd_rembrandt;
+ 		rev_id = data->rev_id;
+ 		lps0_dsm_func_mask = validate_dsm(adev->handle,
+ 					ACPI_LPS0_DSM_UUID_AMD, rev_id, &lps0_dsm_guid);
+-- 
+2.34.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 18D08C6FA8B
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:26:31 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229976AbiIPS03 (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:26:29 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40406 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229599AbiIPS00 (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:26 -0400
+Received: from NAM11-DM6-obe.outbound.protection.outlook.com (mail-dm6nam11on2057.outbound.protection.outlook.com [40.107.223.57])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 9C4D9B5311;
+        Fri, 16 Sep 2022 11:26:24 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=Aqs/ktKKi+3urarY7cANDyqYtaBLtl4XyDKydlg+naoPd7pwk1DrQWs7CypepZbh68Kboi3t4YGozR2j7Vc5g02/1vymLTjUPCr7Yu3xXOHzret4jvMKStGDr1JQi6iA2jwk5yI0v0z3hvwlaA2gwjLei9oagSHn0Qzjxmyo5f2MQ8uJa8X3/yPY7EZ8qgNdy11kGPND3TKz0mIvSeRegjVyRYnHoXKn1oeKifJ3Hasu78+PqJBSjPgNMrJzX45yKwwEKkg4Mz+2dOoCJNYfy8cGInmWaGuLHck+kOVyKth5FB+A5/3Uua3hdyf6B4jqbTYwpn8sctJTCIppr7+R3w==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=ePyhivEEKSN3uPtWtOfk+oKtHUm2HMfkEgpNzEqPEf0=;
+ b=oenU9iHIX9eywBrDA+RD+f+oWvfoVGVwMUdlip0J46OOfk9D4Y/3bJ0iKuDBnVONJT9TzTqfs3EXmWKpjn1h3Lzc0q192BEHra4IvykZPZljP4Kwgf0DCNE3WxwN3MImYT+fQXu6whpo+LR9K5wnrpMj7gREcaEXhquwXfwBhI5AYQwrV6WUJux4jibFb54KGMVhlO1PCh2YGOAIwIGr+HxnFEIls7+q2q9JrP+PyapHCvqH5krqW6WS3vUMVESDgpipOj67VlMcggpqlwcO2+/1z3xEKZZC7H9KW0W9jnZy/gMkn+9rCA1bv91rpi2aJQ6hAHhJ3tdnm28l5E80PQ==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=ePyhivEEKSN3uPtWtOfk+oKtHUm2HMfkEgpNzEqPEf0=;
+ b=z59Ji46or8KqtqcP2NFMJkdHvJhS6zsMzP79Qii0S36dx1HMQKw0Mbq2xc1FnUTNBnNwWXbS+U+jD8PGAePGwOpaVhvpydxau7mfCZiddUtwLxlV3Uko9VXfdxs3L3eQymWzQriTwdBo2UacJXxMYXXLV4Ar3F3SeFDb+6MwCPw=
+Received: from BY5PR17CA0017.namprd17.prod.outlook.com (2603:10b6:a03:1b8::30)
+ by SN7PR12MB6789.namprd12.prod.outlook.com (2603:10b6:806:26b::22) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.15; Fri, 16 Sep
+ 2022 18:26:22 +0000
+Received: from CO1PEPF00001A60.namprd05.prod.outlook.com
+ (2603:10b6:a03:1b8:cafe::9d) by BY5PR17CA0017.outlook.office365.com
+ (2603:10b6:a03:1b8::30) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:22 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A60.mail.protection.outlook.com (10.167.241.7) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.11 via Frontend Transport; Fri, 16 Sep 2022 18:26:22 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:20 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>, <linux-kernel@vger.kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>
+Subject: [PATCH v3 3/7] acpi/x86: s2idle: Add module parameter to prefer Microsoft GUID
+Date:   Fri, 16 Sep 2022 13:26:05 -0500
+Message-ID: <20220916182609.3039-4-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+In-Reply-To: <20220916182609.3039-1-mario.limonciello@amd.com>
+References: <20220916182609.3039-1-mario.limonciello@amd.com>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A60:EE_|SN7PR12MB6789:EE_
+X-MS-Office365-Filtering-Correlation-Id: 61c79222-b286-499c-1b1d-08da9810f52a
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: o0j+kc7ikkZgPIRpfCxyy/qwi2NtK5YDAiTd4zMefAPBIdn+YUVd6O1uPVv2lR7tAiZJwyb0+euvV+EG64y9EjmzylbDgvCsH4Z+rRIUXJPGNl9hQJtf28S4ymLb8AzeC4E3kYufmDkolLVnUJyzSwSJSXUW6FgJanDvDtnk1pXQ4UvlEMLQv6J2XE39mNo9enKq+hidFWVu+sPvGWiVEyeaTuwtGDqbXanaiVLH64Ad4NRPl53u0K8FYw60Zv5E7va1JycBBya9faEWtzgctv87q8PksxWKuy82Tn3c4iVmdVBF1YDRAYEeTu2533uTDH4bd9AW3VYQWExVtMdB5c95Nq2lhRCFzOnlRcyZMqtwOy37UxBv6HhCG1UC9p51TWWT/oqJ7QulNpbDkm4inwKAhNsqAa8BQijgJ1ed2/XWDXCYzllP4ymAgeC0ePFXGcqWGfFz4GIoh/MEDeYOo3bIUEsTzt7mL3ooXB42W1PNboXvyzEza1O7dJOPqRn767IF8JcbQ2nFcTql143Q6bR/LDPmBKA7fZ+k9duFuRnBIGyymAAPWAoVALfYn6uzcxAC6BCXlHIpCrTUUKjZEAnJkkNgZgDd+Wqjhpzfdt9Qx2qNM3Re2KJS93msv5mPr44f/j/lx7CSqayik2RsoyIkYEb6Ui6bqNNCPHZ3gL/am3wZ7mbOaTEo0e9lJyYMsg1X530MdhlOtDkYqCqSVQw8sdSBGqbA+B8aXzEQfTYSFSh6hnVinStIb2M1U/7+aDBtV3twXCySCDnEx77gwEFNd1h0X5JVUGo4jAInSCdk6jeXJkB9wBLfBbtZlV9l
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(136003)(346002)(396003)(39860400002)(376002)(47530400004)(451199015)(40470700004)(36840700001)(46966006)(83380400001)(52230400001)(336012)(16526019)(36756003)(40480700001)(81166007)(82740400003)(40460700003)(86362001)(2906002)(44832011)(36860700001)(70206006)(356005)(82310400005)(8676002)(70586007)(186003)(478600001)(1076003)(4326008)(426003)(8936002)(47076005)(7416002)(2616005)(5660300002)(41300700001)(6666004)(316002)(26005)(110136005)(7696005)(45080400002)(54906003)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:22.4547
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 61c79222-b286-499c-1b1d-08da9810f52a
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A60.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: SN7PR12MB6789
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+OEMs have made some mistakes in the past for the AMD GUID support
+and not populated the method properly.  To add an escape hatch for
+this problem introduce a module parameter that can force using
+the Microsoft GUID.
+
+This is intentionally introduced to both Intel and AMD codepaths
+to allow using the parameter as a debugging tactic on either.
+
+Reviewed-by: Philipp Zabel <philipp.zabel@gmail.com>
+Tested-by: Philipp Zabel <philipp.zabel@gmail.com> # GA402RJ
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+v2->v3:
+ * Add tags
+---
+ drivers/acpi/x86/s2idle.c | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 2c5931d247a2..127215150b84 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -27,6 +27,10 @@ static bool sleep_no_lps0 __read_mostly;
+ module_param(sleep_no_lps0, bool, 0644);
+ MODULE_PARM_DESC(sleep_no_lps0, "Do not use the special LPS0 device interface");
+ 
++static bool prefer_microsoft_guid __read_mostly;
++module_param(prefer_microsoft_guid, bool, 0644);
++MODULE_PARM_DESC(prefer_microsoft_guid, "Prefer selecting Microsoft GUID for LPS0 device");
++
+ static const struct acpi_device_id lps0_device_ids[] = {
+ 	{"PNP0D80", },
+ 	{"", },
+@@ -402,6 +406,9 @@ static int lps0_device_attach(struct acpi_device *adev,
+ 	if (lps0_device_handle)
+ 		return 0;
+ 
++	lps0_dsm_func_mask_microsoft = validate_dsm(adev->handle,
++						    ACPI_LPS0_DSM_UUID_MICROSOFT, 0,
++						    &lps0_dsm_guid_microsoft);
+ 	if (acpi_s2idle_vendor_amd()) {
+ 		static const struct acpi_device_id *dev_id;
+ 		const struct amd_lps0_hid_device_data *data;
+@@ -416,16 +423,12 @@ static int lps0_device_attach(struct acpi_device *adev,
+ 		rev_id = data->rev_id;
+ 		lps0_dsm_func_mask = validate_dsm(adev->handle,
+ 					ACPI_LPS0_DSM_UUID_AMD, rev_id, &lps0_dsm_guid);
+-		lps0_dsm_func_mask_microsoft = validate_dsm(adev->handle,
+-					ACPI_LPS0_DSM_UUID_MICROSOFT, 0,
+-					&lps0_dsm_guid_microsoft);
+ 		if (lps0_dsm_func_mask > 0x3 && data->check_off_by_one) {
+ 			lps0_dsm_func_mask = (lps0_dsm_func_mask << 1) | 0x1;
+ 			acpi_handle_debug(adev->handle, "_DSM UUID %s: Adjusted function mask: 0x%x\n",
+ 					  ACPI_LPS0_DSM_UUID_AMD, lps0_dsm_func_mask);
+ 		} else if (lps0_dsm_func_mask_microsoft > 0 && data->prefer_amd_guid &&
+-				(!strcmp(hid, "AMDI0007") ||
+-				 !strcmp(hid, "AMDI0008"))) {
++				!prefer_microsoft_guid) {
+ 			lps0_dsm_func_mask_microsoft = -EINVAL;
+ 			acpi_handle_debug(adev->handle, "_DSM Using AMD method\n");
+ 		}
+@@ -433,7 +436,8 @@ static int lps0_device_attach(struct acpi_device *adev,
+ 		rev_id = 1;
+ 		lps0_dsm_func_mask = validate_dsm(adev->handle,
+ 					ACPI_LPS0_DSM_UUID, rev_id, &lps0_dsm_guid);
+-		lps0_dsm_func_mask_microsoft = -EINVAL;
++		if (!prefer_microsoft_guid)
++			lps0_dsm_func_mask_microsoft = -EINVAL;
+ 	}
+ 
+ 	if (lps0_dsm_func_mask < 0 && lps0_dsm_func_mask_microsoft < 0)
+-- 
+2.34.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 782A6ECAAD8
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:26:49 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229956AbiIPS0q (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:26:46 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40472 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229962AbiIPS01 (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:27 -0400
+Received: from NAM11-BN8-obe.outbound.protection.outlook.com (mail-bn8nam11on2041.outbound.protection.outlook.com [40.107.236.41])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 0116AB6D3C;
+        Fri, 16 Sep 2022 11:26:25 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=HfOgNSx8rV1AR5Z41uTeCXPPHrHvkJ8NDZb6C5c48Ewyv1LZ8G/TTxCowRT8HSFAe/IVxu8weUIPCQ7foToYzfFGFf9HJD4/uBljwl/hAmcLe7OfHXHU4iHe3bOZnw8xLFp8Nn2xnbwDJrsrDTE5wgSjkDGKM+w1UtfANP2El3BhN50om/37Pb6Xa6mPM3KN33b4RqlFywL+KbTOgEcSj/D8+LbcZck8+aBF8k23w8t4sRaFSQgyo84j6gD7Y7gva4EGJM8jT3p/wUmmBVHn1hm10DKpdfR/hmQtr3A5wxQ8uyK7kY4FV9dDaKoDdenmjvn9hpqieDvjURr4bIEWSg==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=1b2/Owgi2BwWHOWGXd+TlPezx3gF6ZA2SaTGT8qvrhg=;
+ b=gz7uqLBFtr6phHk/DHWqJ8K1yYAXfTkmQ54plRY+jlvYDD5wTGy89jxnmgsQXBIiEt+JJJHB1EWq/UggKDzCohLBWhk/ONTeT9wZKRWbxJBK5pVq/EDy6fTKmSErNXhP7LxQ6v1BGCvtFaDghPoL0ZUoFvN4IDw2/4h+vAvmN8eh8WNhYuono19ayC/PEh9GsqYwfEtDCYs6bDyKAoEgNHO3kF8/ZWYazrfpG4OdJTkg/RpM7qyNN6P+8EcufmV15Pj12VIXsCRJaPTdCei0Ps52RXFccdTjSlELHceyaNTePdu6ccAam1PwaKd3P7hkeeLLv0j520xxfRngX/jkKw==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=1b2/Owgi2BwWHOWGXd+TlPezx3gF6ZA2SaTGT8qvrhg=;
+ b=iP58SrQmp7BBl0obOCP5cgqqNLJDGek7stRb0fyKjCsppkWDj7YtSmNa9Q+5fpjxcUdwxgBRT+p3gsq8tn5fvdf5H0kvdVLj0O/RecEaNLiYNWeChKCxgAErLcOF5u4Hvr2rBb7lmeXmChgPU1v1FCiqDkhP1fBqwluicqk4MZE=
+Received: from BY5PR17CA0004.namprd17.prod.outlook.com (2603:10b6:a03:1b8::17)
+ by SJ0PR12MB6927.namprd12.prod.outlook.com (2603:10b6:a03:483::12) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5612.20; Fri, 16 Sep
+ 2022 18:26:23 +0000
+Received: from CO1PEPF00001A60.namprd05.prod.outlook.com
+ (2603:10b6:a03:1b8:cafe::59) by BY5PR17CA0004.outlook.office365.com
+ (2603:10b6:a03:1b8::17) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.17 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:23 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A60.mail.protection.outlook.com (10.167.241.7) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.11 via Frontend Transport; Fri, 16 Sep 2022 18:26:23 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:21 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>, <linux-kernel@vger.kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>
+Subject: [PATCH v3 4/7] acpi/x86: s2idle: Add a quirk for ASUS TUF Gaming A17 FA707RE
+Date:   Fri, 16 Sep 2022 13:26:06 -0500
+Message-ID: <20220916182609.3039-5-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+In-Reply-To: <20220916182609.3039-1-mario.limonciello@amd.com>
+References: <20220916182609.3039-1-mario.limonciello@amd.com>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A60:EE_|SJ0PR12MB6927:EE_
+X-MS-Office365-Filtering-Correlation-Id: a9524431-0e4b-4272-02de-08da9810f593
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: R5LGHM3uSH8yLt8H5VwBnNHu3Zc89BUoSU15uW7Rnj+DIQvhlZCPJEFe4EWXyVgmuUAEj6vJ7misff1Mg2QT7YJgbYQNhujqgkLncGSWrcnW6z0P/YiIPVocmMqk3dJmAflURH5zCOtRwxXX46SOd1U2wJBsiupMW/h5VHDAdMHzOmie+FCMEQr932lS5/pBibwXfNGgunXHeuo5Pncv5tpcDHIklROLiGyxTJTCIJhiUMH5Bv+dyEqA4gC+6iWBlsYFh+Y7zNx527zg3KkCQ98MR/Jc9gLS+RXvJJIh6YMt9pdSkShYERA2cKvKBCFR7kwAXqxL3r6Bmd4ECIib+qt9JzZuQ13xCqEWcXM7oOHe89rKJQ+1fx2fctVRP2XJvF1yzMHdUq/GsEvuvZkqB/yUGICmU68hpPCt8FROjezXX7RAFfAG3iC+OP6cb3Dno37O5EfycrpLfs3gpYs8OFq4eh7eUtLLChl56/xnDT8epHHM3ROYqTB8m6Z2yXXFBvP6dgtrRODHrbu78jfV0CxeK15d6F+1f2Pz8OoJnQVfm7FZqy+WdpmX1FrpLWXD95bTZIIrVaCPZ+9PeOHClJNp8rrD2KPE7oxMODg4tq7Uk32jBOtYeEHqjKUxho2Ak/Yepx28lTOsKCCkhm37tw6GlmLEXzAjeZkD65ojvvjsn4TrY0j6jPqHnQHxH0FzHBJtNz52hlGED2WZ/QguAia02d4GvdtbjGbIg6s3HaO1lIa+Ei9YOgpy50S3HZRoQoGzy0PO7hiJSEZroXpLKnTMZRKiDW5MY329SQdzB2ZRs0+vodUJPaErF91JNiGZFclsd7akKzbqbcS3PaIq/w==
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(396003)(136003)(346002)(39860400002)(376002)(451199015)(36840700001)(46966006)(40470700004)(478600001)(36756003)(83380400001)(336012)(86362001)(186003)(7416002)(16526019)(4326008)(426003)(2906002)(81166007)(40460700003)(70586007)(2616005)(8676002)(70206006)(110136005)(40480700001)(316002)(36860700001)(1076003)(45080400002)(54906003)(47076005)(82310400005)(82740400003)(356005)(966005)(41300700001)(7696005)(6666004)(8936002)(26005)(5660300002)(44832011)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:23.1422
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: a9524431-0e4b-4272-02de-08da9810f593
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A60.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: SJ0PR12MB6927
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+ASUS TUF Gaming A17 FA707RE has problems with ACPI events after
+s2idle resume.  It's from a missing call to an ASL method in AMD
+the s2idle calling path. Force the system to use the Microsoft
+Modern Standby calling path instead.
+
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216101
+Reported-and-tested-by: catalin@antebit.com
+Reviewed-by: Philipp Zabel <philipp.zabel@gmail.com>
+Tested-by: Philipp Zabel <philipp.zabel@gmail.com> # GA402RJ
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+v2->v3:
+ * Add tags
+v1->v2:
+ * Fixup for __init
+---
+ drivers/acpi/x86/s2idle.c | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 127215150b84..1b638bd30fcf 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -17,6 +17,7 @@
+ 
+ #include <linux/acpi.h>
+ #include <linux/device.h>
++#include <linux/dmi.h>
+ #include <linux/suspend.h>
+ 
+ #include "../sleep.h"
+@@ -400,6 +401,28 @@ static const struct acpi_device_id amd_hid_ids[] = {
+ 	{}
+ };
+ 
++static int lps0_prefer_microsoft(const struct dmi_system_id *id)
++{
++	pr_debug("Preferring Microsoft GUID.\n");
++	prefer_microsoft_guid = true;
++	return 0;
++}
++
++static const struct dmi_system_id s2idle_dmi_table[] __initconst = {
++	{
++		/*
++		 * ASUS TUF Gaming A17 FA707RE
++		 * https://bugzilla.kernel.org/show_bug.cgi?id=216101
++		 */
++		.callback = lps0_prefer_microsoft,
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
++			DMI_MATCH(DMI_PRODUCT_NAME, "ASUS TUF Gaming A17"),
++		},
++	},
++	{}
++};
++
+ static int lps0_device_attach(struct acpi_device *adev,
+ 			      const struct acpi_device_id *not_used)
+ {
+@@ -566,8 +589,9 @@ static const struct platform_s2idle_ops acpi_s2idle_ops_lps0 = {
+ 	.end = acpi_s2idle_end,
+ };
+ 
+-void acpi_s2idle_setup(void)
++void __init acpi_s2idle_setup(void)
+ {
++	dmi_check_system(s2idle_dmi_table);
+ 	acpi_scan_add_handler(&lps0_handler);
+ 	s2idle_set_ops(&acpi_s2idle_ops_lps0);
+ }
+-- 
+2.34.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 84B14ECAAA1
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:26:54 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S230043AbiIPS0w (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:26:52 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40502 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229533AbiIPS03 (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:29 -0400
+Received: from NAM10-DM6-obe.outbound.protection.outlook.com (mail-dm6nam10on2069.outbound.protection.outlook.com [40.107.93.69])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 766C0B5325;
+        Fri, 16 Sep 2022 11:26:28 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=V0xbvWh1VyIZxrd6YKzhBWraJ13r4QhOz3vwtgZBc+ECyQxYlbJyJ/IKG2dPPLsWL1W6igg6entEYKTMpUNRvsgqNb93KlbDC6AfkGogqcQGobOUtZ8lDEKLMb7veqsKn2VS6+YWMxQ3lGyPDIi8PDCC82ni32gn3G91Us7aZK0Nq+kaHmS9Vhi42EhOJwXYRV0ji9N7rrc5CYMfFFYpQpP7HMWgDVSUn4rcLn79ayWbyPv+8oCmrQjFH9/M8SG1C2lm5e3yWy/82FUXkM62SXnQmAZkZGlU7/aJoaZhqZ0OWYB+R/p8OIXJlFjoLOd/xiZ5qa5qc+Z9D07dyCwjWg==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=/m8K/CiYjxIv0zHj3BcTcWMGT19AMaYr2KN67unwh1U=;
+ b=PyD6IDARP9+Xn1WYdXIdmWIQp1UKAwI40wzndoIxcXqkf+d2KudggOHSbXmUl9xfjbAzR3nHI/dTiBX8dUd/KssjppKqJFsumHq6nxW3g+HNkOoco6wkZ00Rio4DJQCDXjPFop+OYU5EmTcK1o7WKufnc7GB345EEqtXtXFoqmB2Qzz94WZjIBtyRFz2jBnhehfapaLwIE7hscFjx3FN2H//VsJ5RQy+sNNDn8E3voDnIy9inJXGWFy3mfFtzxV9UZsD+9Lsc6G/Bv1ipnkmYGDUZXcojsnUNcwCN/Np8F8Tm1RX7BcIAzGZxOkRsN6rb1aNNjodloxTWmSALe5ZuA==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=/m8K/CiYjxIv0zHj3BcTcWMGT19AMaYr2KN67unwh1U=;
+ b=yd+J1ZLdo7kV4oXqGUarMWQKKaXM/F81cZWE456QrG/qYkjrVPjbcQXifvyZpeTKcbQHbhNw+7+CDTkiuuggTQdJ6NXgW9WaYH0D4IHiEOQVfREvbisXpVdoAcq28oEL/FVRaGq2zc56WRnhAx8YYdINXY6Bixz3eZjHsNCqNFY=
+Received: from BY5PR17CA0036.namprd17.prod.outlook.com (2603:10b6:a03:1b8::49)
+ by DM6PR12MB4450.namprd12.prod.outlook.com (2603:10b6:5:28e::18) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16; Fri, 16 Sep
+ 2022 18:26:26 +0000
+Received: from CO1PEPF00001A60.namprd05.prod.outlook.com
+ (2603:10b6:a03:1b8:cafe::58) by BY5PR17CA0036.outlook.office365.com
+ (2603:10b6:a03:1b8::49) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:26 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A60.mail.protection.outlook.com (10.167.241.7) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.11 via Frontend Transport; Fri, 16 Sep 2022 18:26:26 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:22 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>, <linux-kernel@vger.kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>
+Subject: [PATCH v3 5/7] acpi/x86: s2idle: Add a quirk for ASUS ROG Zephyrus G14
+Date:   Fri, 16 Sep 2022 13:26:07 -0500
+Message-ID: <20220916182609.3039-6-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+In-Reply-To: <20220916182609.3039-1-mario.limonciello@amd.com>
+References: <20220916182609.3039-1-mario.limonciello@amd.com>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A60:EE_|DM6PR12MB4450:EE_
+X-MS-Office365-Filtering-Correlation-Id: 57fe0424-f171-4831-deb6-08da9810f750
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: jg6lkGbYIpHwXTtYiUoEqhO8Sy8yPDEVTbY9Q7bXrYh9+tWHmVb8/mG/8DxoAbDzjZzLZNTyfhcz6Rb8/2vva59JjMflWxs7uBLKAwk8vHStgndnMjQBLtjJ2aluGv69uSXiEl5/mDiQLHywnLwYLf4TC4RFX/AHDrKtbTuHjhp1tzZTRpP2V4+FW1nZaYFf3CnxG4QuNVbKfLHHgfp4Yh9F5PoJkyr6WKWuyS+Uu0rI3Cbq9AINBaeM5EtB+yQ9/+bHZdE/im2vRQCzNl86chhHHuOEooR7ZJTxL20S1VS0CzYoWuQPlhW1QS7WWxSdl3N29YGWig4lNtMwErFX84QeDewuTXDzqlNwArxCmiZJdff93V7Ac3TVl5AdK7jccoo4LWsjpcIjKpOJAypEY8Euf+wMdwd08EkFP0mvsmLE+WRZLwSXAMCUt8JG6V2BaPrr/3UONwm+clnH3raVpkTkSlMTXgPOKsrfJSR40Qn1g167lkW6aA1H52wBV8i5WhuYepjuhNQ00451fMHoKRP7Tdvof6dcdyaHEpxCcTBKPaCdQ4B35NknA2E1seZdDBG/rzn3gE6pc+BLGfR0UkodornSfHOFbnn9vZm5hGhjIilNPJuD+j3bpS2OJLsJN3Frn5+hfNxRlN14vyivOFMS6ENebY/MjL1UjqdfZJiW/bE5xBFi7Yo0aiz1kcwvAU4A5Ntox5OFKrMfIMEbwBkcA4D0vbzhC9/nku9h10+D7zd8ZRV9M8dy8QDJI8z8is8DON1lDng7WP2RSoQLX4qxdEXK8DQqj7LDO5JWRw56vCJdD7YoZSMjyabIU26l
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(376002)(396003)(346002)(136003)(39860400002)(451199015)(36840700001)(46966006)(40470700004)(41300700001)(186003)(1076003)(45080400002)(478600001)(7696005)(40480700001)(336012)(16526019)(47076005)(426003)(2616005)(6666004)(26005)(44832011)(2906002)(40460700003)(82310400005)(110136005)(70206006)(70586007)(54906003)(316002)(7416002)(5660300002)(8936002)(4326008)(8676002)(81166007)(82740400003)(36860700001)(86362001)(356005)(36756003)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:26.0641
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 57fe0424-f171-4831-deb6-08da9810f750
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A60.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: DM6PR12MB4450
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+ASUS ROG Zephyrus G14 is affected by the same BIOS bug as ASUS TUF
+Gaming A17 where important ASL is not called in the AMD code path.
+Use the Microsoft codepath instead.
+
+Reported-and-suggested-by: Philipp Zabel <philipp.zabel@gmail.com>
+Tested-by: Philipp Zabel <philipp.zabel@gmail.com>
+Tested-by: Matthew Anderson <ruinairas1992@gmail.com>
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+v2->v3:
+ * Absorb tags
+v1->v2:
+ * New patch
+---
+ drivers/acpi/x86/s2idle.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 1b638bd30fcf..52f41119f296 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -420,6 +420,14 @@ static const struct dmi_system_id s2idle_dmi_table[] __initconst = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "ASUS TUF Gaming A17"),
+ 		},
+ 	},
++	{
++		/* ASUS ROG Zephyrus G14 (2022) */
++		.callback = lps0_prefer_microsoft,
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
++			DMI_MATCH(DMI_PRODUCT_NAME, "ROG Zephyrus G14 GA402"),
++		},
++	},
+ 	{}
+ };
+ 
+-- 
+2.34.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id DA28EECAAA1
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:26:59 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229501AbiIPS05 (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:26:57 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40470 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229599AbiIPS0p (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:45 -0400
+Received: from NAM10-MW2-obe.outbound.protection.outlook.com (mail-mw2nam10on2079.outbound.protection.outlook.com [40.107.94.79])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id C879CB6D76;
+        Fri, 16 Sep 2022 11:26:30 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=DSZMHXix9rHzBdAkLeiTaVCdhclG8gsYDvszDOa6UKKYwUViUR6WrMjIaIxsJmGXZ5ZLDxBhqrA46vRhKCARPkNRRCcaxAKd2TK1+Is3deX5MsFxareZfgWnaOIjpneFiojlw83KUq7rAGTdoMXGc1aBM1PK7V59VZUsL1f5EE1x3b5NXLV+v98jTMINJ15DVDIHGkaHmlMscwdL07fC2NDXZUd+ZbuWETBAClB54OSok44m4XzS2jlHl49gO8DXBoku2gnyPOWjlrvKhFnqC5R2hYxQLspp5a5lAvWiTMrCqF2aT78ymWuqLi8BtBLcP94YnOF7ZLYMWKUS95bNhg==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=Llqeg4TjQ++pX9TuvSuuly+jehqWmV537lSvc4A1pNA=;
+ b=jHR90jdSkLCo1GaMV7J4bK7stOF9/R+eLXNUpXZ56BLUvWTVSbFJCWoV9weFZkqQLXXHbAcL2K7Bgy8pAUHcrIWCvqjVKGpVSJQvqhdR4LHYLzRnsNQDKAXffvbBfR9gdgxG6nGnRsMD/lUA7f4IEYbHHWTG+BZMzwc6fzCk9muDkL8865Hmo+m/+DaXoV++RHkWS37heTUzUE2fNRSqEESNXo2zlCjsXI1eXjrNEUnR+1cwzDRA4t0QsCqo+ZRA9jhS+/0Xy07mMxcRjnemkCh36FwMFppswVXcvmWGAUZRx4uZ86SBo5vKhaBixSzK98i1PbV9EpJwEhkl6+P1Qw==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=Llqeg4TjQ++pX9TuvSuuly+jehqWmV537lSvc4A1pNA=;
+ b=5PvIksePcqm5HYY7Zq0gFoaam6H1FvXATlLoARs7XL74Ld2yrIjZODIhnKWnFsxMtfkGdZOBR46DnLpggUkLqurn6A70tXXoD8vB2LUhRnADiJboCL8ZudsuvBnWvldT/aF9NX2G59cU2M+ireK7gfsDk9k+Ros+U6WPOwwV80o=
+Received: from BY5PR17CA0001.namprd17.prod.outlook.com (2603:10b6:a03:1b8::14)
+ by DM4PR12MB7645.namprd12.prod.outlook.com (2603:10b6:8:107::16) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16; Fri, 16 Sep
+ 2022 18:26:27 +0000
+Received: from CO1PEPF00001A60.namprd05.prod.outlook.com
+ (2603:10b6:a03:1b8:cafe::20) by BY5PR17CA0001.outlook.office365.com
+ (2603:10b6:a03:1b8::14) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:27 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A60.mail.protection.outlook.com (10.167.241.7) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.11 via Frontend Transport; Fri, 16 Sep 2022 18:26:27 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:23 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>, <linux-kernel@vger.kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>
+Subject: [PATCH v3 6/7] acpi/x86: s2idle: Add a quirk for Lenovo Slim 7 Pro 14ARH7
+Date:   Fri, 16 Sep 2022 13:26:08 -0500
+Message-ID: <20220916182609.3039-7-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+In-Reply-To: <20220916182609.3039-1-mario.limonciello@amd.com>
+References: <20220916182609.3039-1-mario.limonciello@amd.com>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A60:EE_|DM4PR12MB7645:EE_
+X-MS-Office365-Filtering-Correlation-Id: ec7b88d6-e1c7-4642-c1bf-08da9810f7f7
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: x4/m37FvKS/bozju20cIoxXl5x9f5K4y3DPQhsrV4scfSEkPdaL93y/dIXuqZlqCzjavgIMNSUsv7uyl8/er1Y0ZxczZttZcLuJinFUw0MyAE5z1FHwKmPB3W4athTUux3z4ty2zdLr/p1F+xAPGq9MFoWIWEFqB7DBkdcUeK5AZZkASMPFtSBta5W2G24rt7ijUk/eGo7sqvLfU+OcvIXUAidX3nDybRETS02gt5cr7SJJ7rexom06nyxGHKB4JpFEXukjfQPifcHnVxMuuLYkzcdObIaJ0HsTppzW2T9ROdqJzwwa679ZcAgM4k8jyvC6ejagsIGvpI2b8P/Qo7JkiFUI0THyY/XkzlxEz+IdNJKAjdrJuJpUxrQCQkOOYXsKcIhvzYHVJSzVeUsFOLKYN4JlUGN2t5K2tPw8RWxT80KTk6ZLWqpM9cgAkoiDlteJ1r/R/4zE/D1kQ//yQ0FDGT9UBTmMGbxW0HB9opF+RqVr4i5lyFX/MgN/KUOAmrog+5YF8mpBdjx+sNGe9oeT9Fvf28gdO8C6jh/dN5xVmwdU/WgTZaoNUbQSyiohlowe9DPeNr/DxLY1jkPlollM0qmHjwyyRvUA9rV3Kv6B4Fgo2FUAdCuzpsuUr/EzSiGwXs12E5EMd8bo3CYLy8jBRLnzCGpD0YfQdiBUDuZI2ySDnIJsKlihilF4ARcILZeCZ6olEh/CwxKP7qGy8R34+HWmk1UDqFpIFtW1ILZfceHktWsPW2iipkKHZWuoScnspga4D3+7RASxGzboYchvutpKjiLHuK5eCUBRPyJ7jkeqNgIfB/PDcwDFw/tgeItuw5wfdwaqhd2+b4TYPq99X0IqtnQ8QOWej0G7MylEl+QlK8SCrDRePH5VutfvT
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(39860400002)(396003)(376002)(136003)(346002)(451199015)(46966006)(36840700001)(40470700004)(82740400003)(81166007)(356005)(36756003)(36860700001)(86362001)(1076003)(44832011)(26005)(40460700003)(40480700001)(82310400005)(2906002)(478600001)(45080400002)(186003)(41300700001)(966005)(7696005)(6666004)(16526019)(336012)(2616005)(426003)(47076005)(110136005)(316002)(54906003)(70586007)(70206006)(8676002)(7416002)(4326008)(8936002)(5660300002)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:27.1579
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: ec7b88d6-e1c7-4642-c1bf-08da9810f7f7
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A60.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: DM4PR12MB7645
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+Lenovo Slim 7 Pro 14ARH7 has a sporadically non-functional keyboard
+when resuming from s2idle.  This is caused by some missing calls to the
+EC that don't occur in the AMD codepath but only in the Microsoft codepath.
+
+Add the system to the quirk list to force Microsoft codepath.
+
+Reported-by: Travis Glenn Hansen <travisghansen@yahoo.com>
+Reported-by: Sebastian S. <iam@decentr.al>
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216473
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216438
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+v2->v3:
+ * Adjust prefix to cover multiple systems
+ * Add another Link tag
+v1->v2:
+ * New patch
+---
+ drivers/acpi/x86/s2idle.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 52f41119f296..9c84eb068e19 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -428,6 +428,18 @@ static const struct dmi_system_id s2idle_dmi_table[] __initconst = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "ROG Zephyrus G14 GA402"),
+ 		},
+ 	},
++	{
++		/*
++		 * Lenovo Yoga Slim 7 Pro X 14ARH7
++		 * https://bugzilla.kernel.org/show_bug.cgi?id=216438 : 82V2
++		 * https://bugzilla.kernel.org/show_bug.cgi?id=216438 : 82TL
++		 */
++		.callback = lps0_prefer_microsoft,
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "LENOVO"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "82"),
++		},
++	},
+ 	{}
+ };
+ 
+-- 
+2.34.1
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <linux-acpi-owner@kernel.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from vger.kernel.org (vger.kernel.org [23.128.96.18])
+	by smtp.lore.kernel.org (Postfix) with ESMTP id 056EFECAAA1
+	for <linux-acpi@archiver.kernel.org>; Fri, 16 Sep 2022 18:27:04 +0000 (UTC)
+Received: (majordomo@vger.kernel.org) by vger.kernel.org via listexpand
+        id S229509AbiIPS1B (ORCPT <rfc822;linux-acpi@archiver.kernel.org>);
+        Fri, 16 Sep 2022 14:27:01 -0400
+Received: from lindbergh.monkeyblade.net ([23.128.96.19]:40472 "EHLO
+        lindbergh.monkeyblade.net" rhost-flags-OK-OK-OK-OK) by vger.kernel.org
+        with ESMTP id S229863AbiIPS0q (ORCPT
+        <rfc822;linux-acpi@vger.kernel.org>); Fri, 16 Sep 2022 14:26:46 -0400
+Received: from NAM12-MW2-obe.outbound.protection.outlook.com (mail-mw2nam12on2076.outbound.protection.outlook.com [40.107.244.76])
+        by lindbergh.monkeyblade.net (Postfix) with ESMTPS id 720BEB6D7E;
+        Fri, 16 Sep 2022 11:26:31 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; s=arcselector9901; d=microsoft.com; cv=none;
+ b=VGH9JwdIu2rc4vaOrc3w0AIhCpEoF8YIiMM4lgaa8cP2pOdnEHRqGkrufuCHAZ+yRkt3DqNpqfoAKA/I2mjb973n/RyH3U1RgnlqX+p8ET/GVghIXXzgrRpZq2HuI5ThifL3CelPBWzWpWxEKwBkMUWeO8wBxNsMNSdKWmeoGp45ttGtDW9w+t05I/p+GYXUhkdOwP8FFyJhEAnSXECqtirjFfADFpQ7TlRA2NcZ1PzH4lk4ZBKLxCHzBrKUbM93OXkJzF8PbicBrTZ36AsF8vRqj0VtJMNX9O0IIbVr4p1W0nUUBmRTy47Wtee3sBy+m1tnwcHjkUIVK/GPRT+DkA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=microsoft.com;
+ s=arcselector9901;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-AntiSpam-MessageData-ChunkCount:X-MS-Exchange-AntiSpam-MessageData-0:X-MS-Exchange-AntiSpam-MessageData-1;
+ bh=FJm2EnFFi2RnO/ktg5JU9Ghz8mVgR90GXT1HwnJiNlc=;
+ b=HZulTG293CTfZEuCYd9eEoHfrOLuOalvW/8w7Y8JhVLg8JU5yLXuRmvWnsRjEZ6OW71DHpxI0V1Mg5IZs10U62ccs+E0FIf/VGHV07QpYo0Ksz4paHF83qtgoIhSZ0fTkU9/vCwnKpwMtv3kdlHV0FFIBPKkYdzRgsGqsiYJ4vYEQ2gAaHfX8Bql7ZiYvPyAsrVJunzSF+gB0XAo25j7i9P/3mBVBYaXt9XtCITEB9nqufJWaVn7AgL8oKtwATkNTVUmP6pCkn3WEUZHo+69JMNFmiS5d9lDM2N3ZxDyPkACoWZJ58q2mMtvZQlY89I17LzpSRFTjNUbEW53N7Y0eQ==
+ARC-Authentication-Results: i=1; mx.microsoft.com 1; spf=pass (sender ip is
+ 165.204.84.17) smtp.rcpttodomain=kernel.org smtp.mailfrom=amd.com; dmarc=pass
+ (p=quarantine sp=quarantine pct=100) action=none header.from=amd.com;
+ dkim=none (message not signed); arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=amd.com; s=selector1;
+ h=From:Date:Subject:Message-ID:Content-Type:MIME-Version:X-MS-Exchange-SenderADCheck;
+ bh=FJm2EnFFi2RnO/ktg5JU9Ghz8mVgR90GXT1HwnJiNlc=;
+ b=F47gj/B3tK9Zn1p4HxXYIn4DaFhs1pY8zGXqsJEufVqfQ8cGVoksWOe4gciyo6fIMU0h0vcJfJGAmAqj8d/67KQoQIAQ4wmOvrZpyIASoWWeiX1ftQIbMf/dPu35hUBesDz/TMYV7SFAZnjkzsGnhk5k7/Me+vJKvSC4hMln1VE=
+Received: from BY5PR17CA0018.namprd17.prod.outlook.com (2603:10b6:a03:1b8::31)
+ by DM6PR12MB4943.namprd12.prod.outlook.com (2603:10b6:5:1bc::21) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.15; Fri, 16 Sep
+ 2022 18:26:29 +0000
+Received: from CO1PEPF00001A60.namprd05.prod.outlook.com
+ (2603:10b6:a03:1b8:cafe::ed) by BY5PR17CA0018.outlook.office365.com
+ (2603:10b6:a03:1b8::31) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.5632.16 via Frontend
+ Transport; Fri, 16 Sep 2022 18:26:29 +0000
+X-MS-Exchange-Authentication-Results: spf=pass (sender IP is 165.204.84.17)
+ smtp.mailfrom=amd.com; dkim=none (message not signed)
+ header.d=none;dmarc=pass action=none header.from=amd.com;
+Received-SPF: Pass (protection.outlook.com: domain of amd.com designates
+ 165.204.84.17 as permitted sender) receiver=protection.outlook.com;
+ client-ip=165.204.84.17; helo=SATLEXMB04.amd.com; pr=C
+Received: from SATLEXMB04.amd.com (165.204.84.17) by
+ CO1PEPF00001A60.mail.protection.outlook.com (10.167.241.7) with Microsoft
+ SMTP Server (version=TLS1_2, cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id
+ 15.20.5612.11 via Frontend Transport; Fri, 16 Sep 2022 18:26:29 +0000
+Received: from AUS-LX-MLIMONCI.amd.com (10.180.168.240) by SATLEXMB04.amd.com
+ (10.181.40.145) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256) id 15.1.2375.28; Fri, 16 Sep
+ 2022 13:26:24 -0500
+From:   Mario Limonciello <mario.limonciello@amd.com>
+To:     <rafael@kernel.org>, <linux-kernel@vger.kernel.org>
+CC:     <travisghansen@yahoo.com>, <catalin@antebit.com>,
+        <Shyam-sundar.S-k@amd.com>,
+        Matthew Anderson <ruinairas1992@gmail.com>,
+        <philipp.zabel@gmail.com>, "Sebastian S ." <iam@decentr.al>,
+        Hans de Goede <hdegoede@redhat.com>,
+        Mario Limonciello <mario.limonciello@amd.com>,
+        "Len Brown" <lenb@kernel.org>, <linux-acpi@vger.kernel.org>
+Subject: [PATCH v3 7/7] acpi/x86: s2idle: Add a quirk for ASUSTeK COMPUTER INC. ROG Flow X13
+Date:   Fri, 16 Sep 2022 13:26:09 -0500
+Message-ID: <20220916182609.3039-8-mario.limonciello@amd.com>
+X-Mailer: git-send-email 2.25.1
+In-Reply-To: <20220916182609.3039-1-mario.limonciello@amd.com>
+References: <20220916182609.3039-1-mario.limonciello@amd.com>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [10.180.168.240]
+X-ClientProxiedBy: SATLEXMB04.amd.com (10.181.40.145) To SATLEXMB04.amd.com
+ (10.181.40.145)
+X-EOPAttributedMessage: 0
+X-MS-PublicTrafficType: Email
+X-MS-TrafficTypeDiagnostic: CO1PEPF00001A60:EE_|DM6PR12MB4943:EE_
+X-MS-Office365-Filtering-Correlation-Id: 65f1622a-74be-484b-b89d-08da9810f92d
+X-MS-Exchange-SenderADCheck: 1
+X-MS-Exchange-AntiSpam-Relay: 0
+X-Microsoft-Antispam: BCL:0;
+X-Microsoft-Antispam-Message-Info: 1WEMhEe7dKl6c67U8ytcC637xpaooi8orAVHgBVPqWjtAxGoHxDyRplX9GGGLozjISVwe3+02wh99IMyw2IxWhRnLBzmBBznAg51PqCta6sHK4Rud4kCjCsQpKymNu4mCe8MCW0wc2lwtKBQKgyYkq+M5yeQ7mTWS8VGZKiTovbGs4KOXqzGvDgCNLNZ+nI5OEiM28snkzflBBsUvDN/CUk3Oh7MRVxxetZ9HqKD2uxfwm9YC8JX+9vuMYhuRg5YJGXW3/nAamKBy0Cdrw9ffwsXksNjJ2mfn7EAQJSF+F95NAoFpibhM/sUHt8VfdQszq7pW8nHyU9K8iL6gaxh9OIZbLdI4AcIuWs40fx+BY1qhnX6Pd+kKfTSX9z7l2wWoCDtwqVCH8JkfIX8lZ3QKZpq/+xpAHMlDLP09WPpbscCJC55kPiDy73Y/HD2lhuOxtS8aBsc0e2h6e7Kl9DVpyNc+GhcGQLl4TVJjmucrkc3+7h6ehB784EwwwYDfsebUZPXzQi60sY2fUTpzMFxd7Mmo/9oUZsm8OqJ7nMoomjGLVaYBIpWxWU8/B0IMOAllxP9PkutGQHXyPhL9gh9j5KNjvIRKx9JQ58Nc/SNsFqVnxWWBU4p6iV/M+YvB79qZd7PALY6nJ8YfcEjXSLCBzmTEebQNMqb3hCeizveFZUVN1WLc4QiVCYdyyOQ5QCZ9YviJbuaAmHgaxIRpEAXf8mEsx/ke6rTLWWfjK9jFgTf69zxD9Lp5HcJ7SQBd0Wf
+X-Forefront-Antispam-Report: CIP:165.204.84.17;CTRY:US;LANG:en;SCL:1;SRV:;IPV:CAL;SFV:NSPM;H:SATLEXMB04.amd.com;PTR:InfoDomainNonexistent;CAT:NONE;SFS:(13230022)(4636009)(396003)(376002)(39860400002)(346002)(136003)(451199015)(46966006)(40470700004)(36840700001)(86362001)(7416002)(44832011)(5660300002)(966005)(8676002)(110136005)(26005)(36860700001)(40460700003)(70206006)(54906003)(70586007)(2906002)(336012)(4326008)(8936002)(41300700001)(316002)(36756003)(45080400002)(478600001)(1076003)(81166007)(6666004)(356005)(82740400003)(7696005)(426003)(16526019)(186003)(82310400005)(40480700001)(47076005)(2616005)(36900700001);DIR:OUT;SFP:1101;
+X-OriginatorOrg: amd.com
+X-MS-Exchange-CrossTenant-OriginalArrivalTime: 16 Sep 2022 18:26:29.1892
+ (UTC)
+X-MS-Exchange-CrossTenant-Network-Message-Id: 65f1622a-74be-484b-b89d-08da9810f92d
+X-MS-Exchange-CrossTenant-Id: 3dd8961f-e488-4e60-8e11-a82d994e183d
+X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp: TenantId=3dd8961f-e488-4e60-8e11-a82d994e183d;Ip=[165.204.84.17];Helo=[SATLEXMB04.amd.com]
+X-MS-Exchange-CrossTenant-AuthSource: CO1PEPF00001A60.namprd05.prod.outlook.com
+X-MS-Exchange-CrossTenant-AuthAs: Anonymous
+X-MS-Exchange-CrossTenant-FromEntityHeader: HybridOnPrem
+X-MS-Exchange-Transport-CrossTenantHeadersStamped: DM6PR12MB4943
+Precedence: bulk
+List-ID: <linux-acpi.vger.kernel.org>
+X-Mailing-List: linux-acpi@vger.kernel.org
+
+ASUSTeK COMPUTER INC. ROG Flow X13 has a problem with fans upon wakeup from
+s2idle. In examining the ASL, functions 3 and 4 are not called in the AMD
+codepath but only in the Microsoft codepath.
+
+Add the system to the quirk list to force Microsoft codepath.
+
+Link: https://gitlab.freedesktop.org/drm/amd/-/issues/2148
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+---
+v2->v3:
+ * New patch
+---
+ drivers/acpi/x86/s2idle.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index 9c84eb068e19..d6fab1eb6a83 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -440,6 +440,17 @@ static const struct dmi_system_id s2idle_dmi_table[] __initconst = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "82"),
+ 		},
+ 	},
++	{
++		/*
++		 * ASUSTeK COMPUTER INC. ROG Flow X13 GV301RE_GV301RE
++		 * https://gitlab.freedesktop.org/drm/amd/-/issues/2148
++		 */
++		.callback = lps0_prefer_microsoft,
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
++			DMI_MATCH(DMI_PRODUCT_NAME, "ROG Flow X13 GV301"),
++		},
++	},
+ 	{}
+ };
+ 
+-- 
+2.34.1
+
+
