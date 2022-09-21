@@ -1,0 +1,390 @@
+From:   John Stultz <jstultz@google.com>
+To:     LKML <linux-kernel@vger.kernel.org>
+Cc:     John Stultz <jstultz@google.com>, John Dias <joaodias@google.com>,
+        "Connor O'Brien" <connoro@google.com>,
+        Rick Yiu <rickyiu@google.com>, John Kacur <jkacur@redhat.com>,
+        Qais Yousef <qais.yousef@arm.com>,
+        Chris Redpath <chris.redpath@arm.com>,
+        Abhijeet Dharmapurikar <adharmap@quicinc.com>,
+        Peter Zijlstra <peterz@infradead.org>,
+        Ingo Molnar <mingo@redhat.com>,
+        Juri Lelli <juri.lelli@redhat.com>,
+        Vincent Guittot <vincent.guittot@linaro.org>,
+        Dietmar Eggemann <dietmar.eggemann@arm.com>,
+        Steven Rostedt <rostedt@goodmis.org>,
+        Thomas Gleixner <tglx@linutronix.de>,
+        Heiko Carstens <hca@linux.ibm.com>,
+        Vasily Gorbik <gor@linux.ibm.com>, kernel-team@android.com,
+        kernel test robot <lkp@intel.com>
+Content-Type: text/plain; charset="UTF-8"
+Precedence: bulk
+List-ID: <linux-kernel.vger.kernel.org>
+diff --git a/arch/s390/include/asm/hardirq.h b/arch/s390/include/asm/hardirq.h
+index 58668ffb5488..cd9cc11588ab 100644
+--- a/arch/s390/include/asm/hardirq.h
++++ b/arch/s390/include/asm/hardirq.h
+@@ -16,6 +16,12 @@
+ #define local_softirq_pending() (S390_lowcore.softirq_pending)
+ #define set_softirq_pending(x) (S390_lowcore.softirq_pending = (x))
+ #define or_softirq_pending(x)  (S390_lowcore.softirq_pending |= (x))
++/*
++ *  Not sure what the right thing is here  for s390,
++ *  but returning 0 will result in no logical change
++ *  from what happens now
++ */
++#define __cpu_softirq_pending(x) (0)
+ 
+ #define __ARCH_IRQ_STAT
+ #define __ARCH_IRQ_EXIT_IRQS_DISABLED
+diff --git a/include/linux/interrupt.h b/include/linux/interrupt.h
+index a92bce40b04b..a749a8663841 100644
+--- a/include/linux/interrupt.h
++++ b/include/linux/interrupt.h
+@@ -527,6 +527,17 @@ DECLARE_STATIC_KEY_FALSE(force_irqthreads_key);
+ #define set_softirq_pending(x)	(__this_cpu_write(local_softirq_pending_ref, (x)))
+ #define or_softirq_pending(x)	(__this_cpu_or(local_softirq_pending_ref, (x)))
+ 
++/**
++ * __cpu_softirq_pending() - Checks to see if softirq is pending on a cpu
++ *
++ * This helper is inherently racy, as we're accessing per-cpu data w/o locks.
++ * But peeking at the flag can still be useful when deciding where to place a
++ * task.
++ */
++static inline u32 __cpu_softirq_pending(int cpu)
++{
++	return (u32)per_cpu(local_softirq_pending_ref, cpu);
++}
+ #endif /* local_softirq_pending */
+ 
+ /* Some architectures might implement lazy enabling/disabling of
+-- 
+2.37.3.968.ga6b4b080e4-goog
+
+diff --git a/include/linux/interrupt.h b/include/linux/interrupt.h
+index a749a8663841..1d126b8495bc 100644
+--- a/include/linux/interrupt.h
++++ b/include/linux/interrupt.h
+@@ -582,6 +582,12 @@ enum
+  * _ IRQ_POLL: irq_poll_cpu_dead() migrates the queue
+  */
+ #define SOFTIRQ_HOTPLUG_SAFE_MASK (BIT(RCU_SOFTIRQ) | BIT(IRQ_POLL_SOFTIRQ))
++/* Softirq's where the handling might be long: */
++#define LONG_SOFTIRQ_MASK ((1 << NET_TX_SOFTIRQ)       | \
++			   (1 << NET_RX_SOFTIRQ)       | \
++			   (1 << BLOCK_SOFTIRQ)        | \
++			   (1 << IRQ_POLL_SOFTIRQ) | \
++			   (1 << TASKLET_SOFTIRQ))
+ 
+ /* map softirq index to softirq name. update 'softirq_to_name' in
+  * kernel/softirq.c when adding a new softirq.
+@@ -617,6 +623,7 @@ extern void raise_softirq_irqoff(unsigned int nr);
+ extern void raise_softirq(unsigned int nr);
+ 
+ DECLARE_PER_CPU(struct task_struct *, ksoftirqd);
++DECLARE_PER_CPU(u32, active_softirqs);
+ 
+ static inline struct task_struct *this_cpu_ksoftirqd(void)
+ {
+diff --git a/init/Kconfig b/init/Kconfig
+index 532362fcfe31..8b5add74b6cb 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1284,6 +1284,16 @@ config SCHED_AUTOGROUP
+ 	  desktop applications.  Task group autogeneration is currently based
+ 	  upon task session.
+ 
++config RT_SOFTIRQ_OPTIMIZATION
++	bool "Improve RT scheduling during long softirq execution"
++	depends on SMP
++	default n
++	help
++	  Enable an optimization which tries to avoid placing RT tasks on CPUs
++	  occupied by nonpreemptible tasks, such as a long softirq or CPUs
++	  which may soon block preemptions, such as a CPU running a ksoftirq
++	  thread which handles slow softirqs.
++
+ config SYSFS_DEPRECATED
+ 	bool "Enable deprecated sysfs features to support old userspace tools"
+ 	depends on SYSFS
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 55f39c8f4203..826f56daecc5 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -1599,12 +1599,49 @@ static void yield_task_rt(struct rq *rq)
+ #ifdef CONFIG_SMP
+ static int find_lowest_rq(struct task_struct *task);
+ 
++#ifdef CONFIG_RT_SOFTIRQ_OPTIMIZATION
++/*
++ * Return whether the task on the given cpu is currently non-preemptible
++ * while handling a potentially long softirq, or if the task is likely
++ * to block preemptions soon because it is a ksoftirq thread that is
++ * handling slow softirq.
++ */
++static bool task_may_preempt(struct task_struct *task, int cpu)
++{
++	u32 softirqs = per_cpu(active_softirqs, cpu) |
++		       __cpu_softirq_pending(cpu);
++	struct task_struct *cpu_ksoftirqd = per_cpu(ksoftirqd, cpu);
++	struct task_struct *curr;
++	struct rq *rq = cpu_rq(cpu);
++	int ret;
++
++	rcu_read_lock();
++	curr = READ_ONCE(rq->curr); /* unlocked access */
++	ret = !((softirqs & LONG_SOFTIRQ_MASK) &&
++		 (curr == cpu_ksoftirqd ||
++		  preempt_count() & SOFTIRQ_MASK));
++	rcu_read_unlock();
++	return ret;
++}
++#else
++static bool task_may_preempt(struct task_struct *task, int cpu)
++{
++	return true;
++}
++#endif /* CONFIG_RT_SOFTIRQ_OPTIMIZATION */
++
++static bool rt_task_fits_capacity_and_may_preempt(struct task_struct *p, int cpu)
++{
++	return task_may_preempt(p, cpu) && rt_task_fits_capacity(p, cpu);
++}
++
+ static int
+ select_task_rq_rt(struct task_struct *p, int cpu, int flags)
+ {
+ 	struct task_struct *curr;
+ 	struct rq *rq;
+ 	bool test;
++	bool may_not_preempt;
+ 
+ 	/* For anything but wake ups, just return the task_cpu */
+ 	if (!(flags & (WF_TTWU | WF_FORK)))
+@@ -1616,7 +1653,12 @@ select_task_rq_rt(struct task_struct *p, int cpu, int flags)
+ 	curr = READ_ONCE(rq->curr); /* unlocked access */
+ 
+ 	/*
+-	 * If the current task on @p's runqueue is an RT task, then
++	 * If the current task on @p's runqueue is a softirq task,
++	 * it may run without preemption for a time that is
++	 * ill-suited for a waiting RT task. Therefore, try to
++	 * wake this RT task on another runqueue.
++	 *
++	 * Also, if the current task on @p's runqueue is an RT task, then
+ 	 * try to see if we can wake this RT task up on another
+ 	 * runqueue. Otherwise simply start this RT task
+ 	 * on its current runqueue.
+@@ -1641,9 +1683,10 @@ select_task_rq_rt(struct task_struct *p, int cpu, int flags)
+ 	 * requirement of the task - which is only important on heterogeneous
+ 	 * systems like big.LITTLE.
+ 	 */
+-	test = curr &&
+-	       unlikely(rt_task(curr)) &&
+-	       (curr->nr_cpus_allowed < 2 || curr->prio <= p->prio);
++	may_not_preempt = !task_may_preempt(curr, cpu);
++	test = (curr && (may_not_preempt ||
++			 (unlikely(rt_task(curr)) &&
++			  (curr->nr_cpus_allowed < 2 || curr->prio <= p->prio))));
+ 
+ 	if (test || !rt_task_fits_capacity(p, cpu)) {
+ 		int target = find_lowest_rq(p);
+@@ -1656,11 +1699,14 @@ select_task_rq_rt(struct task_struct *p, int cpu, int flags)
+ 			goto out_unlock;
+ 
+ 		/*
+-		 * Don't bother moving it if the destination CPU is
++		 * If cpu is non-preemptible, prefer remote cpu
++		 * even if it's running a higher-prio task.
++		 * Otherwise: Don't bother moving it if the destination CPU is
+ 		 * not running a lower priority task.
+ 		 */
+ 		if (target != -1 &&
+-		    p->prio < cpu_rq(target)->rt.highest_prio.curr)
++		    (may_not_preempt ||
++		     p->prio < cpu_rq(target)->rt.highest_prio.curr))
+ 			cpu = target;
+ 	}
+ 
+@@ -1901,11 +1947,11 @@ static int find_lowest_rq(struct task_struct *task)
+ 
+ 		ret = cpupri_find_fitness(&task_rq(task)->rd->cpupri,
+ 					  task, lowest_mask,
+-					  rt_task_fits_capacity);
++					  rt_task_fits_capacity_and_may_preempt);
+ 	} else {
+ 
+-		ret = cpupri_find(&task_rq(task)->rd->cpupri,
+-				  task, lowest_mask);
++		ret = cpupri_find_fitness(&task_rq(task)->rd->cpupri,
++					  task, lowest_mask, task_may_preempt);
+ 	}
+ 
+ 	if (!ret)
+diff --git a/kernel/softirq.c b/kernel/softirq.c
+index c8a6913c067d..35ee79dd8786 100644
+--- a/kernel/softirq.c
++++ b/kernel/softirq.c
+@@ -60,6 +60,13 @@ static struct softirq_action softirq_vec[NR_SOFTIRQS] __cacheline_aligned_in_smp
+ 
+ DEFINE_PER_CPU(struct task_struct *, ksoftirqd);
+ 
++/*
++ * active_softirqs -- per cpu, a mask of softirqs that are being handled,
++ * with the expectation that approximate answers are acceptable and therefore
++ * no synchronization.
++ */
++DEFINE_PER_CPU(u32, active_softirqs);
++
+ const char * const softirq_to_name[NR_SOFTIRQS] = {
+ 	"HI", "TIMER", "NET_TX", "NET_RX", "BLOCK", "IRQ_POLL",
+ 	"TASKLET", "SCHED", "HRTIMER", "RCU"
+@@ -551,6 +558,7 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
+ restart:
+ 	/* Reset the pending bitmask before enabling irqs */
+ 	set_softirq_pending(0);
++	__this_cpu_write(active_softirqs, pending);
+ 
+ 	local_irq_enable();
+ 
+@@ -580,6 +588,7 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
+ 		pending >>= softirq_bit;
+ 	}
+ 
++	__this_cpu_write(active_softirqs, 0);
+ 	if (!IS_ENABLED(CONFIG_PREEMPT_RT) &&
+ 	    __this_cpu_read(ksoftirqd) == current)
+ 		rcu_softirq_qs();
+-- 
+2.37.3.968.ga6b4b080e4-goog
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index e7b2f8a5c711..7f76371cbbb0 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1849,6 +1849,14 @@ current_restore_flags(unsigned long orig
+ 
+ extern int cpuset_cpumask_can_shrink(const struct cpumask *cur, const struct cpumask *trial);
+ extern int task_can_attach(struct task_struct *p, const struct cpumask *cs_cpus_allowed);
++#ifdef CONFIG_RT_SOFTIRQ_OPTIMIZATION
++extern bool cpupri_check_rt(void);
++#else
++static inline bool cpupri_check_rt(void)
++{
++	return false;
++}
++#endif
+ #ifdef CONFIG_SMP
+ extern void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask);
+ extern int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask);
+diff --git a/kernel/sched/cpupri.c b/kernel/sched/cpupri.c
+index fa9ce9d83683..18dc75d16951 100644
+--- a/kernel/sched/cpupri.c
++++ b/kernel/sched/cpupri.c
+@@ -64,6 +64,19 @@ static int convert_prio(int prio)
+ 	return cpupri;
+ }
+ 
++#ifdef CONFIG_RT_SOFTIRQ_OPTIMIZATION
++/*
++ * cpupri_check_rt - check if CPU has a RT task
++ * should be called from rcu-sched read section.
++ */
++bool cpupri_check_rt(void)
++{
++	int cpu = raw_smp_processor_id();
++
++	return cpu_rq(cpu)->rd->cpupri.cpu_to_pri[cpu] > CPUPRI_NORMAL;
++}
++#endif
++
+ static inline int __cpupri_find(struct cpupri *cp, struct task_struct *p,
+ 				struct cpumask *lowest_mask, int idx)
+ {
+diff --git a/kernel/softirq.c b/kernel/softirq.c
+index 35ee79dd8786..203a70dc9459 100644
+--- a/kernel/softirq.c
++++ b/kernel/softirq.c
+@@ -87,6 +87,7 @@ static void wakeup_softirqd(void)
+ 		wake_up_process(tsk);
+ }
+ 
++#ifndef CONFIG_RT_SOFTIRQ_OPTIMIZATION
+ /*
+  * If ksoftirqd is scheduled, we do not want to process pending softirqs
+  * right now. Let ksoftirqd handle this at its own rate, to get fairness,
+@@ -101,6 +102,9 @@ static bool ksoftirqd_running(unsigned long pending)
+ 		return false;
+ 	return tsk && task_is_running(tsk) && !__kthread_should_park(tsk);
+ }
++#else
++#define ksoftirqd_running(pending) (false)
++#endif /* CONFIG_RT_SOFTIRQ_OPTIMIZATION */
+ 
+ #ifdef CONFIG_TRACE_IRQFLAGS
+ DEFINE_PER_CPU(int, hardirqs_enabled);
+@@ -532,6 +536,17 @@ static inline bool lockdep_softirq_start(void) { return false; }
+ static inline void lockdep_softirq_end(bool in_hardirq) { }
+ #endif
+ 
++static __u32 softirq_deferred_for_rt(__u32 *pending)
++{
++	__u32 deferred = 0;
++
++	if (cpupri_check_rt()) {
++		deferred = *pending & LONG_SOFTIRQ_MASK;
++		*pending &= ~LONG_SOFTIRQ_MASK;
++	}
++	return deferred;
++}
++
+ asmlinkage __visible void __softirq_entry __do_softirq(void)
+ {
+ 	unsigned long end = jiffies + MAX_SOFTIRQ_TIME;
+@@ -539,6 +554,7 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
+ 	int max_restart = MAX_SOFTIRQ_RESTART;
+ 	struct softirq_action *h;
+ 	bool in_hardirq;
++	__u32 deferred;
+ 	__u32 pending;
+ 	int softirq_bit;
+ 
+@@ -551,13 +567,15 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
+ 
+ 	pending = local_softirq_pending();
+ 
++	deferred = softirq_deferred_for_rt(&pending);
+ 	softirq_handle_begin();
++
+ 	in_hardirq = lockdep_softirq_start();
+ 	account_softirq_enter(current);
+ 
+ restart:
+ 	/* Reset the pending bitmask before enabling irqs */
+-	set_softirq_pending(0);
++	set_softirq_pending(deferred);
+ 	__this_cpu_write(active_softirqs, pending);
+ 
+ 	local_irq_enable();
+@@ -596,13 +614,16 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
+ 	local_irq_disable();
+ 
+ 	pending = local_softirq_pending();
++	deferred = softirq_deferred_for_rt(&pending);
++
+ 	if (pending) {
+ 		if (time_before(jiffies, end) && !need_resched() &&
+ 		    --max_restart)
+ 			goto restart;
++	}
+ 
++	if (pending | deferred)
+ 		wakeup_softirqd();
+-	}
+ 
+ 	account_softirq_exit(current);
+ 	lockdep_softirq_end(in_hardirq);
+-- 
+2.37.3.968.ga6b4b080e4-goog
+
+
