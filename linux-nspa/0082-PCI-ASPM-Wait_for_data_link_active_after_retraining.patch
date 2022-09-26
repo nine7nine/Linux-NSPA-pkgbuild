@@ -1,0 +1,42 @@
+From: Nathan Rossi <nathan.rossi@digi.com>
+
+When retraining the link either the child or the parent device may have
+the data link layer state machine of the respective devices move out of
+the active state despite the physical link training being completed.
+Depending on how long is takes for the devices to return to the active
+state, the device may not be ready and any further reads/writes to the
+device can fail.
+
+This issue is present with the pci-mvebu controller paired with a device
+supporting ASPM but without advertising the Slot Clock, where during
+boot the pcie_aspm_cap_init call would cause common clocks to be made
+consistent and then retrain the link. However the data link layer would
+not be active before any device initialization (e.g. ASPM capability
+queries, BAR configuration) causing improper configuration of the device
+without error.
+
+To ensure the child device is accessible, after the link retraining use
+pcie_wait_for_link to perform the associated state checks and any needed
+delays.
+
+Signed-off-by: Nathan Rossi <nathan.rossi@digi.com>
+---
+ drivers/pci/pcie/aspm.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/pci/pcie/aspm.c b/drivers/pci/pcie/aspm.c
+index a96b7424c9..4b8a1810be 100644
+--- a/drivers/pci/pcie/aspm.c
++++ b/drivers/pci/pcie/aspm.c
+@@ -288,7 +288,8 @@ static void pcie_aspm_configure_common_clock(struct pcie_link_state *link)
+ 		reg16 &= ~PCI_EXP_LNKCTL_CCC;
+ 	pcie_capability_write_word(parent, PCI_EXP_LNKCTL, reg16);
+ 
+-	if (pcie_retrain_link(link))
++	/* Retrain link and then wait for the link to become active */
++	if (pcie_retrain_link(link) && pcie_wait_for_link(parent, true))
+ 		return;
+ 
+ 	/* Training failed. Restore common clock configurations */
+---
+2.36.1
