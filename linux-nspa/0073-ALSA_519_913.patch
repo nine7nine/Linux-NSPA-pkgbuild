@@ -246,199 +246,6 @@ Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
  
 
 From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
-  To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, chihhao chen, Takashi Iwai
-
-From: Takashi Iwai <tiwai@suse.de>
-
-commit ff878b408a03bef5d610b7e2302702e16a53636e upstream.
-
-One of the former changes for the endpoint management was the more
-consistent setup of endpoints at hw_params.
-snd_usb_endpoint_configure() is a single function that does the full
-setup, and it's called from both PCM hw_params and prepare callbacks.
-Although the EP setup at the prepare phase is usually skipped (by
-checking need_setup flag), it may be still effective in some cases
-like suspend/resume that requires the interface setup again.
-
-As it's a full and single setup, the invocation of
-snd_usb_endpoint_configure() includes not only the USB interface setup
-but also the buffer release and allocation.  OTOH, doing the buffer
-release and re-allocation at PCM prepare phase is rather superfluous,
-and better to be done only in the hw_params phase.
-
-For those optimizations, this patch splits the endpoint setup to two
-phases: snd_usb_endpoint_set_params() and snd_usb_endpoint_prepare(),
-to be called from hw_params and from prepare, respectively.
-
-Note that this patch changes the driver operation slightly,
-effectively moving the USB interface setup again to PCM prepare stage
-instead of hw_params stage, while the buffer allocation and such
-initializations are still done at hw_params stage.
-
-And, the change of the USB interface setup timing (moving to prepare)
-gave an interesting "fix", too: it was reported that the recent
-kernels caused silent output at the beginning on playbacks on some
-devices on Android, and this change casually fixed the regression.
-It seems that those devices are picky about the sample rate change (or
-the interface change?), and don't follow the too immediate rate
-changes.
-
-Meanwhile, Android operates the PCM in the following order:
-- open, then hw_params with the possibly highest sample rate
-- close without prepare
-- re-open, hw_params with the normal sample rate
-- prepare, and start streaming
-This procedure ended up the hw_params twice with different rates, and
-because the recent kernel did set up the sample rate twice one and
-after, it screwed up the device.  OTOH, the earlier kernels didn't set
-up the USB interface at hw_params, hence this problem didn't appear.
-
-Now, with this patch, the USB interface setup is again back to the
-prepare phase, and it works around the problem automagically.
-Although we should address the sample rate problem in a more solid
-way in future, let's keep things working as before for now.
-
-Fixes: bf6313a0ff76 ("ALSA: usb-audio: Refactor endpoint management")
-Cc: <stable@vger.kernel.org>
-Reported-by: chihhao chen <chihhao.chen@mediatek.com>
-Link: https://lore.kernel.org/r/87e6d6ae69d68dc588ac9acc8c0f24d6188375c3.camel@mediatek.com
-Link: https://lore.kernel.org/r/20220901124136.4984-1-tiwai@suse.de
-Signed-off-by: Takashi Iwai <tiwai@suse.de>
-Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
----
- sound/usb/endpoint.c |   23 +++++++++--------------
- sound/usb/endpoint.h |    6 ++++--
- sound/usb/pcm.c      |   14 ++++++++++----
- 3 files changed, 23 insertions(+), 20 deletions(-)
-
---- a/sound/usb/endpoint.c
-+++ b/sound/usb/endpoint.c
-@@ -758,7 +758,8 @@ bool snd_usb_endpoint_compatible(struct
-  * The endpoint needs to be closed via snd_usb_endpoint_close() later.
-  *
-  * Note that this function doesn't configure the endpoint.  The substream
-- * needs to set it up later via snd_usb_endpoint_configure().
-+ * needs to set it up later via snd_usb_endpoint_set_params() and
-+ * snd_usb_endpoint_prepare().
-  */
- struct snd_usb_endpoint *
- snd_usb_endpoint_open(struct snd_usb_audio *chip,
-@@ -1290,12 +1291,13 @@ out_of_memory:
- /*
-  * snd_usb_endpoint_set_params: configure an snd_usb_endpoint
-  *
-+ * It's called either from hw_params callback.
-  * Determine the number of URBs to be used on this endpoint.
-  * An endpoint must be configured before it can be started.
-  * An endpoint that is already running can not be reconfigured.
-  */
--static int snd_usb_endpoint_set_params(struct snd_usb_audio *chip,
--				       struct snd_usb_endpoint *ep)
-+int snd_usb_endpoint_set_params(struct snd_usb_audio *chip,
-+				struct snd_usb_endpoint *ep)
- {
- 	const struct audioformat *fmt = ep->cur_audiofmt;
- 	int err;
-@@ -1378,18 +1380,18 @@ static int init_sample_rate(struct snd_u
- }
- 
- /*
-- * snd_usb_endpoint_configure: Configure the endpoint
-+ * snd_usb_endpoint_prepare: Prepare the endpoint
-  *
-  * This function sets up the EP to be fully usable state.
-- * It's called either from hw_params or prepare callback.
-+ * It's called either from prepare callback.
-  * The function checks need_setup flag, and performs nothing unless needed,
-  * so it's safe to call this multiple times.
-  *
-  * This returns zero if unchanged, 1 if the configuration has changed,
-  * or a negative error code.
-  */
--int snd_usb_endpoint_configure(struct snd_usb_audio *chip,
--			       struct snd_usb_endpoint *ep)
-+int snd_usb_endpoint_prepare(struct snd_usb_audio *chip,
-+			     struct snd_usb_endpoint *ep)
- {
- 	bool iface_first;
- 	int err = 0;
-@@ -1410,9 +1412,6 @@ int snd_usb_endpoint_configure(struct sn
- 			if (err < 0)
- 				goto unlock;
- 		}
--		err = snd_usb_endpoint_set_params(chip, ep);
--		if (err < 0)
--			goto unlock;
- 		goto done;
- 	}
- 
-@@ -1440,10 +1439,6 @@ int snd_usb_endpoint_configure(struct sn
- 	if (err < 0)
- 		goto unlock;
- 
--	err = snd_usb_endpoint_set_params(chip, ep);
--	if (err < 0)
--		goto unlock;
--
- 	err = snd_usb_select_mode_quirk(chip, ep->cur_audiofmt);
- 	if (err < 0)
- 		goto unlock;
---- a/sound/usb/endpoint.h
-+++ b/sound/usb/endpoint.h
-@@ -17,8 +17,10 @@ snd_usb_endpoint_open(struct snd_usb_aud
- 		      bool is_sync_ep);
- void snd_usb_endpoint_close(struct snd_usb_audio *chip,
- 			    struct snd_usb_endpoint *ep);
--int snd_usb_endpoint_configure(struct snd_usb_audio *chip,
--			       struct snd_usb_endpoint *ep);
-+int snd_usb_endpoint_set_params(struct snd_usb_audio *chip,
-+				struct snd_usb_endpoint *ep);
-+int snd_usb_endpoint_prepare(struct snd_usb_audio *chip,
-+			     struct snd_usb_endpoint *ep);
- int snd_usb_endpoint_get_clock_rate(struct snd_usb_audio *chip, int clock);
- 
- bool snd_usb_endpoint_compatible(struct snd_usb_audio *chip,
---- a/sound/usb/pcm.c
-+++ b/sound/usb/pcm.c
-@@ -443,17 +443,17 @@ static int configure_endpoints(struct sn
- 		if (stop_endpoints(subs, false))
- 			sync_pending_stops(subs);
- 		if (subs->sync_endpoint) {
--			err = snd_usb_endpoint_configure(chip, subs->sync_endpoint);
-+			err = snd_usb_endpoint_prepare(chip, subs->sync_endpoint);
- 			if (err < 0)
- 				return err;
- 		}
--		err = snd_usb_endpoint_configure(chip, subs->data_endpoint);
-+		err = snd_usb_endpoint_prepare(chip, subs->data_endpoint);
- 		if (err < 0)
- 			return err;
- 		snd_usb_set_format_quirk(subs, subs->cur_audiofmt);
- 	} else {
- 		if (subs->sync_endpoint) {
--			err = snd_usb_endpoint_configure(chip, subs->sync_endpoint);
-+			err = snd_usb_endpoint_prepare(chip, subs->sync_endpoint);
- 			if (err < 0)
- 				return err;
- 		}
-@@ -551,7 +551,13 @@ static int snd_usb_hw_params(struct snd_
- 	subs->cur_audiofmt = fmt;
- 	mutex_unlock(&chip->mutex);
- 
--	ret = configure_endpoints(chip, subs);
-+	if (subs->sync_endpoint) {
-+		ret = snd_usb_endpoint_set_params(chip, subs->sync_endpoint);
-+		if (ret < 0)
-+			goto unlock;
-+	}
-+
-+	ret = snd_usb_endpoint_set_params(chip, subs->data_endpoint);
- 
-  unlock:
- 	if (ret < 0)
-
-
-From: Greg Kroah-Hartman @ 2022-09-13 14:02 UTC (permalink / raw)
   To: linux-kernel; +Cc: Greg Kroah-Hartman, stable, Dongxiang Ke, Takashi Iwai
 
 From: Dongxiang Ke <kdx.glider@gmail.com>
@@ -583,3 +390,119 @@ index 9bfead5efc4c1..5b4d8f5eade20 100644
  	return false;
 -- 
 2.35.1
+
+From: Takashi Iwai <tiwai@suse.de>
+
+commit ead3d3c5b54f76da79c079e61bacb4279ec56965 upstream.
+
+We fixed the potential deadlock at dynamic unbinding the HD-audio
+codec at the commit 7206998f578d ("ALSA: hda: Fix potential deadlock
+at codec unbinding"), but ironically, this caused another potential
+deadlock.  The current code uses refcount_dec() and waits for the
+pending task with wait_event for dropping the refcount to 0.  This
+works fine when PCMs are assigned and actually waiting for the
+refcount drop.
+
+Meanwhile, when there was no PCM assigned, the refcount_dec() call
+itself was supposed to drop to zero -- alas, it doesn't in reality;
+refcount_dec() complains, spews kernel warning and it saturates
+instead of dropping to 0, due to the nature of refcount_dec()
+implementation.  This eventually blocks the wait_event() wakeup and
+the code get stuck there.
+
+For avoiding the problem, we call refcount_dec_and_test() and skips
+the sync-wait if it already reaches to zero.
+
+The patch does a slight code reshuffling to make sure to invoke other
+disconnect calls before the sync-wait, too.
+
+Fixes: 7206998f578d ("ALSA: hda: Fix potential deadlock at codec unbinding")
+Reported-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Tested-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/YxtflWQnslMHVlU7@intel.com
+Link: https://lore.kernel.org/r/20220910142550.28494-1-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/pci/hda/hda_bind.c |    4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+--- a/sound/pci/hda/hda_bind.c
++++ b/sound/pci/hda/hda_bind.c
+@@ -157,10 +157,10 @@ static int hda_codec_driver_remove(struc
+ 		return codec->bus->core.ext_ops->hdev_detach(&codec->core);
+ 	}
+ 
+-	refcount_dec(&codec->pcm_ref);
+ 	snd_hda_codec_disconnect_pcms(codec);
+ 	snd_hda_jack_tbl_disconnect(codec);
+-	wait_event(codec->remove_sleep, !refcount_read(&codec->pcm_ref));
++	if (!refcount_dec_and_test(&codec->pcm_ref))
++		wait_event(codec->remove_sleep, !refcount_read(&codec->pcm_ref));
+ 	snd_power_sync_ref(codec->bus->card);
+ 
+ 	if (codec->patch_ops.free)
+
+From: Takashi Iwai <tiwai@suse.de>
+
+commit c3afa2a402d1ecefa59f88d55d9e765f52f75bd9 upstream.
+
+During the code change to add the support for devres-managed card
+instance, we put an explicit kfree(card) call at the error path in
+snd_card_new().  This is needed for the early error path before the
+card is initialized with the device, but is rather superfluous and
+causes a double-free at the error path after the card instance is
+initialized, as the destructor of the card object already contains a
+kfree() call.
+
+This patch fixes the double-free situation by removing the superfluous
+kfree().  Meanwhile we need to call kfree() explicitly for the early
+error path, so it's added there instead.
+
+Fixes: e8ad415b7a55 ("ALSA: core: Add managed card creation")
+Reported-by: Rondreis <linhaoguo86@gmail.com>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/CAB7eexL1zBnB636hwS27d-LdPYZ_R1-5fJS_h=ZbCWYU=UPWJg@mail.gmail.com
+Link: https://lore.kernel.org/r/20220919123516.28222-1-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/core/init.c |   10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+--- a/sound/core/init.c
++++ b/sound/core/init.c
+@@ -178,10 +178,8 @@ int snd_card_new(struct device *parent,
+ 		return -ENOMEM;
+ 
+ 	err = snd_card_init(card, parent, idx, xid, module, extra_size);
+-	if (err < 0) {
+-		kfree(card);
+-		return err;
+-	}
++	if (err < 0)
++		return err; /* card is freed by error handler */
+ 
+ 	*card_ret = card;
+ 	return 0;
+@@ -231,7 +229,7 @@ int snd_devm_card_new(struct device *par
+ 	card->managed = true;
+ 	err = snd_card_init(card, parent, idx, xid, module, extra_size);
+ 	if (err < 0) {
+-		devres_free(card);
++		devres_free(card); /* in managed mode, we need to free manually */
+ 		return err;
+ 	}
+ 
+@@ -293,6 +291,8 @@ static int snd_card_init(struct snd_card
+ 		mutex_unlock(&snd_card_mutex);
+ 		dev_err(parent, "cannot find the slot for index %d (range 0-%i), error: %d\n",
+ 			 idx, snd_ecards_limit - 1, err);
++		if (!card->managed)
++			kfree(card); /* manually free here, as no destructor called */
+ 		return err;
+ 	}
+ 	set_bit(idx, snd_cards_lock);		/* lock it */
+ 	
+
