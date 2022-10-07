@@ -1,0 +1,74 @@
+From 48f27a8ca00a7e175437c172c780d7f44c6b0bba Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sun, 24 Apr 2022 00:55:05 -0700
+Subject: [PATCH] locking/rtmutex: Don't hog RCU read lock while optimistically
+ spinning
+
+There's no reason to hold an RCU read lock the entire time while
+optimistically spinning on the rtmutex lock owner. This can needlessly
+delay RCU grace periods, slowing down anything waiting for a grace period
+to elapse.
+
+ --modified/rebased to apply over 5.18-nspa
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ kernel/locking/rtmutex.c | 26 ++++++++++++++++++--------
+ 1 file changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/locking/rtmutex.c b/kernel/locking/rtmutex.c
+index 68306b2ca439..eaae80138965 100644
+--- a/kernel/locking/rtmutex.c
++++ b/kernel/locking/rtmutex.c
+@@ -969,11 +969,11 @@ static bool rtmutex_spin_on_owner(struct rt_mutex *lock,
+ {
+ 	bool res = true;
+ 
+-	rcu_read_lock();
+ 	for (;;) {
+-		/* If owner changed, trylock again. */
+-		if (owner != rt_mutex_owner(lock))
+-			break;
++		bool on_cpu, same_owner;
++
++		rcu_read_lock();
++		same_owner = owner == rt_mutex_owner(lock);
+ 		/*
+ 		 * Ensure that @owner is dereferenced after checking that
+ 		 * the lock owner still matches @owner. If that fails,
+@@ -981,6 +981,18 @@ static bool rtmutex_spin_on_owner(struct rt_mutex *lock,
+ 		 * the rcu_read_lock() ensures the memory stays valid.
+ 		 */
+ 		barrier();
++		if (same_owner) {
++			if (vcpu_is_preempted(task_cpu(owner)))
++				on_cpu = false;
++			else
++				on_cpu = owner->on_cpu;
++		}
++		rcu_read_unlock();
++
++		/* If owner changed, trylock again. */
++		if (!same_owner)
++			break;
++
+ 		/*
+ 		 * Stop spinning when:
+ 		 *  - the lock owner has been scheduled out
+@@ -1382,14 +1394,13 @@ static bool rtmutex_spin_on_owner(struct
+ 		 *    for CONFIG_PREEMPT_RCU=y)
+ 		 *  - the VCPU on which owner runs is preempted
+ 		 */
+-		if (!owner_on_cpu(owner) || need_resched() ||
++		if (!on_cpu || need_resched() ||
+ 		    !rt_mutex_waiter_is_top_waiter(lock, waiter)) {
+ 			res = false;
+ 			break;
+ 		}
+ 		cpu_relax();
+ 	}
+-	rcu_read_unlock();
+ 	return res;
+ }
+ #else
+
