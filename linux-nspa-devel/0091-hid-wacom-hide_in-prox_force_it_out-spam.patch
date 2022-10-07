@@ -1,0 +1,14 @@
+--- a/drivers/hid/wacom_wac.c		2022-10-07 17:15:39.431490117 -0500
++++ b/drivers/hid/wacom_wac.c	2022-10-07 17:15:00.746154259 -0500
+@@ -74,8 +74,8 @@ void wacom_idleprox_timeout(struct timer
+ 	if (!wacom_wac->hid_data.sense_state) {
+ 		return;
+ 	}
+-
+-	hid_warn(wacom->hdev, "%s: tool appears to be hung in-prox. forcing it out.\n", __func__);
++	//  this warning is stupidly spammy on my lenevo flex - silence it completely
++	// hid_warn(wacom->hdev, "%s: tool appears to be hung in-prox. forcing it out.\n", __func__);
+ 	wacom_force_proxout(wacom_wac);
+ }
+ 
+
