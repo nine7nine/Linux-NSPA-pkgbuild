@@ -5,10 +5,6 @@
 # Contributor: Tobias Powalowski <tpowa@archlinux.org>
 # Contributor: Thomas Baechler <thomas@archlinux.org>
 
-### Selecting the CPU scheduler
-# 'cfs' - select 'Completely Fair Scheduler'
-_cpusched='cfs'
-
 ### BUILD OPTIONS
 # Set these variables to ANYTHING that is not null to enable them
 
@@ -36,12 +32,6 @@ _localmodcfg=
 # through the trouble of customizing your config options.  NOT recommended when
 # a new kernel is released, but again, convenient for package bumps.
 _use_current=
-
-### Running with a 1000HZ, 750Hz or  500HZ tick rate
-_1k_HZ_ticks=y
-_750_HZ_ticks=
-_600_HZ_ticks=
-_500_HZ_ticks=
 
 ### Disable MQ-Deadline I/O scheduler
 _mq_deadline_disable=y
@@ -96,36 +86,36 @@ source=(
   "config"
   "config_generic_nspa"
   "auto-cpu-optimization.sh"
-  "0000-more-uarches-for-kernel-5.17+.patch"  
+  "0000-more-uarches-for-kernel-5.17+.patch"
   "0000-TIP-locking-core_6.1-oct7.patch"
   "0000-TIP-rcu.2022.09.30-oct7.patch"
-  "0001-ClearLinux-patchwork.patch"    
-  "0002-MapleTree-MG_lru_6.0.patch"  
+  "0001-ClearLinux-patchwork.patch"
+  "0002-MapleTree-MG_lru_6.0.patch"
   "0003-MM-fixes_6.0.patch"
-  "0004-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"   
-  "0005-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"  
-  "0006-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"  
-  "0007-pinctl-amd-threaded_irqs.patch"   
-  "0008-designware-i2c_IRQF_NO_THREAD.patch"  
-  "0009-background_reclaim_of_hugepages.patch"  
-  "0010-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch" 
-  "0011-mm-ncrease_max_map_count.patch"   
-  "0012-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"   
-  "0013-rcu-gp-workers.patch"  
-  "0014-smp-migrate_disable.patch"   
-  "0015-rtmutex-no-rcu-lock-while-spinning.patch" 
-  "0016-tk-timekeeping-suspend-fixes.patch"   
-  "0017-pm-suspend_tk_patches.patch" 
-  "0018-sched-fix_bad_task_migration_for_rt_tasks.patch"  
-  "0019-rtmutex-Limit_number_of_lock_stealing_for_non-RT_waiters.patch"   
-  "0020-schedutil-Fix_deadlock_between_cpuset_and_cpu_hotplug.patch" 
+  "0004-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"
+  "0005-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
+  "0006-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
+  "0007-pinctl-amd-threaded_irqs.patch"
+  "0008-designware-i2c_IRQF_NO_THREAD.patch"
+  "0009-background_reclaim_of_hugepages.patch"
+  "0010-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
+  "0011-mm-ncrease_max_map_count.patch"
+  "0012-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
+  "0013-rcu-gp-workers.patch"
+  "0014-smp-migrate_disable.patch"
+  "0015-rtmutex-no-rcu-lock-while-spinning.patch"
+  "0016-tk-timekeeping-suspend-fixes.patch"
+  "0017-pm-suspend_tk_patches.patch"
+  "0018-sched-fix_bad_task_migration_for_rt_tasks.patch"
+  "0019-rtmutex-Limit_number_of_lock_stealing_for_non-RT_waiters.patch"
+  "0020-schedutil-Fix_deadlock_between_cpuset_and_cpu_hotplug.patch"
   "0021-sched-fair-Minor_SIS_UTIL_optimizations.patch"
-  "0022-Add_latency_priority_for_CFS_class.patch"  
+  "0022-Add_latency_priority_for_CFS_class.patch"
   "0023-locking-semaphore-Use_wake_q_to_wake_up_processes_outside_lock_cs.patch"
   "0024-sched-all_no_BUG_ON_warn_instead.patch"
   "0025-sched-core-sched-Fix-TASK_state-comparisons.patch"
   "0026-sbitmap-fix_lockup_while_swapping.patch"
-  "0027-hid-wacom-hide_in-prox_force_it_out-spam.patch"
+  "0027-hid-wacom-Silence_log_spam.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -157,30 +147,6 @@ prepare() {
         "${srcdir}"/auto-cpu-optimization.sh
     fi
 
-    if [ "$_HZ_ticks" = "1000" ]; then
-        echo "Setting tick rate to 1k Hz..."
-        scripts/config --disable HZ_300 \
-                       --enable HZ_1000 \
-                       --set-val HZ 1000
-    elif [ "$_HZ_ticks" = "750" ]; then
-        echo "Setting tick rate to 750Hz..."
-        scripts/config --disable HZ_300 \
-                       --enable HZ_750 \
-                       --set-val HZ 750
-    elif [ "$_HZ_ticks" = "600" ]; then
-        echo "Setting tick rate to 600Hz..."
-        scripts/config --disable HZ_300 \
-                       --enable HZ_600 \
-                       --set-val HZ 600
-    elif [ "$_HZ_ticks" = "500" ]; then
-        echo "Setting tick rate to 500Hz..."
-        scripts/config --disable HZ_300 \
-                       --enable HZ_500 \
-                       --set-val HZ 500
-    elif [ "$_HZ_ticks" = "300" ]; then
-        echo "Setting tick rate to 300Hz..."
-    fi
-
     if [ -n "$_NUMAdisable" ]; then
         echo "Disabling NUMA from kernel config..."
         scripts/config --disable NUMA \
@@ -207,15 +173,6 @@ prepare() {
         scripts/config --disable MQ_IOSCHED_KYBER
     fi
 
-    if [ -n "$_per_gov" ]; then
-        echo "Setting performance governor..."
-        scripts/config --disable CPU_FREQ_DEFAULT_GOV_SCHEDUTIL \
-                       --enable CPU_FREQ_DEFAULT_GOV_PERFORMANCE \
-                       --enable PCIEASPM \
-                       --enable PCIEASPM_PERFORMANCE \
-                       --enable PCIE_BUS_PERFORMANCE
-  fi
-
     if [ "$_tickrate" = "perodic" ]; then
         echo "Enabling periodic ticks..."
         scripts/config --disable NO_HZ_IDLE \
@@ -240,44 +197,6 @@ prepare() {
                        --enable NO_HZ \
                        --enable NO_HZ_COMMON \
                        --enable CONTEXT_TRACKING
-    fi
-
-    if [ "$_preempt" = "full" ]; then
-        echo "Enabling low latency preempt..."
-        scripts/config --enable PREEMPT_BUILD \
-                      --disable PREEMPT_NONE \
-                      --disable PREEMPT_VOLUNTARY \
-                      --enable PREEMPT \
-                      --enable PREEMPT_COUNT \
-                      --enable PREEMPTION \
-                      --enable PREEMPT_DYNAMIC
-    elif [ "$_preempt" = "voluntary" ]; then
-        echo "Enabling tickless idle..."
-        scripts/config --enable PREEMPT_BUILD \
-                      --disable PREEMPT_NONE \
-                      --enable PREEMPT_VOLUNTARY \
-                      --disable PREEMPT \
-                      --enable PREEMPT_COUNT \
-                      --enable PREEMPTION \
-                      --enable PREEMPT_DYNAMIC
-    elif [ "$_tickrate" = "server" ]; then
-        echo "Enabling tickless idle..."
-        scripts/config --enable PREEMPT_NONE_BUILD \
-                       --enable PREEMPT_NONE \
-                       --disable PREEMPT_VOLUNTARY \
-                       --disable PREEMPT \
-                       --disable PREEMPT_COUNT \
-                       --disable PREEMPTION \
-                       --disable PREEMPT_DYNAMIC
-    fi
-
-    if [ -n "$_tcp_bbr2" ]; then
-        echo "Disabling TCP_CONG_CUBIC..."
-        scripts/config --module TCP_CONG_CUBIC \
-                       --disable DEFAULT_CUBIC \
-                       --enable TCP_CONG_BBR2 \
-                       --enable DEFAULT_BBR2 \
-                       --set-str DEFAULT_TCP_CONG bbr2
     fi
 
     if [ -n "$_nf_cone" ]; then
@@ -353,16 +272,6 @@ prepare() {
                         --disable LRNG_TEST_CPU_ES_COMPRESSION \
                         --enable LRNG_SELFTEST \
                         --disable LRNG_SELFTEST_PANIC
-    fi
-
-    if [ -n "$_zstd_swap_compression" ]; then
-        echo "Enabling zram ZSTD compression..."
-        scripts/config --disable ZRAM_DEF_COMP_LZORLE \
-                       --enable ZRAM_DEF_COMP_ZSTD \
-                       --set-str ZRAM_DEF_COMP zstd \
-                       --disable ZSWAP_COMPRESSOR_DEFAULT_LZ4 \
-                       --enable ZSWAP_COMPRESSOR_DEFAULT_ZSTD \
-                       --set-str ZSWAP_COMPRESSOR_DEFAULT zstd
     fi
 
     if [ -n "$_disable_debug" ]; then
@@ -481,11 +390,6 @@ _package-headers() {
     # required when STACK_VALIDATION is enabled
     install -Dt "$builddir/tools/objtool" tools/objtool/objtool
 
-#    # required when DEBUG_INFO_BTF_MODULES is enabled
-#    if [ -f tools/bpf/resolve_btfids/resolve_btfids ]; then
-#        install -Dt "$builddir/tools/bpf/resolve_btfids" tools/bpf/resolve_btfids/resolve_btfids
-#    fi
-
     echo "Installing headers..."
     cp -t "$builddir" -a include
     cp -t "$builddir/arch/x86" -a arch/x86/include
@@ -589,5 +493,5 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '8373f42c0d3e349983c486ee3ab78de7f2f71f225ee761cdf08f7e54e8430657'
             '9837738ff7721de537ddc7bac33f7e9da90d545913b08a0d58d7d4271b2f287a'
             '153935699c4f15434c06582a64054660f55eaee9d5c70b277442b5156ccdfb15'
-            '896a3917af981bfc18a39775e5a88ce500a4b6968434b2a925f895340f7e25fb')
+            '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe')
 

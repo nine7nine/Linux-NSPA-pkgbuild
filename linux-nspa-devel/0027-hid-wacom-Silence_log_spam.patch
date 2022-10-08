@@ -11,4 +11,15 @@
  	wacom_force_proxout(wacom_wac);
  }
  
+--- a/drivers/hid/wacom_sys.c		2022-10-08 09:39:22.601080278 -0500
++++ b/drivers/hid/wacom_sys.c	2022-10-08 09:38:55.766924209 -0500
+@@ -61,7 +61,7 @@ static void wacom_wac_queue_insert(struc
+ 
+ 	while (kfifo_avail(fifo) < size) {
+ 		if (!warned)
+-			hid_warn(hdev, "%s: kfifo has filled, starting to drop events\n", __func__);
++			// hid_warn(hdev, "%s: kfifo has filled, starting to drop events\n", __func__);
+ 		warned = true;
+ 
+ 		kfifo_skip(fifo);
 
