@@ -1,0 +1,4176 @@
+From 4d2f862b5b49141a1762baa67c846c598b54be27 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 5 Jul 2022 12:15:35 -0700
+Subject: doc: Emphasize the need for explicit RCU read-side markers
+
+This commit updates checklist.rst to emphasize the need for explicit
+markers for RCU read-side critical sections.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ Documentation/RCU/checklist.rst | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/RCU/checklist.rst b/Documentation/RCU/checklist.rst
+index 42cc5d891bd26..5eedef027d922 100644
+--- a/Documentation/RCU/checklist.rst
++++ b/Documentation/RCU/checklist.rst
+@@ -66,8 +66,13 @@ over a rather long period of time, but improvements are always welcome!
+ 	As a rough rule of thumb, any dereference of an RCU-protected
+ 	pointer must be covered by rcu_read_lock(), rcu_read_lock_bh(),
+ 	rcu_read_lock_sched(), or by the appropriate update-side lock.
+-	Disabling of preemption can serve as rcu_read_lock_sched(), but
+-	is less readable and prevents lockdep from detecting locking issues.
++	Explicit disabling of preemption (preempt_disable(), for example)
++	can serve as rcu_read_lock_sched(), but is less readable and
++	prevents lockdep from detecting locking issues.
++
++	Please not that you *cannot* rely on code known to be built
++	only in non-preemptible kernels.  Such code can and will break,
++	especially in kernels built with CONFIG_PREEMPT_COUNT=y.
+ 
+ 	Letting RCU-protected pointers "leak" out of an RCU read-side
+ 	critical section is every bit as bad as letting them leak out
+-- 
+cgit 
+
+
+From ed336c6fe4c0110a56f6f237865ff9660de8c598 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 28 Jul 2022 12:00:50 -0700
+Subject: doc: Call out queue_rcu_work() for blocking RCU callbacks
+
+The current checklist.rst file correctly notes that RCU callbacks execute
+in BH context, and cannot block.  This commit adds words advising people
+needing callbacks to block to use workqueues, for example, by replacing
+call_rcu() with queue_rcu_work().
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ Documentation/RCU/checklist.rst | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Documentation/RCU/checklist.rst b/Documentation/RCU/checklist.rst
+index 5eedef027d922..2db206fc3465f 100644
+--- a/Documentation/RCU/checklist.rst
++++ b/Documentation/RCU/checklist.rst
+@@ -190,6 +190,9 @@ over a rather long period of time, but improvements are always welcome!
+ 
+ 5.	If call_rcu() or call_srcu() is used, the callback function will
+ 	be called from softirq context.  In particular, it cannot block.
++	If you need the callback to block, run that code in a workqueue
++	handler scheduled from the callback.  The queue_rcu_work()
++	function does this for you in the case of call_rcu().
+ 
+ 6.	Since synchronize_rcu() can block, it cannot be called
+ 	from any sort of irq context.  The same rule applies
+-- 
+cgit 
+
+
+From 1c1c1d983e75f53b3e307804a39d17d24310c5f2 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 28 Jul 2022 12:04:00 -0700
+Subject: doc: Use rcu_barrier() to rate-limit RCU callbacks
+
+The checklist.rst document advises periodic synchronize_rcu() invocations
+to prevent callback flooding.  However, rcu_barrier() is often a better
+choice.  This commit therefore adds words to this effect.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ Documentation/RCU/checklist.rst | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/RCU/checklist.rst b/Documentation/RCU/checklist.rst
+index 2db206fc3465f..178ca7547b987 100644
+--- a/Documentation/RCU/checklist.rst
++++ b/Documentation/RCU/checklist.rst
+@@ -305,7 +305,8 @@ over a rather long period of time, but improvements are always welcome!
+ 		the machine.
+ 
+ 	d.	Periodically invoke synchronize_rcu(), permitting a limited
+-		number of updates per grace period.
++		number of updates per grace period.  Better yet, periodically
++		invoke rcu_barrier() to wait for all outstanding callbacks.
+ 
+ 	The same cautions apply to call_srcu() and kfree_rcu().
+ 
+-- 
+cgit 
+
+
+From ca8a439e4611765b0e4bf5d4fd3fab54bab5ffe2 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 3 Aug 2022 10:23:42 -0700
+Subject: doc: Fix list: rcu_access_pointer() is not lockdep-checked
+
+The rcu_access_pointer() macro does not consult lockdep by design because
+it is intended to be used outside of RCU read-side critical sections.
+This commit therefore makes a separate list for it in whatisRCU.rst.
+
+Similarly, RCU_LOCKDEP_WARN(), rcu_sleep_check(), and RCU_NONIDLE()
+do not do anything with pointer access.  This commit therefore creates
+a separate utility-API list for them.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ Documentation/RCU/whatisRCU.rst | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/Documentation/RCU/whatisRCU.rst b/Documentation/RCU/whatisRCU.rst
+index 77ea260efd120..6940e0fe8599b 100644
+--- a/Documentation/RCU/whatisRCU.rst
++++ b/Documentation/RCU/whatisRCU.rst
+@@ -1057,14 +1057,20 @@ SRCU: Initialization/cleanup::
+ 	init_srcu_struct
+ 	cleanup_srcu_struct
+ 
+-All: lockdep-checked RCU-protected pointer access::
++All: lockdep-checked RCU utility APIs::
+ 
+-	rcu_access_pointer
+-	rcu_dereference_raw
+ 	RCU_LOCKDEP_WARN
+ 	rcu_sleep_check
+ 	RCU_NONIDLE
+ 
++All: Unchecked RCU-protected pointer access::
++
++	rcu_dereference_raw
++
++All: Unchecked RCU-protected pointer access with dereferencing prohibited::
++
++	rcu_access_pointer
++
+ See the comment headers in the source code (or the docbook generated
+ from them) for more information.
+ 
+-- 
+cgit 
+
+
+From 022d1b356c8a687a58a74cbc90a92d56d3aa207d Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 11:23:19 -0700
+Subject: doc: Update rcu_access_pointer() advice in rcu_dereference.rst
+
+This commit updates the rcu_access_pointer() advice, noting that its
+return value should not be assigned to a local variable, and also noting
+that there is little point in using rcu_access_pointer() within an RCU
+read-side critical section.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ Documentation/RCU/rcu_dereference.rst | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/RCU/rcu_dereference.rst b/Documentation/RCU/rcu_dereference.rst
+index 0b418a5b243c5..81e828c8313b8 100644
+--- a/Documentation/RCU/rcu_dereference.rst
++++ b/Documentation/RCU/rcu_dereference.rst
+@@ -128,10 +128,16 @@ Follow these rules to keep your RCU code working properly:
+ 		This sort of comparison occurs frequently when scanning
+ 		RCU-protected circular linked lists.
+ 
+-		Note that if checks for being within an RCU read-side
+-		critical section are not required and the pointer is never
+-		dereferenced, rcu_access_pointer() should be used in place
+-		of rcu_dereference().
++		Note that if the pointer comparison is done outside
++		of an RCU read-side critical section, and the pointer
++		is never dereferenced, rcu_access_pointer() should be
++		used in place of rcu_dereference().  In most cases,
++		it is best to avoid accidental dereferences by testing
++		the rcu_access_pointer() return value directly, without
++		assigning it to a variable.
++
++		Within an RCU read-side critical section, there is little
++		reason to use rcu_access_pointer().
+ 
+ 	-	The comparison is against a pointer that references memory
+ 		that was initialized "a long time ago."  The reason
+-- 
+cgit 
+
+
+From 99cf092058e13f133ff9373fcbd25ae38509df03 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 9 Aug 2022 10:24:36 -0700
+Subject: doc: SLAB_TYPESAFE_BY_RCU uses cannot rely on spinlocks
+
+Because the SLAB_TYPESAFE_BY_RCU code does not zero pages that are
+to be broken up into slabs, the memory returned by kmem_cache_alloc()
+must be fully initialized, including any spinlocks included in the newly
+allocated structure.  This means that readers attempting to look up an
+SLAB_TYPESAFE_BY_RCU object must use a reference-counting approach.
+A spinlock may be acquired only after a reference is obtained, which
+prevents that object from being passed to kmem_struct_free(), but only
+while that reference continues to be held.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ Documentation/RCU/whatisRCU.rst | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/Documentation/RCU/whatisRCU.rst b/Documentation/RCU/whatisRCU.rst
+index 6940e0fe8599b..97f2d0fa84dfa 100644
+--- a/Documentation/RCU/whatisRCU.rst
++++ b/Documentation/RCU/whatisRCU.rst
+@@ -915,13 +915,18 @@ which an RCU reference is held include:
+ The understanding that RCU provides a reference that only prevents a
+ change of type is particularly visible with objects allocated from a
+ slab cache marked ``SLAB_TYPESAFE_BY_RCU``.  RCU operations may yield a
+-reference to an object from such a cache that has been concurrently
+-freed and the memory reallocated to a completely different object,
+-though of the same type.  In this case RCU doesn't even protect the
+-identity of the object from changing, only its type.  So the object
+-found may not be the one expected, but it will be one where it is safe
+-to take a reference or spinlock and then confirm that the identity
+-matches the expectations.
++reference to an object from such a cache that has been concurrently freed
++and the memory reallocated to a completely different object, though of
++the same type.  In this case RCU doesn't even protect the identity of the
++object from changing, only its type.  So the object found may not be the
++one expected, but it will be one where it is safe to take a reference
++(and then potentially acquiring a spinlock), allowing subsequent code
++to check whether the identity matches expectations.  It is tempting
++to simply acquire the spinlock without first taking the reference, but
++unfortunately any spinlock in a ``SLAB_TYPESAFE_BY_RCU`` object must be
++initialized after each and every call to kmem_cache_alloc(), which renders
++reference-free spinlock acquisition completely unsafe.  Therefore, when
++using ``SLAB_TYPESAFE_BY_RCU``, make proper use of a reference counter.
+ 
+ With traditional reference counting -- such as that implemented by the
+ kref library in Linux -- there is typically code that runs when the last
+-- 
+cgit 
+
+
+From ef32aee9aa062bfbaab2cab36ee837be6060d0a1 Mon Sep 17 00:00:00 2001
+From: Shao-Tse Hung <ccs100203@gmail.com>
+Date: Sat, 20 Aug 2022 16:32:44 +0800
+Subject: doc/rcu: Update LWN article URLs and add 2019 article
+
+This patch adds LWN articles about RCU APIs which were released in 2019.
+Also, HTTP URLs are replaced by HTTPS.
+
+Signed-off-by: Shao-Tse Hung <ccs100203@gmail.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ Documentation/RCU/whatisRCU.rst | 16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/Documentation/RCU/whatisRCU.rst b/Documentation/RCU/whatisRCU.rst
+index 97f2d0fa84dfa..1c747ac3f2c8e 100644
+--- a/Documentation/RCU/whatisRCU.rst
++++ b/Documentation/RCU/whatisRCU.rst
+@@ -6,13 +6,15 @@ What is RCU?  --  "Read, Copy, Update"
+ Please note that the "What is RCU?" LWN series is an excellent place
+ to start learning about RCU:
+ 
+-| 1.	What is RCU, Fundamentally?  http://lwn.net/Articles/262464/
+-| 2.	What is RCU? Part 2: Usage   http://lwn.net/Articles/263130/
+-| 3.	RCU part 3: the RCU API      http://lwn.net/Articles/264090/
+-| 4.	The RCU API, 2010 Edition    http://lwn.net/Articles/418853/
+-| 	2010 Big API Table           http://lwn.net/Articles/419086/
+-| 5.	The RCU API, 2014 Edition    http://lwn.net/Articles/609904/
+-|	2014 Big API Table           http://lwn.net/Articles/609973/
++| 1.	What is RCU, Fundamentally?  https://lwn.net/Articles/262464/
++| 2.	What is RCU? Part 2: Usage   https://lwn.net/Articles/263130/
++| 3.	RCU part 3: the RCU API      https://lwn.net/Articles/264090/
++| 4.	The RCU API, 2010 Edition    https://lwn.net/Articles/418853/
++| 	2010 Big API Table           https://lwn.net/Articles/419086/
++| 5.	The RCU API, 2014 Edition    https://lwn.net/Articles/609904/
++|	2014 Big API Table           https://lwn.net/Articles/609973/
++| 6.	The RCU API, 2019 Edition    https://lwn.net/Articles/777036/
++|	2019 Big API Table           https://lwn.net/Articles/777165/
+ 
+ 
+ What is RCU?
+-- 
+cgit 
+
+
+From 6d60ea03ac2d3dcf6ddee6b45aa7213d8b0461c5 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Thu, 16 Jun 2022 21:53:47 +0800
+Subject: rcu: Fix rcu_read_unlock_strict() strict QS reporting
+
+Kernels built with CONFIG_PREEMPT=n and CONFIG_RCU_STRICT_GRACE_PERIOD=y
+report the quiescent state directly from the outermost rcu_read_unlock().
+However, the current CPU's rcu_data structure's ->cpu_no_qs.b.norm
+might still be set, in which case rcu_report_qs_rdp() will exit early,
+thus failing to report quiescent state.
+
+This commit therefore causes rcu_read_unlock_strict() to clear
+CPU's rcu_data structure's ->cpu_no_qs.b.norm field before invoking
+rcu_report_qs_rdp().
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_plugin.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/rcu/tree_plugin.h b/kernel/rcu/tree_plugin.h
+index 438ecae6bd7e7..86772c95ed0ae 100644
+--- a/kernel/rcu/tree_plugin.h
++++ b/kernel/rcu/tree_plugin.h
+@@ -824,6 +824,7 @@ void rcu_read_unlock_strict(void)
+ 	if (irqs_disabled() || preempt_count() || !rcu_state.gp_kthread)
+ 		return;
+ 	rdp = this_cpu_ptr(&rcu_data);
++	rdp->cpu_no_qs.b.norm = false;
+ 	rcu_report_qs_rdp(rdp);
+ 	udelay(rcu_unlock_delay);
+ }
+-- 
+cgit 
+
+
+From bca4fa8cb0f4c096b515952f64e560fd784a0514 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Mon, 20 Jun 2022 14:42:24 +0800
+Subject: rcu: Update rcu_preempt_deferred_qs() comments for !PREEMPT kernels
+
+In non-premptible kernels, tasks never do context switches within
+RCU read-side critical sections.  Therefore, in such kernels, each
+leaf rcu_node structure's ->blkd_tasks list will always be empty.
+The comment on the non-preemptible version of rcu_preempt_deferred_qs()
+confuses this point, so this commit therefore fixes it.
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_plugin.h | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/rcu/tree_plugin.h b/kernel/rcu/tree_plugin.h
+index 86772c95ed0ae..4152816dd29f6 100644
+--- a/kernel/rcu/tree_plugin.h
++++ b/kernel/rcu/tree_plugin.h
+@@ -932,10 +932,13 @@ static notrace bool rcu_preempt_need_deferred_qs(struct task_struct *t)
+ 	return false;
+ }
+ 
+-// Except that we do need to respond to a request by an expedited grace
+-// period for a quiescent state from this CPU.  Note that requests from
+-// tasks are handled when removing the task from the blocked-tasks list
+-// below.
++// Except that we do need to respond to a request by an expedited
++// grace period for a quiescent state from this CPU.  Note that in
++// non-preemptible kernels, there can be no context switches within RCU
++// read-side critical sections, which in turn means that the leaf rcu_node
++// structure's blocked-tasks list is always empty.  is therefore no need to
++// actually check it.  Instead, a quiescent state from this CPU suffices,
++// and this function is only called from such a quiescent state.
+ notrace void rcu_preempt_deferred_qs(struct task_struct *t)
+ {
+ 	struct rcu_data *rdp = this_cpu_ptr(&rcu_data);
+-- 
+cgit 
+
+
+From fcb42c9a77d490ed0974e4d394519481aa06e585 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Tue, 5 Jul 2022 12:09:51 -0700
+Subject: rcu: Add QS check in rcu_exp_handler() for non-preemptible kernels
+
+Kernels built with CONFIG_PREEMPTION=n and CONFIG_PREEMPT_COUNT=y maintain
+preempt_count() state.  Because such kernels map __rcu_read_lock()
+and __rcu_read_unlock() to preempt_disable() and preempt_enable(),
+respectively, this allows the expedited grace period's !CONFIG_PREEMPT_RCU
+version of the rcu_exp_handler() IPI handler function to use
+preempt_count() to detect quiescent states.
+
+This preempt_count() usage might seem to risk failures due to
+use of implicit RCU readers in portions of the kernel under #ifndef
+CONFIG_PREEMPTION, except that rcu_core() already disallows such implicit
+RCU readers.  The moral of this story is that you must use explicit
+read-side markings such as rcu_read_lock() or preempt_disable() even if
+the code knows that this kernel does not support preemption.
+
+This commit therefore adds a preempt_count()-based check for a quiescent
+state in the !CONFIG_PREEMPT_RCU version of the rcu_exp_handler()
+function for kernels built with CONFIG_PREEMPT_COUNT=y, reporting an
+immediate quiescent state when the interrupted code had both preemption
+and softirqs enabled.
+
+This change results in about a 2% reduction in expedited grace-period
+latency in kernels built with both CONFIG_PREEMPT_RCU=n and
+CONFIG_PREEMPT_COUNT=y.
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+Link: https://lore.kernel.org/all/20220622103549.2840087-1-qiang1.zhang@intel.com/
+---
+ kernel/rcu/tree_exp.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tree_exp.h b/kernel/rcu/tree_exp.h
+index be667583a5547..b07998159d1fa 100644
+--- a/kernel/rcu/tree_exp.h
++++ b/kernel/rcu/tree_exp.h
+@@ -828,11 +828,13 @@ static void rcu_exp_handler(void *unused)
+ {
+ 	struct rcu_data *rdp = this_cpu_ptr(&rcu_data);
+ 	struct rcu_node *rnp = rdp->mynode;
++	bool preempt_bh_enabled = !(preempt_count() & (PREEMPT_MASK | SOFTIRQ_MASK));
+ 
+ 	if (!(READ_ONCE(rnp->expmask) & rdp->grpmask) ||
+ 	    __this_cpu_read(rcu_data.cpu_no_qs.b.exp))
+ 		return;
+-	if (rcu_is_cpu_rrupt_from_idle()) {
++	if (rcu_is_cpu_rrupt_from_idle() ||
++	    (IS_ENABLED(CONFIG_PREEMPT_COUNT) && preempt_bh_enabled)) {
+ 		rcu_report_exp_rdp(this_cpu_ptr(&rcu_data));
+ 		return;
+ 	}
+-- 
+cgit 
+
+
+From 6ca0292ccf968e0132e64d6a699d36ba3e92cb81 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Fri, 1 Jul 2022 10:44:04 +0800
+Subject: rcu: Make tiny RCU support leak callbacks for debug-object errors
+
+Currently, only Tree RCU leaks callbacks setting when it detects a
+duplicate call_rcu().  This commit causes Tiny RCU to also leak
+callbacks in this situation.
+
+Because this is Tiny RCU, kernel size is important:
+
+1. CONFIG_TINY_RCU=y and CONFIG_DEBUG_OBJECTS_RCU_HEAD=n
+   (Production kernel)
+
+    Original:
+    text      data      bss       dec       hex     filename
+    26290663  20159823  15212544  61663030  3ace736 vmlinux
+
+    With this commit:
+    text      data      bss       dec       hex     filename
+    26290663  20159823  15212544  61663030  3ace736 vmlinux
+
+2. CONFIG_TINY_RCU=y and CONFIG_DEBUG_OBJECTS_RCU_HEAD=y
+   (Debugging kernel)
+
+    Original:
+    text      data      bss       dec       hex     filename
+    26291319  20160143  15212544  61664006  3aceb06 vmlinux
+
+    With this commit:
+    text      data      bss       dec       hex     filename
+    26291319  20160431  15212544  61664294  3acec26 vmlinux
+
+These results show that the kernel size is unchanged for production
+kernels, as desired.
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tiny.c | 17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tiny.c b/kernel/rcu/tiny.c
+index f0561ee16b9c2..943d431b908f6 100644
+--- a/kernel/rcu/tiny.c
++++ b/kernel/rcu/tiny.c
+@@ -158,6 +158,10 @@ void synchronize_rcu(void)
+ }
+ EXPORT_SYMBOL_GPL(synchronize_rcu);
+ 
++static void tiny_rcu_leak_callback(struct rcu_head *rhp)
++{
++}
++
+ /*
+  * Post an RCU callback to be invoked after the end of an RCU grace
+  * period.  But since we have but one CPU, that would be after any
+@@ -165,9 +169,20 @@ EXPORT_SYMBOL_GPL(synchronize_rcu);
+  */
+ void call_rcu(struct rcu_head *head, rcu_callback_t func)
+ {
++	static atomic_t doublefrees;
+ 	unsigned long flags;
+ 
+-	debug_rcu_head_queue(head);
++	if (debug_rcu_head_queue(head)) {
++		if (atomic_inc_return(&doublefrees) < 4) {
++			pr_err("%s(): Double-freed CB %p->%pS()!!!  ", __func__, head, head->func);
++			mem_dump_obj(head);
++		}
++
++		if (!__is_kvfree_rcu_offset((unsigned long)head->func))
++			WRITE_ONCE(head->func, tiny_rcu_leak_callback);
++		return;
++	}
++
+ 	head->func = func;
+ 	head->next = NULL;
+ 
+-- 
+cgit 
+
+
+From 089254fd386eb6800dd7d7863f12a04ada0c35fa Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 3 Aug 2022 08:48:12 -0700
+Subject: rcu: Document reason for rcu_all_qs() call to preempt_disable()
+
+Given that rcu_all_qs() is in non-preemptible kernels, why on earth should
+it invoke preempt_disable()?  This commit adds the reason, which is to
+work nicely with debugging enabled in CONFIG_PREEMPT_COUNT=y kernels.
+
+Reported-by: Neeraj Upadhyay <quic_neeraju@quicinc.com>
+Reported-by: Boqun Feng <boqun.feng@gmail.com>
+Reported-by: Frederic Weisbecker <frederic@kernel.org>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_plugin.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tree_plugin.h b/kernel/rcu/tree_plugin.h
+index 4152816dd29f6..c46b3c74dad1f 100644
+--- a/kernel/rcu/tree_plugin.h
++++ b/kernel/rcu/tree_plugin.h
+@@ -870,7 +870,7 @@ void rcu_all_qs(void)
+ 
+ 	if (!raw_cpu_read(rcu_data.rcu_urgent_qs))
+ 		return;
+-	preempt_disable();
++	preempt_disable();  // For CONFIG_PREEMPT_COUNT=y kernels
+ 	/* Load rcu_urgent_qs before other flags. */
+ 	if (!smp_load_acquire(this_cpu_ptr(&rcu_data.rcu_urgent_qs))) {
+ 		preempt_enable();
+-- 
+cgit 
+
+
+From d8f3f5834febb74d18b5b2098f67d9db740f3e30 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 3 Aug 2022 10:36:32 -0700
+Subject: rcu: Update rcu_access_pointer() header for
+ rcu_dereference_protected()
+
+The rcu_access_pointer() docbook header correctly notes that it may be
+used during post-grace-period teardown.  However, it is usually better to
+use rcu_dereference_protected() for this purpose.  This commit therefore
+calls out this preferred usage.
+
+Reported-by: Maxim Mikityanskiy <maximmi@nvidia.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcupdate.h | 18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/rcupdate.h b/include/linux/rcupdate.h
+index f527f27e64387..61a1a85c720c3 100644
+--- a/include/linux/rcupdate.h
++++ b/include/linux/rcupdate.h
+@@ -496,13 +496,21 @@ do {									      \
+  * against NULL.  Although rcu_access_pointer() may also be used in cases
+  * where update-side locks prevent the value of the pointer from changing,
+  * you should instead use rcu_dereference_protected() for this use case.
++ * Within an RCU read-side critical section, there is little reason to
++ * use rcu_access_pointer().
++ *
++ * It is usually best to test the rcu_access_pointer() return value
++ * directly in order to avoid accidental dereferences being introduced
++ * by later inattentive changes.  In other words, assigning the
++ * rcu_access_pointer() return value to a local variable results in an
++ * accident waiting to happen.
+  *
+  * It is also permissible to use rcu_access_pointer() when read-side
+- * access to the pointer was removed at least one grace period ago, as
+- * is the case in the context of the RCU callback that is freeing up
+- * the data, or after a synchronize_rcu() returns.  This can be useful
+- * when tearing down multi-linked structures after a grace period
+- * has elapsed.
++ * access to the pointer was removed at least one grace period ago, as is
++ * the case in the context of the RCU callback that is freeing up the data,
++ * or after a synchronize_rcu() returns.  This can be useful when tearing
++ * down multi-linked structures after a grace period has elapsed.  However,
++ * rcu_dereference_protected() is normally preferred for this use case.
+  */
+ #define rcu_access_pointer(p) __rcu_access_pointer((p), __UNIQUE_ID(rcu), __rcu)
+ 
+-- 
+cgit 
+
+
+From e73dfe30930b75c98746152e7a2f6a8ab6067b51 Mon Sep 17 00:00:00 2001
+From: Zhen Lei <thunder.leizhen@huawei.com>
+Date: Thu, 4 Aug 2022 10:34:19 +0800
+Subject: sched/debug: Try trigger_single_cpu_backtrace(cpu) in dump_cpu_task()
+
+The trigger_all_cpu_backtrace() function attempts to send an NMI to the
+target CPU, which usually provides much better stack traces than the
+dump_cpu_task() function's approach of dumping that stack from some other
+CPU.  So much so that most calls to dump_cpu_task() only happen after
+a call to trigger_all_cpu_backtrace() has failed.  And the exception to
+this rule really should attempt to use trigger_all_cpu_backtrace() first.
+
+Therefore, move the trigger_all_cpu_backtrace() invocation into
+dump_cpu_task().
+
+Signed-off-by: Zhen Lei <thunder.leizhen@huawei.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+Cc: Ingo Molnar <mingo@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Juri Lelli <juri.lelli@redhat.com>
+Cc: Vincent Guittot <vincent.guittot@linaro.org>
+Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Cc: Ben Segall <bsegall@google.com>
+Cc: Mel Gorman <mgorman@suse.de>
+Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
+Cc: Valentin Schneider <vschneid@redhat.com>
+---
+ kernel/rcu/tree_stall.h | 5 ++---
+ kernel/sched/core.c     | 3 +++
+ kernel/smp.c            | 3 +--
+ 3 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/rcu/tree_stall.h b/kernel/rcu/tree_stall.h
+index c3fbbcc09327f..5653560573e22 100644
+--- a/kernel/rcu/tree_stall.h
++++ b/kernel/rcu/tree_stall.h
+@@ -368,7 +368,7 @@ static void rcu_dump_cpu_stacks(void)
+ 			if (rnp->qsmask & leaf_node_cpu_bit(rnp, cpu)) {
+ 				if (cpu_is_offline(cpu))
+ 					pr_err("Offline CPU %d blocking current GP.\n", cpu);
+-				else if (!trigger_single_cpu_backtrace(cpu))
++				else
+ 					dump_cpu_task(cpu);
+ 			}
+ 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
+@@ -511,8 +511,7 @@ static void rcu_check_gp_kthread_starvation(void)
+ 					pr_err("RCU GP kthread last ran on offline CPU %d.\n", cpu);
+ 				} else  {
+ 					pr_err("Stack dump where RCU GP kthread last ran:\n");
+-					if (!trigger_single_cpu_backtrace(cpu))
+-						dump_cpu_task(cpu);
++					dump_cpu_task(cpu);
+ 				}
+ 			}
+ 			wake_up_process(gpk);
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index ee28253c9ac0c..e15b6a7f34f47 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -11183,6 +11183,9 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 
+ void dump_cpu_task(int cpu)
+ {
++	if (trigger_single_cpu_backtrace(cpu))
++		return;
++
+ 	pr_info("Task dump for CPU %d:\n", cpu);
+ 	sched_show_task(cpu_curr(cpu));
+ }
+diff --git a/kernel/smp.c b/kernel/smp.c
+index 650810a6f29b3..e8cdc025a046f 100644
+--- a/kernel/smp.c
++++ b/kernel/smp.c
+@@ -370,8 +370,7 @@ static bool csd_lock_wait_toolong(struct __call_single_data *csd, u64 ts0, u64 *
+ 	if (cpu >= 0) {
+ 		if (static_branch_unlikely(&csdlock_debug_extended))
+ 			csd_lock_print_extended(csd, cpu);
+-		if (!trigger_single_cpu_backtrace(cpu))
+-			dump_cpu_task(cpu);
++		dump_cpu_task(cpu);
+ 		if (!cpu_cur_csd) {
+ 			pr_alert("csd: Re-sending CSD lock (#%d) IPI from CPU#%02d to CPU#%02d\n", *bug_id, raw_smp_processor_id(), cpu);
+ 			arch_send_call_function_single_ipi(cpu);
+-- 
+cgit 
+
+
+From bc1cca97e6da6c7c34db7c5b864bb354ca5305ac Mon Sep 17 00:00:00 2001
+From: Zhen Lei <thunder.leizhen@huawei.com>
+Date: Thu, 4 Aug 2022 10:34:20 +0800
+Subject: sched/debug: Show the registers of 'current' in dump_cpu_task()
+
+The dump_cpu_task() function does not print registers on architectures
+that do not support NMIs.  However, registers can be useful for
+debugging.  Fortunately, in the case where dump_cpu_task() is invoked
+from an interrupt handler and is dumping the current CPU's stack, the
+get_irq_regs() function can be used to get the registers.
+
+Therefore, this commit makes dump_cpu_task() check to see if it is being
+asked to dump the current CPU's stack from within an interrupt handler,
+and, if so, it uses the get_irq_regs() function to obtain the registers.
+On systems that do support NMIs, this commit has the further advantage
+of avoiding a self-NMI in this case.
+
+This is an example of rcu self-detected stall on arm64, which does not
+support NMIs:
+[   27.501721] rcu: INFO: rcu_preempt self-detected stall on CPU
+[   27.502238] rcu:     0-....: (1250 ticks this GP) idle=4f7/1/0x4000000000000000 softirq=2594/2594 fqs=619
+[   27.502632]  (t=1251 jiffies g=2989 q=29 ncpus=4)
+[   27.503845] CPU: 0 PID: 306 Comm: test0 Not tainted 5.19.0-rc7-00009-g1c1a6c29ff99-dirty #46
+[   27.504732] Hardware name: linux,dummy-virt (DT)
+[   27.504947] pstate: 20000005 (nzCv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   27.504998] pc : arch_counter_read+0x18/0x24
+[   27.505301] lr : arch_counter_read+0x18/0x24
+[   27.505328] sp : ffff80000b29bdf0
+[   27.505345] x29: ffff80000b29bdf0 x28: 0000000000000000 x27: 0000000000000000
+[   27.505475] x26: 0000000000000000 x25: 0000000000000000 x24: 0000000000000000
+[   27.505553] x23: 0000000000001f40 x22: ffff800009849c48 x21: 000000065f871ae0
+[   27.505627] x20: 00000000000025ec x19: ffff80000a6eb300 x18: ffffffffffffffff
+[   27.505654] x17: 0000000000000001 x16: 0000000000000000 x15: ffff80000a6d0296
+[   27.505681] x14: ffffffffffffffff x13: ffff80000a29bc18 x12: 0000000000000426
+[   27.505709] x11: 0000000000000162 x10: ffff80000a2f3c18 x9 : ffff80000a29bc18
+[   27.505736] x8 : 00000000ffffefff x7 : ffff80000a2f3c18 x6 : 00000000759bd013
+[   27.505761] x5 : 01ffffffffffffff x4 : 0002dc6c00000000 x3 : 0000000000000017
+[   27.505787] x2 : 00000000000025ec x1 : ffff80000b29bdf0 x0 : 0000000075a30653
+[   27.505937] Call trace:
+[   27.506002]  arch_counter_read+0x18/0x24
+[   27.506171]  ktime_get+0x48/0xa0
+[   27.506207]  test_task+0x70/0xf0
+[   27.506227]  kthread+0x10c/0x110
+[   27.506243]  ret_from_fork+0x10/0x20
+
+This is a marked improvement over the old output:
+[   27.944550] rcu: INFO: rcu_preempt self-detected stall on CPU
+[   27.944980] rcu:     0-....: (1249 ticks this GP) idle=cbb/1/0x4000000000000000 softirq=2610/2610 fqs=614
+[   27.945407]  (t=1251 jiffies g=2681 q=28 ncpus=4)
+[   27.945731] Task dump for CPU 0:
+[   27.945844] task:test0           state:R  running task     stack:    0 pid:  306 ppid:     2 flags:0x0000000a
+[   27.946073] Call trace:
+[   27.946151]  dump_backtrace.part.0+0xc8/0xd4
+[   27.946378]  show_stack+0x18/0x70
+[   27.946405]  sched_show_task+0x150/0x180
+[   27.946427]  dump_cpu_task+0x44/0x54
+[   27.947193]  rcu_dump_cpu_stacks+0xec/0x130
+[   27.947212]  rcu_sched_clock_irq+0xb18/0xef0
+[   27.947231]  update_process_times+0x68/0xac
+[   27.947248]  tick_sched_handle+0x34/0x60
+[   27.947266]  tick_sched_timer+0x4c/0xa4
+[   27.947281]  __hrtimer_run_queues+0x178/0x360
+[   27.947295]  hrtimer_interrupt+0xe8/0x244
+[   27.947309]  arch_timer_handler_virt+0x38/0x4c
+[   27.947326]  handle_percpu_devid_irq+0x88/0x230
+[   27.947342]  generic_handle_domain_irq+0x2c/0x44
+[   27.947357]  gic_handle_irq+0x44/0xc4
+[   27.947376]  call_on_irq_stack+0x2c/0x54
+[   27.947415]  do_interrupt_handler+0x80/0x94
+[   27.947431]  el1_interrupt+0x34/0x70
+[   27.947447]  el1h_64_irq_handler+0x18/0x24
+[   27.947462]  el1h_64_irq+0x64/0x68                       <--- the above backtrace is worthless
+[   27.947474]  arch_counter_read+0x18/0x24
+[   27.947487]  ktime_get+0x48/0xa0
+[   27.947501]  test_task+0x70/0xf0
+[   27.947520]  kthread+0x10c/0x110
+[   27.947538]  ret_from_fork+0x10/0x20
+
+Signed-off-by: Zhen Lei <thunder.leizhen@huawei.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+Cc: Ingo Molnar <mingo@redhat.com>
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: Juri Lelli <juri.lelli@redhat.com>
+Cc: Vincent Guittot <vincent.guittot@linaro.org>
+Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Cc: Ben Segall <bsegall@google.com>
+Cc: Mel Gorman <mgorman@suse.de>
+Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
+Cc: Valentin Schneider <vschneid@redhat.com>
+---
+ kernel/sched/core.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index e15b6a7f34f47..60fdc0faf1c9d 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -73,6 +73,7 @@
+ 
+ #include <uapi/linux/sched/types.h>
+ 
++#include <asm/irq_regs.h>
+ #include <asm/switch_to.h>
+ #include <asm/tlb.h>
+ 
+@@ -11183,6 +11184,16 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 
+ void dump_cpu_task(int cpu)
+ {
++	if (cpu == smp_processor_id() && in_hardirq()) {
++		struct pt_regs *regs;
++
++		regs = get_irq_regs();
++		if (regs) {
++			show_regs(regs);
++			return;
++		}
++	}
++
+ 	if (trigger_single_cpu_backtrace(cpu))
+ 		return;
+ 
+-- 
+cgit 
+
+
+From 621189a1fe93cb2b34d62c5cdb9e258bca044813 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Mon, 8 Aug 2022 10:26:26 +0800
+Subject: rcu: Avoid triggering strict-GP irq-work when RCU is idle
+
+Kernels built with PREEMPT_RCU=y and RCU_STRICT_GRACE_PERIOD=y trigger
+irq-work from rcu_read_unlock(), and the resulting irq-work handler
+invokes rcu_preempt_deferred_qs_handle().  The point of this triggering
+is to force grace periods to end quickly in order to give tools like KASAN
+a better chance of detecting RCU usage bugs such as leaking RCU-protected
+pointers out of an RCU read-side critical section.
+
+However, this irq-work triggering is unconditional.  This works, but
+there is no point in doing this irq-work unless the current grace period
+is waiting on the running CPU or task, which is not the common case.
+After all, in the common case there are many rcu_read_unlock() calls
+per CPU per grace period.
+
+This commit therefore triggers the irq-work only when the current grace
+period is waiting on the running CPU or task.
+
+This change was tested as follows on a four-CPU system:
+
+	echo rcu_preempt_deferred_qs_handler > /sys/kernel/debug/tracing/set_ftrace_filter
+	echo 1 > /sys/kernel/debug/tracing/function_profile_enabled
+	insmod rcutorture.ko
+	sleep 20
+	rmmod rcutorture.ko
+	echo 0 > /sys/kernel/debug/tracing/function_profile_enabled
+	echo > /sys/kernel/debug/tracing/set_ftrace_filter
+
+This procedure produces results in this per-CPU set of files:
+
+	/sys/kernel/debug/tracing/trace_stat/function*
+
+Sample output from one of these files is as follows:
+
+  Function                               Hit    Time            Avg             s^2
+  --------                               ---    ----            ---             ---
+  rcu_preempt_deferred_qs_handle      838746    182650.3 us     0.217 us        0.004 us
+
+The baseline sum of the "Hit" values (the number of calls to this
+function) was 3,319,015.  With this commit, that sum was 1,140,359,
+for a 2.9x reduction.  The worst-case variance across the CPUs was less
+than 25%, so this large effect size is statistically significant.
+
+The raw data is available in the Link: URL.
+
+Link: https://lore.kernel.org/all/20220808022626.12825-1-qiang1.zhang@intel.com/
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_plugin.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tree_plugin.h b/kernel/rcu/tree_plugin.h
+index c46b3c74dad1f..207617f69aa56 100644
+--- a/kernel/rcu/tree_plugin.h
++++ b/kernel/rcu/tree_plugin.h
+@@ -641,7 +641,8 @@ static void rcu_read_unlock_special(struct task_struct *t)
+ 
+ 		expboost = (t->rcu_blocked_node && READ_ONCE(t->rcu_blocked_node->exp_tasks)) ||
+ 			   (rdp->grpmask & READ_ONCE(rnp->expmask)) ||
+-			   IS_ENABLED(CONFIG_RCU_STRICT_GRACE_PERIOD) ||
++			   (IS_ENABLED(CONFIG_RCU_STRICT_GRACE_PERIOD) &&
++			   ((rdp->grpmask & READ_ONCE(rnp->qsmask)) || t->rcu_blocked_node)) ||
+ 			   (IS_ENABLED(CONFIG_RCU_BOOST) && irqs_were_disabled &&
+ 			    t->rcu_blocked_node);
+ 		// Need to defer quiescent state until everything is enabled.
+-- 
+cgit 
+
+
+From 7634b1eaa0cd135d5eedadb04ad3c91b1ecf28a9 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 24 Aug 2022 14:46:56 -0700
+Subject: rcu: Exclude outgoing CPU when it is the last to leave
+
+The rcu_boost_kthread_setaffinity() function removes the outgoing CPU
+from the set_cpus_allowed() mask for the corresponding leaf rcu_node
+structure's rcub priority-boosting kthread.  Except that if the outgoing
+CPU will leave that structure without any online CPUs, the mask is set
+to the housekeeping CPU mask from housekeeping_cpumask().  Which is fine
+unless the outgoing CPU happens to be a housekeeping CPU.
+
+This commit therefore removes the outgoing CPU from the housekeeping mask.
+This would of course be problematic if the outgoing CPU was the last
+online housekeeping CPU, but in that case you are in a world of hurt
+anyway.  If someone comes up with a valid use case for a system needing
+all the housekeeping CPUs to be offline, further adjustments can be made.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_plugin.h | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tree_plugin.h b/kernel/rcu/tree_plugin.h
+index 207617f69aa56..32b424b571bd9 100644
+--- a/kernel/rcu/tree_plugin.h
++++ b/kernel/rcu/tree_plugin.h
+@@ -1243,8 +1243,11 @@ static void rcu_boost_kthread_setaffinity(struct rcu_node *rnp, int outgoingcpu)
+ 		    cpu != outgoingcpu)
+ 			cpumask_set_cpu(cpu, cm);
+ 	cpumask_and(cm, cm, housekeeping_cpumask(HK_TYPE_RCU));
+-	if (cpumask_empty(cm))
++	if (cpumask_empty(cm)) {
+ 		cpumask_copy(cm, housekeeping_cpumask(HK_TYPE_RCU));
++		if (outgoingcpu >= 0)
++			cpumask_clear_cpu(outgoingcpu, cm);
++	}
+ 	set_cpus_allowed_ptr(t, cm);
+ 	mutex_unlock(&rnp->boost_kthread_mutex);
+ 	free_cpumask_var(cm);
+-- 
+cgit 
+
+
+From 093590c16b447f53e66771c8579ae66c96f6ef61 Mon Sep 17 00:00:00 2001
+From: Michal Hocko <mhocko@suse.com>
+Date: Wed, 22 Jun 2022 13:47:11 +0200
+Subject: rcu: Back off upon fill_page_cache_func() allocation failure
+
+The fill_page_cache_func() function allocates couple of pages to store
+kvfree_rcu_bulk_data structures. This is a lightweight (GFP_NORETRY)
+allocation which can fail under memory pressure. The function will,
+however keep retrying even when the previous attempt has failed.
+
+This retrying is in theory correct, but in practice the allocation is
+invoked from workqueue context, which means that if the memory reclaim
+gets stuck, these retries can hog the worker for quite some time.
+Although the workqueues subsystem automatically adjusts concurrency, such
+adjustment is not guaranteed to happen until the worker context sleeps.
+And the fill_page_cache_func() function's retry loop is not guaranteed
+to sleep (see the should_reclaim_retry() function).
+
+And we have seen this function cause workqueue lockups:
+
+kernel: BUG: workqueue lockup - pool cpus=93 node=1 flags=0x1 nice=0 stuck for 32s!
+[...]
+kernel: pool 74: cpus=37 node=0 flags=0x1 nice=0 hung=32s workers=2 manager: 2146
+kernel:   pwq 498: cpus=249 node=1 flags=0x1 nice=0 active=4/256 refcnt=5
+kernel:     in-flight: 1917:fill_page_cache_func
+kernel:     pending: dbs_work_handler, free_work, kfree_rcu_monitor
+
+Originally, we thought that the root cause of this lockup was several
+retries with direct reclaim, but this is not yet confirmed.  Furthermore,
+we have seen similar lockups without any heavy memory pressure.  This
+suggests that there are other factors contributing to these lockups.
+However, it is not really clear that endless retries are desireable.
+
+So let's make the fill_page_cache_func() function back off after
+allocation failure.
+
+Cc: Uladzislau Rezki (Sony) <urezki@gmail.com>
+Cc: "Paul E. McKenney" <paulmck@kernel.org>
+Cc: Frederic Weisbecker <frederic@kernel.org>
+Cc: Neeraj Upadhyay <quic_neeraju@quicinc.com>
+Cc: Josh Triplett <josh@joshtriplett.org>
+Cc: Steven Rostedt <rostedt@goodmis.org>
+Cc: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+Cc: Lai Jiangshan <jiangshanlai@gmail.com>
+Cc: Joel Fernandes <joel@joelfernandes.org>
+Signed-off-by: Michal Hocko <mhocko@suse.com>
+Reviewed-by: Uladzislau Rezki (Sony) <urezki@gmail.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 17 +++++++++--------
+ 1 file changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 79aea7df4345e..eb435941e92fd 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3183,15 +3183,16 @@ static void fill_page_cache_func(struct work_struct *work)
+ 		bnode = (struct kvfree_rcu_bulk_data *)
+ 			__get_free_page(GFP_KERNEL | __GFP_NORETRY | __GFP_NOMEMALLOC | __GFP_NOWARN);
+ 
+-		if (bnode) {
+-			raw_spin_lock_irqsave(&krcp->lock, flags);
+-			pushed = put_cached_bnode(krcp, bnode);
+-			raw_spin_unlock_irqrestore(&krcp->lock, flags);
++		if (!bnode)
++			break;
+ 
+-			if (!pushed) {
+-				free_page((unsigned long) bnode);
+-				break;
+-			}
++		raw_spin_lock_irqsave(&krcp->lock, flags);
++		pushed = put_cached_bnode(krcp, bnode);
++		raw_spin_unlock_irqrestore(&krcp->lock, flags);
++
++		if (!pushed) {
++			free_page((unsigned long) bnode);
++			break;
+ 		}
+ 	}
+ 
+-- 
+cgit 
+
+
+From 38269096351806bf7315f971c53205b676ada259 Mon Sep 17 00:00:00 2001
+From: "Joel Fernandes (Google)" <joel@joelfernandes.org>
+Date: Wed, 22 Jun 2022 22:51:02 +0000
+Subject: rcu/kfree: Fix kfree_rcu_shrink_count() return value
+
+As per the comments in include/linux/shrinker.h, .count_objects callback
+should return the number of freeable items, but if there are no objects
+to free, SHRINK_EMPTY should be returned. The only time 0 is returned
+should be when we are unable to determine the number of objects, or the
+cache should be skipped for another reason.
+
+Signed-off-by: Joel Fernandes (Google) <joel@joelfernandes.org>
+Reviewed-by: Uladzislau Rezki (Sony) <urezki@gmail.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index eb435941e92fd..3d234d536d4c3 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3372,7 +3372,7 @@ kfree_rcu_shrink_count(struct shrinker *shrink, struct shrink_control *sc)
+ 		atomic_set(&krcp->backoff_page_cache_fill, 1);
+ 	}
+ 
+-	return count;
++	return count == 0 ? SHRINK_EMPTY : count;
+ }
+ 
+ static unsigned long
+-- 
+cgit 
+
+
+From 51824b780b719c53113dc39e027fbf670dc66028 Mon Sep 17 00:00:00 2001
+From: "Uladzislau Rezki (Sony)" <urezki@gmail.com>
+Date: Thu, 30 Jun 2022 18:33:35 +0200
+Subject: rcu/kvfree: Update KFREE_DRAIN_JIFFIES interval
+
+Currently the monitor work is scheduled with a fixed interval of HZ/20,
+which is roughly 50 milliseconds. The drawback of this approach is
+low utilization of the 512 page slots in scenarios with infrequence
+kvfree_rcu() calls.  For example on an Android system:
+
+<snip>
+  kworker/3:3-507     [003] ....   470.286305: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000d0f0dde5 nr_records=6
+  kworker/6:1-76      [006] ....   470.416613: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000ea0d6556 nr_records=1
+  kworker/6:1-76      [006] ....   470.416625: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x000000003e025849 nr_records=9
+  kworker/3:3-507     [003] ....   471.390000: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000815a8713 nr_records=48
+  kworker/1:1-73      [001] ....   471.725785: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000fda9bf20 nr_records=3
+  kworker/1:1-73      [001] ....   471.725833: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000a425b67b nr_records=76
+  kworker/0:4-1411    [000] ....   472.085673: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x000000007996be9d nr_records=1
+  kworker/0:4-1411    [000] ....   472.085728: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000d0f0dde5 nr_records=5
+  kworker/6:1-76      [006] ....   472.260340: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x0000000065630ee4 nr_records=102
+<snip>
+
+In many cases, out of 512 slots, fewer than 10 were actually used.
+In order to improve batching and make utilization more efficient this
+commit sets a drain interval to a fixed 5-seconds interval. Floods are
+detected when a page fills quickly, and in that case, the reclaim work
+is re-scheduled for the next scheduling-clock tick (jiffy).
+
+After this change:
+
+<snip>
+  kworker/7:1-371     [007] ....  5630.725708: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x000000005ab0ffb3 nr_records=121
+  kworker/7:1-371     [007] ....  5630.989702: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x0000000060c84761 nr_records=47
+  kworker/7:1-371     [007] ....  5630.989714: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x000000000babf308 nr_records=510
+  kworker/7:1-371     [007] ....  5631.553790: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000bb7bd0ef nr_records=169
+  kworker/7:1-371     [007] ....  5631.553808: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x0000000044c78753 nr_records=510
+  kworker/5:6-9428    [005] ....  5631.746102: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000d98519aa nr_records=123
+  kworker/4:7-9434    [004] ....  5632.001758: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x00000000526c9d44 nr_records=322
+  kworker/4:7-9434    [004] ....  5632.002073: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x000000002c6a8afa nr_records=185
+  kworker/7:1-371     [007] ....  5632.277515: rcu_invoke_kfree_bulk_callback: rcu_preempt bulk=0x000000007f4a962f nr_records=510
+<snip>
+
+Here, all but one of the cases, more than one hundreds slots were used,
+representing an order-of-magnitude improvement.
+
+Signed-off-by: Uladzislau Rezki (Sony) <urezki@gmail.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 23 +++++++++++++++++++----
+ 1 file changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 3d234d536d4c3..7b90478b752e8 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -2832,7 +2832,7 @@ EXPORT_SYMBOL_GPL(call_rcu);
+ 
+ 
+ /* Maximum number of jiffies to wait before draining a batch. */
+-#define KFREE_DRAIN_JIFFIES (HZ / 50)
++#define KFREE_DRAIN_JIFFIES (5 * HZ)
+ #define KFREE_N_BATCHES 2
+ #define FREE_N_CHANNELS 2
+ 
+@@ -3093,6 +3093,21 @@ need_offload_krc(struct kfree_rcu_cpu *krcp)
+ 	return !!krcp->head;
+ }
+ 
++static void
++schedule_delayed_monitor_work(struct kfree_rcu_cpu *krcp)
++{
++	long delay, delay_left;
++
++	delay = READ_ONCE(krcp->count) >= KVFREE_BULK_MAX_ENTR ? 1:KFREE_DRAIN_JIFFIES;
++	if (delayed_work_pending(&krcp->monitor_work)) {
++		delay_left = krcp->monitor_work.timer.expires - jiffies;
++		if (delay < delay_left)
++			mod_delayed_work(system_wq, &krcp->monitor_work, delay);
++		return;
++	}
++	queue_delayed_work(system_wq, &krcp->monitor_work, delay);
++}
++
+ /*
+  * This function is invoked after the KFREE_DRAIN_JIFFIES timeout.
+  */
+@@ -3150,7 +3165,7 @@ static void kfree_rcu_monitor(struct work_struct *work)
+ 	// work to repeat an attempt. Because previous batches are
+ 	// still in progress.
+ 	if (need_offload_krc(krcp))
+-		schedule_delayed_work(&krcp->monitor_work, KFREE_DRAIN_JIFFIES);
++		schedule_delayed_monitor_work(krcp);
+ 
+ 	raw_spin_unlock_irqrestore(&krcp->lock, flags);
+ }
+@@ -3339,7 +3354,7 @@ void kvfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
+ 
+ 	// Set timer to drain after KFREE_DRAIN_JIFFIES.
+ 	if (rcu_scheduler_active == RCU_SCHEDULER_RUNNING)
+-		schedule_delayed_work(&krcp->monitor_work, KFREE_DRAIN_JIFFIES);
++		schedule_delayed_monitor_work(krcp);
+ 
+ unlock_return:
+ 	krc_this_cpu_unlock(krcp, flags);
+@@ -3415,7 +3430,7 @@ void __init kfree_rcu_scheduler_running(void)
+ 
+ 		raw_spin_lock_irqsave(&krcp->lock, flags);
+ 		if (need_offload_krc(krcp))
+-			schedule_delayed_work_on(cpu, &krcp->monitor_work, KFREE_DRAIN_JIFFIES);
++			schedule_delayed_monitor_work(krcp);
+ 		raw_spin_unlock_irqrestore(&krcp->lock, flags);
+ 	}
+ }
+-- 
+cgit 
+
+
+From 5334da2af25eceb6a88ae162e69d6586b5cb9abc Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Fri, 17 Jun 2022 22:15:19 +0800
+Subject: rcu/nocb: Choose the right rcuog/rcuop kthreads to output
+
+The show_rcu_nocb_gp_state() function is supposed to dump out the rcuog
+kthread and the show_rcu_nocb_state() function is supposed to dump out
+the rcuo[ps] kthread.  Currently, both do a mixture, which is not optimal
+for debugging, even though it does not affect functionality.
+
+This commit therefore adjusts these two functions to focus on their
+respective kthreads.
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_nocb.h | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/rcu/tree_nocb.h b/kernel/rcu/tree_nocb.h
+index a8f574d8850d2..f20aec4f4394b 100644
+--- a/kernel/rcu/tree_nocb.h
++++ b/kernel/rcu/tree_nocb.h
+@@ -1452,8 +1452,8 @@ static void show_rcu_nocb_gp_state(struct rcu_data *rdp)
+ 		(long)rdp->nocb_gp_seq,
+ 		rnp->grplo, rnp->grphi, READ_ONCE(rdp->nocb_gp_loops),
+ 		rdp->nocb_gp_kthread ? task_state_to_char(rdp->nocb_gp_kthread) : '.',
+-		rdp->nocb_cb_kthread ? (int)task_cpu(rdp->nocb_gp_kthread) : -1,
+-		show_rcu_should_be_on_cpu(rdp->nocb_cb_kthread));
++		rdp->nocb_gp_kthread ? (int)task_cpu(rdp->nocb_gp_kthread) : -1,
++		show_rcu_should_be_on_cpu(rdp->nocb_gp_kthread));
+ }
+ 
+ /* Dump out nocb kthread state for the specified rcu_data structure. */
+@@ -1497,7 +1497,7 @@ static void show_rcu_nocb_state(struct rcu_data *rdp)
+ 		".B"[!!rcu_cblist_n_cbs(&rdp->nocb_bypass)],
+ 		rcu_segcblist_n_cbs(&rdp->cblist),
+ 		rdp->nocb_cb_kthread ? task_state_to_char(rdp->nocb_cb_kthread) : '.',
+-		rdp->nocb_cb_kthread ? (int)task_cpu(rdp->nocb_gp_kthread) : -1,
++		rdp->nocb_cb_kthread ? (int)task_cpu(rdp->nocb_cb_kthread) : -1,
+ 		show_rcu_should_be_on_cpu(rdp->nocb_cb_kthread));
+ 
+ 	/* It is OK for GP kthreads to have GP state. */
+-- 
+cgit 
+
+
+From 638dce227a41534bbc4fdd73280e73e0b3570048 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 2 Aug 2022 17:39:28 -0700
+Subject: rcu/nocb: Add CPU number to CPU-{,de}offload failure messages
+
+Offline CPUs cannot be offloaded or deoffloaded.  Any attempt to offload
+or deoffload an offline CPU causes a message to be printed on the console,
+which is good, but this message does not contain the CPU number, which
+is bad.  Such a CPU number can be helpful when debugging, as it gives a
+clear indication that the CPU in question is in fact offline.  This commit
+therefore adds the CPU number to the CPU-{,de}offload failure messages.
+
+Cc: Frederic Weisbecker <frederic@kernel.org>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_nocb.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/rcu/tree_nocb.h b/kernel/rcu/tree_nocb.h
+index f20aec4f4394b..0a5f0ef414845 100644
+--- a/kernel/rcu/tree_nocb.h
++++ b/kernel/rcu/tree_nocb.h
+@@ -1111,7 +1111,7 @@ int rcu_nocb_cpu_deoffload(int cpu)
+ 			if (!ret)
+ 				cpumask_clear_cpu(cpu, rcu_nocb_mask);
+ 		} else {
+-			pr_info("NOCB: Can't CB-deoffload an offline CPU\n");
++			pr_info("NOCB: Cannot CB-deoffload offline CPU %d\n", rdp->cpu);
+ 			ret = -EINVAL;
+ 		}
+ 	}
+@@ -1196,7 +1196,7 @@ int rcu_nocb_cpu_offload(int cpu)
+ 			if (!ret)
+ 				cpumask_set_cpu(cpu, rcu_nocb_mask);
+ 		} else {
+-			pr_info("NOCB: Can't CB-offload an offline CPU\n");
++			pr_info("NOCB: Cannot CB-offload offline CPU %d\n", rdp->cpu);
+ 			ret = -EINVAL;
+ 		}
+ 	}
+-- 
+cgit 
+
+
+From 91a967fd6934abc0c7e4b0d26728e38674278707 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 28 Jul 2022 15:37:05 -0700
+Subject: rcu: Add full-sized polling for get_completed*() and poll_state*()
+
+The get_completed_synchronize_rcu() and poll_state_synchronize_rcu()
+APIs compress the combined expedited and normal grace-period states into a
+single unsigned long, which conserves storage, but can miss grace periods
+in certain cases involving overlapping normal and expedited grace periods.
+Missing the occasional grace period is usually not a problem, but there
+are use cases that care about each and every grace period.
+
+This commit therefore adds the first members of the full-state RCU
+grace-period polling API, namely the get_completed_synchronize_rcu_full()
+and poll_state_synchronize_rcu_full() functions.  These use up to three
+times the storage (rcu_gp_oldstate structure instead of unsigned long),
+but which are guaranteed not to miss grace periods, at least in situations
+where the single-CPU grace-period optimization does not apply.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcupdate.h |  3 ++
+ include/linux/rcutiny.h  |  9 ++++++
+ include/linux/rcutree.h  |  8 +++++
+ kernel/rcu/rcutorture.c  |  9 ++++++
+ kernel/rcu/tiny.c        | 10 +++++++
+ kernel/rcu/tree.c        | 76 +++++++++++++++++++++++++++++++++++++++++++++---
+ 6 files changed, 111 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/rcupdate.h b/include/linux/rcupdate.h
+index f527f27e64387..faaa174dfb27c 100644
+--- a/include/linux/rcupdate.h
++++ b/include/linux/rcupdate.h
+@@ -42,7 +42,10 @@ void call_rcu(struct rcu_head *head, rcu_callback_t func);
+ void rcu_barrier_tasks(void);
+ void rcu_barrier_tasks_rude(void);
+ void synchronize_rcu(void);
++
++struct rcu_gp_oldstate;
+ unsigned long get_completed_synchronize_rcu(void);
++void get_completed_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ 
+ #ifdef CONFIG_PREEMPT_RCU
+ 
+diff --git a/include/linux/rcutiny.h b/include/linux/rcutiny.h
+index 62815c0a2dcef..1fbff8600d92d 100644
+--- a/include/linux/rcutiny.h
++++ b/include/linux/rcutiny.h
+@@ -14,10 +14,19 @@
+ 
+ #include <asm/param.h> /* for HZ */
+ 
++struct rcu_gp_oldstate {
++	unsigned long rgos_norm;
++};
++
+ unsigned long get_state_synchronize_rcu(void);
+ unsigned long start_poll_synchronize_rcu(void);
+ bool poll_state_synchronize_rcu(unsigned long oldstate);
+ 
++static inline bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	return poll_state_synchronize_rcu(rgosp->rgos_norm);
++}
++
+ static inline void cond_synchronize_rcu(unsigned long oldstate)
+ {
+ 	might_sleep();
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 47eaa4cb0df72..4ccbc3aa9dc20 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -40,11 +40,19 @@ bool rcu_eqs_special_set(int cpu);
+ void rcu_momentary_dyntick_idle(void);
+ void kfree_rcu_scheduler_running(void);
+ bool rcu_gp_might_be_stalled(void);
++
++struct rcu_gp_oldstate {
++	unsigned long rgos_norm;
++	unsigned long rgos_exp;
++	unsigned long rgos_polled;
++};
++
+ unsigned long start_poll_synchronize_rcu_expedited(void);
+ void cond_synchronize_rcu_expedited(unsigned long oldstate);
+ unsigned long get_state_synchronize_rcu(void);
+ unsigned long start_poll_synchronize_rcu(void);
+ bool poll_state_synchronize_rcu(unsigned long oldstate);
++bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ void cond_synchronize_rcu(unsigned long oldstate);
+ 
+ bool rcu_is_idle_cpu(int cpu);
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index d8e1b270a065f..b31e6ed64d1b9 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -336,8 +336,10 @@ struct rcu_torture_ops {
+ 	void (*cond_sync_exp)(unsigned long oldstate);
+ 	unsigned long (*get_gp_state)(void);
+ 	unsigned long (*get_gp_completed)(void);
++	void (*get_gp_completed_full)(struct rcu_gp_oldstate *rgosp);
+ 	unsigned long (*start_gp_poll)(void);
+ 	bool (*poll_gp_state)(unsigned long oldstate);
++	bool (*poll_gp_state_full)(struct rcu_gp_oldstate *rgosp);
+ 	void (*cond_sync)(unsigned long oldstate);
+ 	call_rcu_func_t call;
+ 	void (*cb_barrier)(void);
+@@ -503,8 +505,10 @@ static struct rcu_torture_ops rcu_ops = {
+ 	.exp_sync		= synchronize_rcu_expedited,
+ 	.get_gp_state		= get_state_synchronize_rcu,
+ 	.get_gp_completed	= get_completed_synchronize_rcu,
++	.get_gp_completed_full	= get_completed_synchronize_rcu_full,
+ 	.start_gp_poll		= start_poll_synchronize_rcu,
+ 	.poll_gp_state		= poll_state_synchronize_rcu,
++	.poll_gp_state_full	= poll_state_synchronize_rcu_full,
+ 	.cond_sync		= cond_synchronize_rcu,
+ 	.get_gp_state_exp	= get_state_synchronize_rcu,
+ 	.start_gp_poll_exp	= start_poll_synchronize_rcu_expedited,
+@@ -1212,6 +1216,7 @@ rcu_torture_writer(void *arg)
+ 	bool boot_ended;
+ 	bool can_expedite = !rcu_gp_is_expedited() && !rcu_gp_is_normal();
+ 	unsigned long cookie;
++	struct rcu_gp_oldstate cookie_full;
+ 	int expediting = 0;
+ 	unsigned long gp_snap;
+ 	int i;
+@@ -1277,6 +1282,10 @@ rcu_torture_writer(void *arg)
+ 				}
+ 				cur_ops->readunlock(idx);
+ 			}
++			if (cur_ops->get_gp_completed_full && cur_ops->poll_gp_state_full) {
++				cur_ops->get_gp_completed_full(&cookie_full);
++				WARN_ON_ONCE(!cur_ops->poll_gp_state_full(&cookie_full));
++			}
+ 			switch (synctype[torture_random(&rand) % nsynctypes]) {
+ 			case RTWS_DEF_FREE:
+ 				rcu_torture_writer_state = RTWS_DEF_FREE;
+diff --git a/kernel/rcu/tiny.c b/kernel/rcu/tiny.c
+index f0561ee16b9c2..435edc785412c 100644
+--- a/kernel/rcu/tiny.c
++++ b/kernel/rcu/tiny.c
+@@ -183,6 +183,16 @@ void call_rcu(struct rcu_head *head, rcu_callback_t func)
+ }
+ EXPORT_SYMBOL_GPL(call_rcu);
+ 
++/*
++ * Store a grace-period-counter "cookie".  For more information,
++ * see the Tree RCU header comment.
++ */
++void get_completed_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	rgosp->rgos_norm = RCU_GET_STATE_COMPLETED;
++}
++EXPORT_SYMBOL_GPL(get_completed_synchronize_rcu_full);
++
+ /*
+  * Return a grace-period-counter "cookie".  For more information,
+  * see the Tree RCU header comment.
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 79aea7df4345e..d47c9b6d81066 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3522,6 +3522,22 @@ void synchronize_rcu(void)
+ }
+ EXPORT_SYMBOL_GPL(synchronize_rcu);
+ 
++/**
++ * get_completed_synchronize_rcu_full - Return a full pre-completed polled state cookie
++ * @rgosp: Place to put state cookie
++ *
++ * Stores into @rgosp a value that will always be treated by functions
++ * like poll_state_synchronize_rcu_full() as a cookie whose grace period
++ * has already completed.
++ */
++void get_completed_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	rgosp->rgos_norm = RCU_GET_STATE_COMPLETED;
++	rgosp->rgos_exp = RCU_GET_STATE_COMPLETED;
++	rgosp->rgos_polled = RCU_GET_STATE_COMPLETED;
++}
++EXPORT_SYMBOL_GPL(get_completed_synchronize_rcu_full);
++
+ /**
+  * get_state_synchronize_rcu - Snapshot current RCU state
+  *
+@@ -3580,7 +3596,7 @@ unsigned long start_poll_synchronize_rcu(void)
+ EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu);
+ 
+ /**
+- * poll_state_synchronize_rcu - Conditionally wait for an RCU grace period
++ * poll_state_synchronize_rcu - Has the specified RCU grace period completed?
+  *
+  * @oldstate: value from get_state_synchronize_rcu() or start_poll_synchronize_rcu()
+  *
+@@ -3595,9 +3611,10 @@ EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu);
+  * But counter wrap is harmless.  If the counter wraps, we have waited for
+  * more than a billion grace periods (and way more on a 64-bit system!).
+  * Those needing to keep oldstate values for very long time periods
+- * (many hours even on 32-bit systems) should check them occasionally
+- * and either refresh them or set a flag indicating that the grace period
+- * has completed.
++ * (many hours even on 32-bit systems) should check them occasionally and
++ * either refresh them or set a flag indicating that the grace period has
++ * completed.  Alternatively, they can use get_completed_synchronize_rcu()
++ * to get a guaranteed-completed grace-period state.
+  *
+  * This function provides the same memory-ordering guarantees that
+  * would be provided by a synchronize_rcu() that was invoked at the call
+@@ -3615,6 +3632,57 @@ bool poll_state_synchronize_rcu(unsigned long oldstate)
+ }
+ EXPORT_SYMBOL_GPL(poll_state_synchronize_rcu);
+ 
++/**
++ * poll_state_synchronize_rcu_full - Has the specified RCU grace period completed?
++ * @rgosp: value from get_state_synchronize_rcu_full() or start_poll_synchronize_rcu_full()
++ *
++ * If a full RCU grace period has elapsed since the earlier call from
++ * which *rgosp was obtained, return @true, otherwise return @false.
++ * If @false is returned, it is the caller's responsibility to invoke this
++ * function later on until it does return @true.  Alternatively, the caller
++ * can explicitly wait for a grace period, for example, by passing @rgosp
++ * to cond_synchronize_rcu() or by directly invoking synchronize_rcu().
++ *
++ * Yes, this function does not take counter wrap into account.
++ * But counter wrap is harmless.  If the counter wraps, we have waited
++ * for more than a billion grace periods (and way more on a 64-bit
++ * system!).  Those needing to keep rcu_gp_oldstate values for very
++ * long time periods (many hours even on 32-bit systems) should check
++ * them occasionally and either refresh them or set a flag indicating
++ * that the grace period has completed.  Alternatively, they can use
++ * get_completed_synchronize_rcu_full() to get a guaranteed-completed
++ * grace-period state.
++ *
++ * This function provides the same memory-ordering guarantees that would
++ * be provided by a synchronize_rcu() that was invoked at the call to
++ * the function that provided @rgosp, and that returned at the end of this
++ * function.  And this guarantee requires that the root rcu_node structure's
++ * ->gp_seq field be checked instead of that of the rcu_state structure.
++ * The problem is that the just-ending grace-period's callbacks can be
++ * invoked between the time that the root rcu_node structure's ->gp_seq
++ * field is updated and the time that the rcu_state structure's ->gp_seq
++ * field is updated.  Therefore, if a single synchronize_rcu() is to
++ * cause a subsequent poll_state_synchronize_rcu_full() to return @true,
++ * then the root rcu_node structure is the one that needs to be polled.
++ */
++bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	struct rcu_node *rnp = rcu_get_root();
++
++	smp_mb(); // Order against root rcu_node structure grace-period cleanup.
++	if (rgosp->rgos_norm == RCU_GET_STATE_COMPLETED ||
++	    rcu_seq_done_exact(&rnp->gp_seq, rgosp->rgos_norm) ||
++	    rgosp->rgos_exp == RCU_GET_STATE_COMPLETED ||
++	    rcu_seq_done_exact(&rcu_state.expedited_sequence, rgosp->rgos_exp) ||
++	    rgosp->rgos_polled == RCU_GET_STATE_COMPLETED ||
++	    rcu_seq_done_exact(&rcu_state.gp_seq_polled, rgosp->rgos_polled)) {
++		smp_mb(); /* Ensure GP ends before subsequent accesses. */
++		return true;
++	}
++	return false;
++}
++EXPORT_SYMBOL_GPL(poll_state_synchronize_rcu_full);
++
+ /**
+  * cond_synchronize_rcu - Conditionally wait for an RCU grace period
+  *
+-- 
+cgit 
+
+
+From 3fdefca9b42c8bebe3beea5c1a067c9718ca0fc7 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 28 Jul 2022 19:58:13 -0700
+Subject: rcu: Add full-sized polling for get_state()
+
+The get_state_synchronize_rcu() API compresses the combined expedited and
+normal grace-period states into a single unsigned long, which conserves
+storage, but can miss grace periods in certain cases involving overlapping
+normal and expedited grace periods.  Missing the occasional grace period
+is usually not a problem, but there are use cases that care about each
+and every grace period.
+
+This commit therefore adds the next member of the full-state RCU
+grace-period polling API, namely the get_state_synchronize_rcu_full()
+function.  This uses up to three times the storage (rcu_gp_oldstate
+structure instead of unsigned long), but is guaranteed not to miss
+grace periods.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcutiny.h |  6 ++++++
+ include/linux/rcutree.h |  1 +
+ kernel/rcu/rcutorture.c | 10 ++++++----
+ kernel/rcu/tree.c       | 33 +++++++++++++++++++++++++++++++++
+ 4 files changed, 46 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/rcutiny.h b/include/linux/rcutiny.h
+index 1fbff8600d92d..6e299955c4e9a 100644
+--- a/include/linux/rcutiny.h
++++ b/include/linux/rcutiny.h
+@@ -19,6 +19,12 @@ struct rcu_gp_oldstate {
+ };
+ 
+ unsigned long get_state_synchronize_rcu(void);
++
++static inline void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	rgosp->rgos_norm = get_state_synchronize_rcu();
++}
++
+ unsigned long start_poll_synchronize_rcu(void);
+ bool poll_state_synchronize_rcu(unsigned long oldstate);
+ 
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 4ccbc3aa9dc20..7b769f1b417aa 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -50,6 +50,7 @@ struct rcu_gp_oldstate {
+ unsigned long start_poll_synchronize_rcu_expedited(void);
+ void cond_synchronize_rcu_expedited(unsigned long oldstate);
+ unsigned long get_state_synchronize_rcu(void);
++void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ unsigned long start_poll_synchronize_rcu(void);
+ bool poll_state_synchronize_rcu(unsigned long oldstate);
+ bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index b31e6ed64d1b9..4f196ebce7f29 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -335,6 +335,7 @@ struct rcu_torture_ops {
+ 	bool (*poll_gp_state_exp)(unsigned long oldstate);
+ 	void (*cond_sync_exp)(unsigned long oldstate);
+ 	unsigned long (*get_gp_state)(void);
++	void (*get_gp_state_full)(struct rcu_gp_oldstate *rgosp);
+ 	unsigned long (*get_gp_completed)(void);
+ 	void (*get_gp_completed_full)(struct rcu_gp_oldstate *rgosp);
+ 	unsigned long (*start_gp_poll)(void);
+@@ -504,6 +505,7 @@ static struct rcu_torture_ops rcu_ops = {
+ 	.sync			= synchronize_rcu,
+ 	.exp_sync		= synchronize_rcu_expedited,
+ 	.get_gp_state		= get_state_synchronize_rcu,
++	.get_gp_state_full	= get_state_synchronize_rcu_full,
+ 	.get_gp_completed	= get_completed_synchronize_rcu,
+ 	.get_gp_completed_full	= get_completed_synchronize_rcu_full,
+ 	.start_gp_poll		= start_poll_synchronize_rcu,
+@@ -1293,12 +1295,12 @@ rcu_torture_writer(void *arg)
+ 				break;
+ 			case RTWS_EXP_SYNC:
+ 				rcu_torture_writer_state = RTWS_EXP_SYNC;
+-				if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
+-					cookie = cur_ops->get_gp_state();
++				if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
++					cur_ops->get_gp_state_full(&cookie_full);
+ 				cur_ops->exp_sync();
+ 				cur_ops->exp_sync();
+-				if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
+-					WARN_ON_ONCE(!cur_ops->poll_gp_state(cookie));
++				if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
++					WARN_ON_ONCE(!cur_ops->poll_gp_state_full(&cookie_full));
+ 				rcu_torture_pipe_update(old_rp);
+ 				break;
+ 			case RTWS_COND_GET:
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index d47c9b6d81066..3fa79ee78b5b4 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -1755,6 +1755,8 @@ static noinline void rcu_gp_cleanup(void)
+ 			dump_blkd_tasks(rnp, 10);
+ 		WARN_ON_ONCE(rnp->qsmask);
+ 		WRITE_ONCE(rnp->gp_seq, new_gp_seq);
++		if (!rnp->parent)
++			smp_mb(); // Order against failing poll_state_synchronize_rcu_full().
+ 		rdp = this_cpu_ptr(&rcu_data);
+ 		if (rnp == rdp->mynode)
+ 			needgp = __note_gp_changes(rnp, rdp) || needgp;
+@@ -3556,6 +3558,37 @@ unsigned long get_state_synchronize_rcu(void)
+ }
+ EXPORT_SYMBOL_GPL(get_state_synchronize_rcu);
+ 
++/**
++ * get_state_synchronize_rcu_full - Snapshot RCU state, both normal and expedited
++ * @rgosp: location to place combined normal/expedited grace-period state
++ *
++ * Places the normal and expedited grace-period states in @rgosp.  This
++ * state value can be passed to a later call to cond_synchronize_rcu_full()
++ * or poll_state_synchronize_rcu_full() to determine whether or not a
++ * grace period (whether normal or expedited) has elapsed in the meantime.
++ * The rcu_gp_oldstate structure takes up twice the memory of an unsigned
++ * long, but is guaranteed to see all grace periods.  In contrast, the
++ * combined state occupies less memory, but can sometimes fail to take
++ * grace periods into account.
++ *
++ * This does not guarantee that the needed grace period will actually
++ * start.
++ */
++void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	struct rcu_node *rnp = rcu_get_root();
++
++	/*
++	 * Any prior manipulation of RCU-protected data must happen
++	 * before the loads from ->gp_seq and ->expedited_sequence.
++	 */
++	smp_mb();  /* ^^^ */
++	rgosp->rgos_norm = rcu_seq_snap(&rnp->gp_seq);
++	rgosp->rgos_exp = rcu_seq_snap(&rcu_state.expedited_sequence);
++	rgosp->rgos_polled = rcu_seq_snap(&rcu_state.gp_seq_polled);
++}
++EXPORT_SYMBOL_GPL(get_state_synchronize_rcu_full);
++
+ /**
+  * start_poll_synchronize_rcu - Snapshot and start RCU grace period
+  *
+-- 
+cgit 
+
+
+From ccb42229fb34bc3e93f7aa081da3e78eac68cd27 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Fri, 29 Jul 2022 22:05:17 -0700
+Subject: rcutorture: Abstract synchronous and polled API testing
+
+This commit abstracts a do_rtws_sync() function that does synchronous
+grace-period testing, but also testing the polled API 25% of the time
+each for the normal and full-state variants of the polled API.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 48 ++++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 36 insertions(+), 12 deletions(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 4f196ebce7f29..c3c94e343eb28 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -1207,6 +1207,40 @@ static void rcu_torture_write_types(void)
+ 	}
+ }
+ 
++/*
++ * Do the specified rcu_torture_writer() synchronous grace period,
++ * while also testing out the polled APIs.  Note well that the single-CPU
++ * grace-period optimizations must be accounted for.
++ */
++static void do_rtws_sync(struct torture_random_state *trsp, void (*sync)(void))
++{
++	unsigned long cookie;
++	struct rcu_gp_oldstate cookie_full;
++	bool dopoll;
++	bool dopoll_full;
++	unsigned long r = torture_random(trsp);
++
++	dopoll = cur_ops->get_gp_state && cur_ops->poll_gp_state && !(r & 0x300);
++	dopoll_full = cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full && !(r & 0xc00);
++	if (dopoll || dopoll_full)
++		cpus_read_lock();
++	if (dopoll)
++		cookie = cur_ops->get_gp_state();
++	if (dopoll_full)
++		cur_ops->get_gp_state_full(&cookie_full);
++	if (dopoll || (!IS_ENABLED(CONFIG_TINY_RCU) && dopoll_full && num_online_cpus() <= 1))
++		sync();
++	sync();
++	WARN_ONCE(dopoll && !cur_ops->poll_gp_state(cookie),
++		  "%s: Cookie check 3 failed %pS() online %*pbl.",
++		  __func__, sync, cpumask_pr_args(cpu_online_mask));
++	WARN_ONCE(dopoll_full && !cur_ops->poll_gp_state_full(&cookie_full),
++		  "%s: Cookie check 4 failed %pS() online %*pbl",
++		  __func__, sync, cpumask_pr_args(cpu_online_mask));
++	if (dopoll || dopoll_full)
++		cpus_read_unlock();
++}
++
+ /*
+  * RCU torture writer kthread.  Repeatedly substitutes a new structure
+  * for that pointed to by rcu_torture_current, freeing the old structure
+@@ -1295,12 +1329,7 @@ rcu_torture_writer(void *arg)
+ 				break;
+ 			case RTWS_EXP_SYNC:
+ 				rcu_torture_writer_state = RTWS_EXP_SYNC;
+-				if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
+-					cur_ops->get_gp_state_full(&cookie_full);
+-				cur_ops->exp_sync();
+-				cur_ops->exp_sync();
+-				if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
+-					WARN_ON_ONCE(!cur_ops->poll_gp_state_full(&cookie_full));
++				do_rtws_sync(&rand, cur_ops->exp_sync);
+ 				rcu_torture_pipe_update(old_rp);
+ 				break;
+ 			case RTWS_COND_GET:
+@@ -1339,12 +1368,7 @@ rcu_torture_writer(void *arg)
+ 				break;
+ 			case RTWS_SYNC:
+ 				rcu_torture_writer_state = RTWS_SYNC;
+-				if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
+-					cookie = cur_ops->get_gp_state();
+-				cur_ops->sync();
+-				cur_ops->sync();
+-				if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
+-					WARN_ON_ONCE(!cur_ops->poll_gp_state(cookie));
++				do_rtws_sync(&rand, cur_ops->sync);
+ 				rcu_torture_pipe_update(old_rp);
+ 				break;
+ 			default:
+-- 
+cgit 
+
+
+From ed7d2f1abee48a90fae5fdf5c60d71803a5a1d10 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Mon, 1 Aug 2022 16:57:17 -0700
+Subject: rcutorture: Allow per-RCU-flavor polled double-GP check
+
+Only vanilla RCU needs a double grace period for its compressed
+polled grace-period old-state cookie.  This commit therefore adds an
+rcu_torture_ops per-flavor function ->poll_need_2gp to allow this check
+to be adapted to the RCU flavor under test.  A NULL pointer for this
+function says that doubled grace periods are never needed.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index c3c94e343eb28..f2564c7633a8a 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -341,6 +341,7 @@ struct rcu_torture_ops {
+ 	unsigned long (*start_gp_poll)(void);
+ 	bool (*poll_gp_state)(unsigned long oldstate);
+ 	bool (*poll_gp_state_full)(struct rcu_gp_oldstate *rgosp);
++	bool (*poll_need_2gp)(bool poll, bool poll_full);
+ 	void (*cond_sync)(unsigned long oldstate);
+ 	call_rcu_func_t call;
+ 	void (*cb_barrier)(void);
+@@ -492,6 +493,11 @@ static void rcu_sync_torture_init(void)
+ 	INIT_LIST_HEAD(&rcu_torture_removed);
+ }
+ 
++static bool rcu_poll_need_2gp(bool poll, bool poll_full)
++{
++	return poll || (!IS_ENABLED(CONFIG_TINY_RCU) && poll_full && num_online_cpus() <= 1);
++}
++
+ static struct rcu_torture_ops rcu_ops = {
+ 	.ttype			= RCU_FLAVOR,
+ 	.init			= rcu_sync_torture_init,
+@@ -511,6 +517,7 @@ static struct rcu_torture_ops rcu_ops = {
+ 	.start_gp_poll		= start_poll_synchronize_rcu,
+ 	.poll_gp_state		= poll_state_synchronize_rcu,
+ 	.poll_gp_state_full	= poll_state_synchronize_rcu_full,
++	.poll_need_2gp		= rcu_poll_need_2gp,
+ 	.cond_sync		= cond_synchronize_rcu,
+ 	.get_gp_state_exp	= get_state_synchronize_rcu,
+ 	.start_gp_poll_exp	= start_poll_synchronize_rcu_expedited,
+@@ -1228,7 +1235,7 @@ static void do_rtws_sync(struct torture_random_state *trsp, void (*sync)(void))
+ 		cookie = cur_ops->get_gp_state();
+ 	if (dopoll_full)
+ 		cur_ops->get_gp_state_full(&cookie_full);
+-	if (dopoll || (!IS_ENABLED(CONFIG_TINY_RCU) && dopoll_full && num_online_cpus() <= 1))
++	if (cur_ops->poll_need_2gp && cur_ops->poll_need_2gp(dopoll, dopoll_full))
+ 		sync();
+ 	sync();
+ 	WARN_ONCE(dopoll && !cur_ops->poll_gp_state(cookie),
+-- 
+cgit 
+
+
+From d594231aa50a0f113cfb4749da5162e6a0c3fa73 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Mon, 1 Aug 2022 17:33:24 -0700
+Subject: rcutorture: Verify RCU reader prevents full polling from completing
+
+This commit adds a test to rcu_torture_writer() that verifies that a
+->get_gp_state_full() and ->poll_gp_state_full() polled grace-period
+sequence does not claim that a grace period elapsed within the confines
+of the corresponding read-side critical section.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index f2564c7633a8a..050f4d0a987ff 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -1309,6 +1309,8 @@ rcu_torture_writer(void *arg)
+ 			atomic_inc(&rcu_torture_wcount[i]);
+ 			WRITE_ONCE(old_rp->rtort_pipe_count,
+ 				   old_rp->rtort_pipe_count + 1);
++
++			// Make sure readers block polled grace periods.
+ 			if (cur_ops->get_gp_state && cur_ops->poll_gp_state) {
+ 				idx = cur_ops->readlock();
+ 				cookie = cur_ops->get_gp_state();
+@@ -1325,9 +1327,20 @@ rcu_torture_writer(void *arg)
+ 				}
+ 				cur_ops->readunlock(idx);
+ 			}
+-			if (cur_ops->get_gp_completed_full && cur_ops->poll_gp_state_full) {
+-				cur_ops->get_gp_completed_full(&cookie_full);
+-				WARN_ON_ONCE(!cur_ops->poll_gp_state_full(&cookie_full));
++			if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full) {
++				idx = cur_ops->readlock();
++				cur_ops->get_gp_state_full(&cookie_full);
++				WARN_ONCE(cur_ops->poll_gp_state_full(&cookie_full),
++					  "%s: Cookie check 5 failed %s(%d) online %*pbl\n",
++					  __func__,
++					  rcu_torture_writer_state_getname(),
++					  rcu_torture_writer_state,
++					  cpumask_pr_args(cpu_online_mask));
++				if (cur_ops->get_gp_completed_full) {
++					cur_ops->get_gp_completed_full(&cookie_full);
++					WARN_ON_ONCE(!cur_ops->poll_gp_state_full(&cookie_full));
++				}
++				cur_ops->readunlock(idx);
+ 			}
+ 			switch (synctype[torture_random(&rand) % nsynctypes]) {
+ 			case RTWS_DEF_FREE:
+-- 
+cgit 
+
+
+From 37d6ade31cf83305495a2875ab5d283e17322032 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 2 Aug 2022 10:22:12 -0700
+Subject: rcutorture: Remove redundant RTWS_DEF_FREE check
+
+This check does nothing because the state at this point in the code
+because the rcu_torture_writer_state value is guaranteed to instead
+be RTWS_REPLACE.  This commit therefore removes this check.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 050f4d0a987ff..236bd6b57277f 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -1314,8 +1314,7 @@ rcu_torture_writer(void *arg)
+ 			if (cur_ops->get_gp_state && cur_ops->poll_gp_state) {
+ 				idx = cur_ops->readlock();
+ 				cookie = cur_ops->get_gp_state();
+-				WARN_ONCE(rcu_torture_writer_state != RTWS_DEF_FREE &&
+-					  cur_ops->poll_gp_state(cookie),
++				WARN_ONCE(cur_ops->poll_gp_state(cookie),
+ 					  "%s: Cookie check 1 failed %s(%d) %lu->%lu\n",
+ 					  __func__,
+ 					  rcu_torture_writer_state_getname(),
+-- 
+cgit 
+
+
+From f4754ad2922e5a2b08c8aecf33d1ec03d7219fb4 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 3 Aug 2022 16:40:48 -0700
+Subject: rcutorture: Verify long-running reader prevents full polling from
+ completing
+
+This commit adds full-state polling checks to accompany the old-style
+polling checks in the rcu_torture_one_read() function.  If a polling
+cycle within an RCU reader completes, a WARN_ONCE() is triggered.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 236bd6b57277f..3d85420108477 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -1770,6 +1770,7 @@ rcutorture_loop_extend(int *readstate, struct torture_random_state *trsp,
+ static bool rcu_torture_one_read(struct torture_random_state *trsp, long myid)
+ {
+ 	unsigned long cookie;
++	struct rcu_gp_oldstate cookie_full;
+ 	int i;
+ 	unsigned long started;
+ 	unsigned long completed;
+@@ -1787,6 +1788,8 @@ static bool rcu_torture_one_read(struct torture_random_state *trsp, long myid)
+ 	rcutorture_one_extend(&readstate, newstate, trsp, rtrsp++);
+ 	if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
+ 		cookie = cur_ops->get_gp_state();
++	if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
++		cur_ops->get_gp_state_full(&cookie_full);
+ 	started = cur_ops->get_gp_seq();
+ 	ts = rcu_trace_clock_local();
+ 	p = rcu_dereference_check(rcu_torture_current,
+@@ -1827,6 +1830,13 @@ static bool rcu_torture_one_read(struct torture_random_state *trsp, long myid)
+ 			  rcu_torture_writer_state_getname(),
+ 			  rcu_torture_writer_state,
+ 			  cookie, cur_ops->get_gp_state());
++	if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
++		WARN_ONCE(cur_ops->poll_gp_state_full(&cookie_full),
++			  "%s: Cookie check 6 failed %s(%d) online %*pbl\n",
++			  __func__,
++			  rcu_torture_writer_state_getname(),
++			  rcu_torture_writer_state,
++			  cpumask_pr_args(cpu_online_mask));
+ 	rcutorture_one_extend(&readstate, 0, trsp, rtrsp);
+ 	WARN_ON_ONCE(readstate);
+ 	// This next splat is expected behavior if leakpointer, especially
+-- 
+cgit 
+
+
+From 76ea364161e72b1878126edf8d507d2a62fb47b0 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 2 Aug 2022 17:04:54 -0700
+Subject: rcu: Add full-sized polling for start_poll()
+
+The start_poll_synchronize_rcu() API compresses the combined expedited and
+normal grace-period states into a single unsigned long, which conserves
+storage, but can miss grace periods in certain cases involving overlapping
+normal and expedited grace periods.  Missing the occasional grace period
+is usually not a problem, but there are use cases that care about each
+and every grace period.
+
+This commit therefore adds the next member of the full-state RCU
+grace-period polling API, namely the start_poll_synchronize_rcu_full()
+function.  This uses up to three times the storage (rcu_gp_oldstate
+structure instead of unsigned long), but is guaranteed not to miss
+grace periods.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcutiny.h |  6 +++++
+ include/linux/rcutree.h |  1 +
+ kernel/rcu/rcutorture.c | 49 +++++++++++++++++++++++++++++++++--------
+ kernel/rcu/tree.c       | 58 ++++++++++++++++++++++++++++++++++++++-----------
+ 4 files changed, 92 insertions(+), 22 deletions(-)
+
+diff --git a/include/linux/rcutiny.h b/include/linux/rcutiny.h
+index 6e299955c4e9a..6bc30e46a819c 100644
+--- a/include/linux/rcutiny.h
++++ b/include/linux/rcutiny.h
+@@ -26,6 +26,12 @@ static inline void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
+ }
+ 
+ unsigned long start_poll_synchronize_rcu(void);
++
++static inline void start_poll_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	rgosp->rgos_norm = start_poll_synchronize_rcu();
++}
++
+ bool poll_state_synchronize_rcu(unsigned long oldstate);
+ 
+ static inline bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 7b769f1b417aa..8f2e0f0b26f63 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -52,6 +52,7 @@ void cond_synchronize_rcu_expedited(unsigned long oldstate);
+ unsigned long get_state_synchronize_rcu(void);
+ void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ unsigned long start_poll_synchronize_rcu(void);
++void start_poll_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ bool poll_state_synchronize_rcu(unsigned long oldstate);
+ bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ void cond_synchronize_rcu(unsigned long oldstate);
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 3d85420108477..68387ccc7ddfc 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -88,6 +88,7 @@ torture_param(bool, gp_exp, false, "Use expedited GP wait primitives");
+ torture_param(bool, gp_normal, false, "Use normal (non-expedited) GP wait primitives");
+ torture_param(bool, gp_poll, false, "Use polling GP wait primitives");
+ torture_param(bool, gp_poll_exp, false, "Use polling expedited GP wait primitives");
++torture_param(bool, gp_poll_full, false, "Use polling full-state GP wait primitives");
+ torture_param(bool, gp_sync, false, "Use synchronous GP wait primitives");
+ torture_param(int, irqreader, 1, "Allow RCU readers from irq handlers");
+ torture_param(int, leakpointer, 0, "Leak pointer dereferences from readers");
+@@ -198,12 +199,14 @@ static int rcu_torture_writer_state;
+ #define RTWS_COND_SYNC		7
+ #define RTWS_COND_SYNC_EXP	8
+ #define RTWS_POLL_GET		9
+-#define RTWS_POLL_GET_EXP	10
+-#define RTWS_POLL_WAIT		11
+-#define RTWS_POLL_WAIT_EXP	12
+-#define RTWS_SYNC		13
+-#define RTWS_STUTTER		14
+-#define RTWS_STOPPING		15
++#define RTWS_POLL_GET_FULL	10
++#define RTWS_POLL_GET_EXP	11
++#define RTWS_POLL_WAIT		12
++#define RTWS_POLL_WAIT_FULL	13
++#define RTWS_POLL_WAIT_EXP	14
++#define RTWS_SYNC		15
++#define RTWS_STUTTER		16
++#define RTWS_STOPPING		17
+ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_FIXED_DELAY",
+ 	"RTWS_DELAY",
+@@ -215,8 +218,10 @@ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_COND_SYNC",
+ 	"RTWS_COND_SYNC_EXP",
+ 	"RTWS_POLL_GET",
++	"RTWS_POLL_GET_FULL",
+ 	"RTWS_POLL_GET_EXP",
+ 	"RTWS_POLL_WAIT",
++	"RTWS_POLL_WAIT_FULL",
+ 	"RTWS_POLL_WAIT_EXP",
+ 	"RTWS_SYNC",
+ 	"RTWS_STUTTER",
+@@ -339,6 +344,7 @@ struct rcu_torture_ops {
+ 	unsigned long (*get_gp_completed)(void);
+ 	void (*get_gp_completed_full)(struct rcu_gp_oldstate *rgosp);
+ 	unsigned long (*start_gp_poll)(void);
++	void (*start_gp_poll_full)(struct rcu_gp_oldstate *rgosp);
+ 	bool (*poll_gp_state)(unsigned long oldstate);
+ 	bool (*poll_gp_state_full)(struct rcu_gp_oldstate *rgosp);
+ 	bool (*poll_need_2gp)(bool poll, bool poll_full);
+@@ -515,6 +521,7 @@ static struct rcu_torture_ops rcu_ops = {
+ 	.get_gp_completed	= get_completed_synchronize_rcu,
+ 	.get_gp_completed_full	= get_completed_synchronize_rcu_full,
+ 	.start_gp_poll		= start_poll_synchronize_rcu,
++	.start_gp_poll_full	= start_poll_synchronize_rcu_full,
+ 	.poll_gp_state		= poll_state_synchronize_rcu,
+ 	.poll_gp_state_full	= poll_state_synchronize_rcu_full,
+ 	.poll_need_2gp		= rcu_poll_need_2gp,
+@@ -1163,13 +1170,13 @@ static void rcu_torture_write_types(void)
+ {
+ 	bool gp_cond1 = gp_cond, gp_cond_exp1 = gp_cond_exp, gp_exp1 = gp_exp;
+ 	bool gp_poll_exp1 = gp_poll_exp, gp_normal1 = gp_normal, gp_poll1 = gp_poll;
+-	bool gp_sync1 = gp_sync;
++	bool gp_poll_full1 = gp_poll_full, gp_sync1 = gp_sync;
+ 
+ 	/* Initialize synctype[] array.  If none set, take default. */
+ 	if (!gp_cond1 && !gp_cond_exp1 && !gp_exp1 && !gp_poll_exp &&
+-	    !gp_normal1 && !gp_poll1 && !gp_sync1)
++	    !gp_normal1 && !gp_poll1 && !gp_poll_full1 && !gp_sync1)
+ 		gp_cond1 = gp_cond_exp1 = gp_exp1 = gp_poll_exp1 =
+-			   gp_normal1 = gp_poll1 = gp_sync1 = true;
++			   gp_normal1 = gp_poll1 = gp_poll_full1 = gp_sync1 = true;
+ 	if (gp_cond1 && cur_ops->get_gp_state && cur_ops->cond_sync) {
+ 		synctype[nsynctypes++] = RTWS_COND_GET;
+ 		pr_info("%s: Testing conditional GPs.\n", __func__);
+@@ -1200,6 +1207,12 @@ static void rcu_torture_write_types(void)
+ 	} else if (gp_poll && (!cur_ops->start_gp_poll || !cur_ops->poll_gp_state)) {
+ 		pr_alert("%s: gp_poll without primitives.\n", __func__);
+ 	}
++	if (gp_poll_full1 && cur_ops->start_gp_poll_full && cur_ops->poll_gp_state_full) {
++		synctype[nsynctypes++] = RTWS_POLL_GET_FULL;
++		pr_info("%s: Testing polling full-state GPs.\n", __func__);
++	} else if (gp_poll_full && (!cur_ops->start_gp_poll_full || !cur_ops->poll_gp_state_full)) {
++		pr_alert("%s: gp_poll_full without primitives.\n", __func__);
++	}
+ 	if (gp_poll_exp1 && cur_ops->start_gp_poll_exp && cur_ops->poll_gp_state_exp) {
+ 		synctype[nsynctypes++] = RTWS_POLL_GET_EXP;
+ 		pr_info("%s: Testing polling expedited GPs.\n", __func__);
+@@ -1262,6 +1275,7 @@ rcu_torture_writer(void *arg)
+ 	struct rcu_gp_oldstate cookie_full;
+ 	int expediting = 0;
+ 	unsigned long gp_snap;
++	struct rcu_gp_oldstate gp_snap_full;
+ 	int i;
+ 	int idx;
+ 	int oldnice = task_nice(current);
+@@ -1376,6 +1390,15 @@ rcu_torture_writer(void *arg)
+ 								  &rand);
+ 				rcu_torture_pipe_update(old_rp);
+ 				break;
++			case RTWS_POLL_GET_FULL:
++				rcu_torture_writer_state = RTWS_POLL_GET_FULL;
++				cur_ops->start_gp_poll_full(&gp_snap_full);
++				rcu_torture_writer_state = RTWS_POLL_WAIT_FULL;
++				while (!cur_ops->poll_gp_state_full(&gp_snap_full))
++					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
++								  &rand);
++				rcu_torture_pipe_update(old_rp);
++				break;
+ 			case RTWS_POLL_GET_EXP:
+ 				rcu_torture_writer_state = RTWS_POLL_GET_EXP;
+ 				gp_snap = cur_ops->start_gp_poll_exp();
+@@ -1454,6 +1477,7 @@ static int
+ rcu_torture_fakewriter(void *arg)
+ {
+ 	unsigned long gp_snap;
++	struct rcu_gp_oldstate gp_snap_full;
+ 	DEFINE_TORTURE_RANDOM(rand);
+ 
+ 	VERBOSE_TOROUT_STRING("rcu_torture_fakewriter task started");
+@@ -1499,6 +1523,13 @@ rcu_torture_fakewriter(void *arg)
+ 								  &rand);
+ 				}
+ 				break;
++			case RTWS_POLL_GET_FULL:
++				cur_ops->start_gp_poll_full(&gp_snap_full);
++				while (!cur_ops->poll_gp_state_full(&gp_snap_full)) {
++					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
++								  &rand);
++				}
++				break;
+ 			case RTWS_POLL_GET_EXP:
+ 				gp_snap = cur_ops->start_gp_poll_exp();
+ 				while (!cur_ops->poll_gp_state_exp(gp_snap)) {
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 3fa79ee78b5b4..89572385fd1aa 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3589,22 +3589,13 @@ void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
+ }
+ EXPORT_SYMBOL_GPL(get_state_synchronize_rcu_full);
+ 
+-/**
+- * start_poll_synchronize_rcu - Snapshot and start RCU grace period
+- *
+- * Returns a cookie that is used by a later call to cond_synchronize_rcu()
+- * or poll_state_synchronize_rcu() to determine whether or not a full
+- * grace period has elapsed in the meantime.  If the needed grace period
+- * is not already slated to start, notifies RCU core of the need for that
+- * grace period.
+- *
+- * Interrupts must be enabled for the case where it is necessary to awaken
+- * the grace-period kthread.
++/*
++ * Helper function for start_poll_synchronize_rcu() and
++ * start_poll_synchronize_rcu_full().
+  */
+-unsigned long start_poll_synchronize_rcu(void)
++static void start_poll_synchronize_rcu_common(void)
+ {
+ 	unsigned long flags;
+-	unsigned long gp_seq = get_state_synchronize_rcu();
+ 	bool needwake;
+ 	struct rcu_data *rdp;
+ 	struct rcu_node *rnp;
+@@ -3624,10 +3615,51 @@ unsigned long start_poll_synchronize_rcu(void)
+ 	raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
+ 	if (needwake)
+ 		rcu_gp_kthread_wake();
++}
++
++/**
++ * start_poll_synchronize_rcu - Snapshot and start RCU grace period
++ *
++ * Returns a cookie that is used by a later call to cond_synchronize_rcu()
++ * or poll_state_synchronize_rcu() to determine whether or not a full
++ * grace period has elapsed in the meantime.  If the needed grace period
++ * is not already slated to start, notifies RCU core of the need for that
++ * grace period.
++ *
++ * Interrupts must be enabled for the case where it is necessary to awaken
++ * the grace-period kthread.
++ */
++unsigned long start_poll_synchronize_rcu(void)
++{
++	unsigned long gp_seq = get_state_synchronize_rcu();
++
++	start_poll_synchronize_rcu_common();
+ 	return gp_seq;
+ }
+ EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu);
+ 
++/**
++ * start_poll_synchronize_rcu_full - Take a full snapshot and start RCU grace period
++ * @rgosp: value from get_state_synchronize_rcu_full() or start_poll_synchronize_rcu_full()
++ *
++ * Places the normal and expedited grace-period states in *@rgos.  This
++ * state value can be passed to a later call to cond_synchronize_rcu_full()
++ * or poll_state_synchronize_rcu_full() to determine whether or not a
++ * grace period (whether normal or expedited) has elapsed in the meantime.
++ * If the needed grace period is not already slated to start, notifies
++ * RCU core of the need for that grace period.
++ *
++ * Interrupts must be enabled for the case where it is necessary to awaken
++ * the grace-period kthread.
++ */
++void start_poll_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	get_state_synchronize_rcu_full(rgosp);
++
++	start_poll_synchronize_rcu_common();
++}
++EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu_full);
++
+ /**
+  * poll_state_synchronize_rcu - Has the specified RCU grace period completed?
+  *
+-- 
+cgit 
+
+
+From 6c502b14ba66da0670a59e20354469fa56eab26c Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 3 Aug 2022 12:38:51 -0700
+Subject: rcu: Add full-sized polling for start_poll_expedited()
+
+The start_poll_synchronize_rcu_expedited() API compresses the combined
+expedited and normal grace-period states into a single unsigned long,
+which conserves storage, but can miss grace periods in certain cases
+involving overlapping normal and expedited grace periods.  Missing the
+occasional grace period is usually not a problem, but there are use
+cases that care about each and every grace period.
+
+This commit therefore adds yet another member of the
+full-state RCU grace-period polling API, which is the
+start_poll_synchronize_rcu_expedited_full() function.  This uses up to
+three times the storage (rcu_gp_oldstate structure instead of unsigned
+long), but is guaranteed not to miss grace periods.
+
+[ paulmck: Apply feedback from kernel test robot and Julia Lawall. ]
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcutiny.h |  5 +++++
+ include/linux/rcutree.h |  1 +
+ kernel/rcu/rcutorture.c | 51 +++++++++++++++++++++++++++++++++++++++----------
+ kernel/rcu/tree_exp.h   | 18 +++++++++++++++++
+ 4 files changed, 65 insertions(+), 10 deletions(-)
+
+diff --git a/include/linux/rcutiny.h b/include/linux/rcutiny.h
+index 6bc30e46a819c..653e35777a99b 100644
+--- a/include/linux/rcutiny.h
++++ b/include/linux/rcutiny.h
+@@ -49,6 +49,11 @@ static inline unsigned long start_poll_synchronize_rcu_expedited(void)
+ 	return start_poll_synchronize_rcu();
+ }
+ 
++static inline void start_poll_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp)
++{
++	rgosp->rgos_norm = start_poll_synchronize_rcu_expedited();
++}
++
+ static inline void cond_synchronize_rcu_expedited(unsigned long oldstate)
+ {
+ 	cond_synchronize_rcu(oldstate);
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 8f2e0f0b26f63..7151fd8617365 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -48,6 +48,7 @@ struct rcu_gp_oldstate {
+ };
+ 
+ unsigned long start_poll_synchronize_rcu_expedited(void);
++void start_poll_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp);
+ void cond_synchronize_rcu_expedited(unsigned long oldstate);
+ unsigned long get_state_synchronize_rcu(void);
+ void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 68387ccc7ddfc..f9ca33555debf 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -89,6 +89,7 @@ torture_param(bool, gp_normal, false, "Use normal (non-expedited) GP wait primit
+ torture_param(bool, gp_poll, false, "Use polling GP wait primitives");
+ torture_param(bool, gp_poll_exp, false, "Use polling expedited GP wait primitives");
+ torture_param(bool, gp_poll_full, false, "Use polling full-state GP wait primitives");
++torture_param(bool, gp_poll_exp_full, false, "Use polling full-state expedited GP wait primitives");
+ torture_param(bool, gp_sync, false, "Use synchronous GP wait primitives");
+ torture_param(int, irqreader, 1, "Allow RCU readers from irq handlers");
+ torture_param(int, leakpointer, 0, "Leak pointer dereferences from readers");
+@@ -201,12 +202,14 @@ static int rcu_torture_writer_state;
+ #define RTWS_POLL_GET		9
+ #define RTWS_POLL_GET_FULL	10
+ #define RTWS_POLL_GET_EXP	11
+-#define RTWS_POLL_WAIT		12
+-#define RTWS_POLL_WAIT_FULL	13
+-#define RTWS_POLL_WAIT_EXP	14
+-#define RTWS_SYNC		15
+-#define RTWS_STUTTER		16
+-#define RTWS_STOPPING		17
++#define RTWS_POLL_GET_EXP_FULL	12
++#define RTWS_POLL_WAIT		13
++#define RTWS_POLL_WAIT_FULL	14
++#define RTWS_POLL_WAIT_EXP	15
++#define RTWS_POLL_WAIT_EXP_FULL	16
++#define RTWS_SYNC		17
++#define RTWS_STUTTER		18
++#define RTWS_STOPPING		19
+ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_FIXED_DELAY",
+ 	"RTWS_DELAY",
+@@ -220,9 +223,11 @@ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_POLL_GET",
+ 	"RTWS_POLL_GET_FULL",
+ 	"RTWS_POLL_GET_EXP",
++	"RTWS_POLL_GET_EXP_FULL",
+ 	"RTWS_POLL_WAIT",
+ 	"RTWS_POLL_WAIT_FULL",
+ 	"RTWS_POLL_WAIT_EXP",
++	"RTWS_POLL_WAIT_EXP_FULL",
+ 	"RTWS_SYNC",
+ 	"RTWS_STUTTER",
+ 	"RTWS_STOPPING",
+@@ -337,6 +342,7 @@ struct rcu_torture_ops {
+ 	void (*exp_sync)(void);
+ 	unsigned long (*get_gp_state_exp)(void);
+ 	unsigned long (*start_gp_poll_exp)(void);
++	void (*start_gp_poll_exp_full)(struct rcu_gp_oldstate *rgosp);
+ 	bool (*poll_gp_state_exp)(unsigned long oldstate);
+ 	void (*cond_sync_exp)(unsigned long oldstate);
+ 	unsigned long (*get_gp_state)(void);
+@@ -528,6 +534,7 @@ static struct rcu_torture_ops rcu_ops = {
+ 	.cond_sync		= cond_synchronize_rcu,
+ 	.get_gp_state_exp	= get_state_synchronize_rcu,
+ 	.start_gp_poll_exp	= start_poll_synchronize_rcu_expedited,
++	.start_gp_poll_exp_full	= start_poll_synchronize_rcu_expedited_full,
+ 	.poll_gp_state_exp	= poll_state_synchronize_rcu,
+ 	.cond_sync_exp		= cond_synchronize_rcu_expedited,
+ 	.call			= call_rcu,
+@@ -1169,13 +1176,14 @@ static int nsynctypes;
+ static void rcu_torture_write_types(void)
+ {
+ 	bool gp_cond1 = gp_cond, gp_cond_exp1 = gp_cond_exp, gp_exp1 = gp_exp;
+-	bool gp_poll_exp1 = gp_poll_exp, gp_normal1 = gp_normal, gp_poll1 = gp_poll;
+-	bool gp_poll_full1 = gp_poll_full, gp_sync1 = gp_sync;
++	bool gp_poll_exp1 = gp_poll_exp, gp_poll_exp_full1 = gp_poll_exp_full;
++	bool gp_normal1 = gp_normal, gp_poll1 = gp_poll, gp_poll_full1 = gp_poll_full;
++	bool gp_sync1 = gp_sync;
+ 
+ 	/* Initialize synctype[] array.  If none set, take default. */
+-	if (!gp_cond1 && !gp_cond_exp1 && !gp_exp1 && !gp_poll_exp &&
++	if (!gp_cond1 && !gp_cond_exp1 && !gp_exp1 && !gp_poll_exp && !gp_poll_exp_full1 &&
+ 	    !gp_normal1 && !gp_poll1 && !gp_poll_full1 && !gp_sync1)
+-		gp_cond1 = gp_cond_exp1 = gp_exp1 = gp_poll_exp1 =
++		gp_cond1 = gp_cond_exp1 = gp_exp1 = gp_poll_exp1 = gp_poll_exp_full1 =
+ 			   gp_normal1 = gp_poll1 = gp_poll_full1 = gp_sync1 = true;
+ 	if (gp_cond1 && cur_ops->get_gp_state && cur_ops->cond_sync) {
+ 		synctype[nsynctypes++] = RTWS_COND_GET;
+@@ -1219,6 +1227,13 @@ static void rcu_torture_write_types(void)
+ 	} else if (gp_poll_exp && (!cur_ops->start_gp_poll_exp || !cur_ops->poll_gp_state_exp)) {
+ 		pr_alert("%s: gp_poll_exp without primitives.\n", __func__);
+ 	}
++	if (gp_poll_exp_full1 && cur_ops->start_gp_poll_exp_full && cur_ops->poll_gp_state_full) {
++		synctype[nsynctypes++] = RTWS_POLL_GET_EXP_FULL;
++		pr_info("%s: Testing polling full-state expedited GPs.\n", __func__);
++	} else if (gp_poll_exp_full &&
++		   (!cur_ops->start_gp_poll_exp_full || !cur_ops->poll_gp_state_full)) {
++		pr_alert("%s: gp_poll_exp_full without primitives.\n", __func__);
++	}
+ 	if (gp_sync1 && cur_ops->sync) {
+ 		synctype[nsynctypes++] = RTWS_SYNC;
+ 		pr_info("%s: Testing normal GPs.\n", __func__);
+@@ -1408,6 +1423,15 @@ rcu_torture_writer(void *arg)
+ 								  &rand);
+ 				rcu_torture_pipe_update(old_rp);
+ 				break;
++			case RTWS_POLL_GET_EXP_FULL:
++				rcu_torture_writer_state = RTWS_POLL_GET_EXP_FULL;
++				cur_ops->start_gp_poll_exp_full(&gp_snap_full);
++				rcu_torture_writer_state = RTWS_POLL_WAIT_EXP_FULL;
++				while (!cur_ops->poll_gp_state_full(&gp_snap_full))
++					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
++								  &rand);
++				rcu_torture_pipe_update(old_rp);
++				break;
+ 			case RTWS_SYNC:
+ 				rcu_torture_writer_state = RTWS_SYNC;
+ 				do_rtws_sync(&rand, cur_ops->sync);
+@@ -1537,6 +1561,13 @@ rcu_torture_fakewriter(void *arg)
+ 								  &rand);
+ 				}
+ 				break;
++			case RTWS_POLL_GET_EXP_FULL:
++				cur_ops->start_gp_poll_exp_full(&gp_snap_full);
++				while (!cur_ops->poll_gp_state_full(&gp_snap_full)) {
++					torture_hrtimeout_jiffies(torture_random(&rand) % 16,
++								  &rand);
++				}
++				break;
+ 			case RTWS_SYNC:
+ 				cur_ops->sync();
+ 				break;
+diff --git a/kernel/rcu/tree_exp.h b/kernel/rcu/tree_exp.h
+index be667583a5547..18128ee0d36c0 100644
+--- a/kernel/rcu/tree_exp.h
++++ b/kernel/rcu/tree_exp.h
+@@ -1027,6 +1027,24 @@ unsigned long start_poll_synchronize_rcu_expedited(void)
+ }
+ EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu_expedited);
+ 
++/**
++ * start_poll_synchronize_rcu_expedited_full - Take a full snapshot and start expedited grace period
++ * @rgosp: Place to put snapshot of grace-period state
++ *
++ * Places the normal and expedited grace-period states in rgosp.  This
++ * state value can be passed to a later call to cond_synchronize_rcu_full()
++ * or poll_state_synchronize_rcu_full() to determine whether or not a
++ * grace period (whether normal or expedited) has elapsed in the meantime.
++ * If the needed expedited grace period is not already slated to start,
++ * initiates that grace period.
++ */
++void start_poll_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp)
++{
++	get_state_synchronize_rcu_full(rgosp);
++	(void)start_poll_synchronize_rcu_expedited();
++}
++EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu_expedited_full);
++
+ /**
+  * cond_synchronize_rcu_expedited - Conditionally wait for an expedited RCU grace period
+  *
+-- 
+cgit 
+
+
+From f21e014345e0abf11fdc2e59fb6eb6d6aa6ae4eb Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 3 Aug 2022 16:57:47 -0700
+Subject: rcu: Remove blank line from poll_state_synchronize_rcu() docbook
+ header
+
+This commit removes the blank line preceding the oldstate parameter to
+the docbook header for the poll_state_synchronize_rcu() function and
+marks uses of this parameter later in that header.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 89572385fd1aa..0a24ef4d6b823 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3662,11 +3662,10 @@ EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu_full);
+ 
+ /**
+  * poll_state_synchronize_rcu - Has the specified RCU grace period completed?
+- *
+  * @oldstate: value from get_state_synchronize_rcu() or start_poll_synchronize_rcu()
+  *
+  * If a full RCU grace period has elapsed since the earlier call from
+- * which oldstate was obtained, return @true, otherwise return @false.
++ * which @oldstate was obtained, return @true, otherwise return @false.
+  * If @false is returned, it is the caller's responsibility to invoke this
+  * function later on until it does return @true.  Alternatively, the caller
+  * can explicitly wait for a grace period, for example, by passing @oldstate
+@@ -3675,7 +3674,7 @@ EXPORT_SYMBOL_GPL(start_poll_synchronize_rcu_full);
+  * Yes, this function does not take counter wrap into account.
+  * But counter wrap is harmless.  If the counter wraps, we have waited for
+  * more than a billion grace periods (and way more on a 64-bit system!).
+- * Those needing to keep oldstate values for very long time periods
++ * Those needing to keep old state values for very long time periods
+  * (many hours even on 32-bit systems) should check them occasionally and
+  * either refresh them or set a flag indicating that the grace period has
+  * completed.  Alternatively, they can use get_completed_synchronize_rcu()
+-- 
+cgit 
+
+
+From b6fe4917ae4353b397079902cb024ae01f20dfb2 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 13:46:05 -0700
+Subject: rcu: Add full-sized polling for cond_sync_full()
+
+The cond_synchronize_rcu() API compresses the combined expedited and
+normal grace-period states into a single unsigned long, which conserves
+storage, but can miss grace periods in certain cases involving overlapping
+normal and expedited grace periods.  Missing the occasional grace period
+is usually not a problem, but there are use cases that care about each
+and every grace period.
+
+This commit therefore adds yet another member of the full-state RCU
+grace-period polling API, which is the cond_synchronize_rcu_full()
+function.  This uses up to three times the storage (rcu_gp_oldstate
+structure instead of unsigned long), but is guaranteed not to miss
+grace periods.
+
+[ paulmck: Apply feedback from kernel test robot and Julia Lawall. ]
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcutiny.h |  5 ++++
+ include/linux/rcutree.h |  1 +
+ kernel/rcu/rcutorture.c | 67 ++++++++++++++++++++++++++++++++++---------------
+ kernel/rcu/tree.c       | 28 ++++++++++++++++++++-
+ 4 files changed, 80 insertions(+), 21 deletions(-)
+
+diff --git a/include/linux/rcutiny.h b/include/linux/rcutiny.h
+index 653e35777a99b..3bee97f76bf43 100644
+--- a/include/linux/rcutiny.h
++++ b/include/linux/rcutiny.h
+@@ -44,6 +44,11 @@ static inline void cond_synchronize_rcu(unsigned long oldstate)
+ 	might_sleep();
+ }
+ 
++static inline void cond_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	cond_synchronize_rcu(rgosp->rgos_norm);
++}
++
+ static inline unsigned long start_poll_synchronize_rcu_expedited(void)
+ {
+ 	return start_poll_synchronize_rcu();
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 7151fd8617365..1b44288c027da 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -57,6 +57,7 @@ void start_poll_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ bool poll_state_synchronize_rcu(unsigned long oldstate);
+ bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ void cond_synchronize_rcu(unsigned long oldstate);
++void cond_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ 
+ bool rcu_is_idle_cpu(int cpu);
+ 
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index f9ca33555debf..9d22161bf7700 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -84,6 +84,7 @@ torture_param(int, fwd_progress_holdoff, 60, "Time between forward-progress test
+ torture_param(bool, fwd_progress_need_resched, 1, "Hide cond_resched() behind need_resched()");
+ torture_param(bool, gp_cond, false, "Use conditional/async GP wait primitives");
+ torture_param(bool, gp_cond_exp, false, "Use conditional/async expedited GP wait primitives");
++torture_param(bool, gp_cond_full, false, "Use conditional/async full-state GP wait primitives");
+ torture_param(bool, gp_exp, false, "Use expedited GP wait primitives");
+ torture_param(bool, gp_normal, false, "Use normal (non-expedited) GP wait primitives");
+ torture_param(bool, gp_poll, false, "Use polling GP wait primitives");
+@@ -196,20 +197,22 @@ static int rcu_torture_writer_state;
+ #define RTWS_DEF_FREE		3
+ #define RTWS_EXP_SYNC		4
+ #define RTWS_COND_GET		5
+-#define RTWS_COND_GET_EXP	6
+-#define RTWS_COND_SYNC		7
+-#define RTWS_COND_SYNC_EXP	8
+-#define RTWS_POLL_GET		9
+-#define RTWS_POLL_GET_FULL	10
+-#define RTWS_POLL_GET_EXP	11
+-#define RTWS_POLL_GET_EXP_FULL	12
+-#define RTWS_POLL_WAIT		13
+-#define RTWS_POLL_WAIT_FULL	14
+-#define RTWS_POLL_WAIT_EXP	15
+-#define RTWS_POLL_WAIT_EXP_FULL	16
+-#define RTWS_SYNC		17
+-#define RTWS_STUTTER		18
+-#define RTWS_STOPPING		19
++#define RTWS_COND_GET_FULL	6
++#define RTWS_COND_GET_EXP	7
++#define RTWS_COND_SYNC		8
++#define RTWS_COND_SYNC_FULL	9
++#define RTWS_COND_SYNC_EXP	10
++#define RTWS_POLL_GET		11
++#define RTWS_POLL_GET_FULL	12
++#define RTWS_POLL_GET_EXP	13
++#define RTWS_POLL_GET_EXP_FULL	14
++#define RTWS_POLL_WAIT		15
++#define RTWS_POLL_WAIT_FULL	16
++#define RTWS_POLL_WAIT_EXP	17
++#define RTWS_POLL_WAIT_EXP_FULL	18
++#define RTWS_SYNC		19
++#define RTWS_STUTTER		20
++#define RTWS_STOPPING		21
+ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_FIXED_DELAY",
+ 	"RTWS_DELAY",
+@@ -217,8 +220,10 @@ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_DEF_FREE",
+ 	"RTWS_EXP_SYNC",
+ 	"RTWS_COND_GET",
++	"RTWS_COND_GET_FULL",
+ 	"RTWS_COND_GET_EXP",
+ 	"RTWS_COND_SYNC",
++	"RTWS_COND_SYNC_FULL",
+ 	"RTWS_COND_SYNC_EXP",
+ 	"RTWS_POLL_GET",
+ 	"RTWS_POLL_GET_FULL",
+@@ -355,6 +360,7 @@ struct rcu_torture_ops {
+ 	bool (*poll_gp_state_full)(struct rcu_gp_oldstate *rgosp);
+ 	bool (*poll_need_2gp)(bool poll, bool poll_full);
+ 	void (*cond_sync)(unsigned long oldstate);
++	void (*cond_sync_full)(struct rcu_gp_oldstate *rgosp);
+ 	call_rcu_func_t call;
+ 	void (*cb_barrier)(void);
+ 	void (*fqs)(void);
+@@ -532,6 +538,7 @@ static struct rcu_torture_ops rcu_ops = {
+ 	.poll_gp_state_full	= poll_state_synchronize_rcu_full,
+ 	.poll_need_2gp		= rcu_poll_need_2gp,
+ 	.cond_sync		= cond_synchronize_rcu,
++	.cond_sync_full		= cond_synchronize_rcu_full,
+ 	.get_gp_state_exp	= get_state_synchronize_rcu,
+ 	.start_gp_poll_exp	= start_poll_synchronize_rcu_expedited,
+ 	.start_gp_poll_exp_full	= start_poll_synchronize_rcu_expedited_full,
+@@ -1175,16 +1182,17 @@ static int nsynctypes;
+  */
+ static void rcu_torture_write_types(void)
+ {
+-	bool gp_cond1 = gp_cond, gp_cond_exp1 = gp_cond_exp, gp_exp1 = gp_exp;
+-	bool gp_poll_exp1 = gp_poll_exp, gp_poll_exp_full1 = gp_poll_exp_full;
++	bool gp_cond1 = gp_cond, gp_cond_exp1 = gp_cond_exp, gp_cond_full1 = gp_cond_full;
++	bool gp_exp1 = gp_exp, gp_poll_exp1 = gp_poll_exp, gp_poll_exp_full1 = gp_poll_exp_full;
+ 	bool gp_normal1 = gp_normal, gp_poll1 = gp_poll, gp_poll_full1 = gp_poll_full;
+ 	bool gp_sync1 = gp_sync;
+ 
+ 	/* Initialize synctype[] array.  If none set, take default. */
+-	if (!gp_cond1 && !gp_cond_exp1 && !gp_exp1 && !gp_poll_exp && !gp_poll_exp_full1 &&
+-	    !gp_normal1 && !gp_poll1 && !gp_poll_full1 && !gp_sync1)
+-		gp_cond1 = gp_cond_exp1 = gp_exp1 = gp_poll_exp1 = gp_poll_exp_full1 =
+-			   gp_normal1 = gp_poll1 = gp_poll_full1 = gp_sync1 = true;
++	if (!gp_cond1 && !gp_cond_exp1 && !gp_cond_full1 && !gp_exp1 && !gp_poll_exp &&
++	    !gp_poll_exp_full1 && !gp_normal1 && !gp_poll1 && !gp_poll_full1 && !gp_sync1)
++		gp_cond1 = gp_cond_exp1 = gp_cond_full1 = gp_exp1 = gp_poll_exp1 =
++			   gp_poll_exp_full1 = gp_normal1 = gp_poll1 = gp_poll_full1 =
++			   gp_sync1 = true;
+ 	if (gp_cond1 && cur_ops->get_gp_state && cur_ops->cond_sync) {
+ 		synctype[nsynctypes++] = RTWS_COND_GET;
+ 		pr_info("%s: Testing conditional GPs.\n", __func__);
+@@ -1197,6 +1205,12 @@ static void rcu_torture_write_types(void)
+ 	} else if (gp_cond_exp && (!cur_ops->get_gp_state_exp || !cur_ops->cond_sync_exp)) {
+ 		pr_alert("%s: gp_cond_exp without primitives.\n", __func__);
+ 	}
++	if (gp_cond_full1 && cur_ops->get_gp_state && cur_ops->cond_sync_full) {
++		synctype[nsynctypes++] = RTWS_COND_GET_FULL;
++		pr_info("%s: Testing conditional full-state GPs.\n", __func__);
++	} else if (gp_cond_full && (!cur_ops->get_gp_state || !cur_ops->cond_sync_full)) {
++		pr_alert("%s: gp_cond_full without primitives.\n", __func__);
++	}
+ 	if (gp_exp1 && cur_ops->exp_sync) {
+ 		synctype[nsynctypes++] = RTWS_EXP_SYNC;
+ 		pr_info("%s: Testing expedited GPs.\n", __func__);
+@@ -1396,6 +1410,14 @@ rcu_torture_writer(void *arg)
+ 				cur_ops->cond_sync_exp(gp_snap);
+ 				rcu_torture_pipe_update(old_rp);
+ 				break;
++			case RTWS_COND_GET_FULL:
++				rcu_torture_writer_state = RTWS_COND_GET_FULL;
++				cur_ops->get_gp_state_full(&gp_snap_full);
++				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
++				rcu_torture_writer_state = RTWS_COND_SYNC_FULL;
++				cur_ops->cond_sync_full(&gp_snap_full);
++				rcu_torture_pipe_update(old_rp);
++				break;
+ 			case RTWS_POLL_GET:
+ 				rcu_torture_writer_state = RTWS_POLL_GET;
+ 				gp_snap = cur_ops->start_gp_poll();
+@@ -1540,6 +1562,11 @@ rcu_torture_fakewriter(void *arg)
+ 				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
+ 				cur_ops->cond_sync_exp(gp_snap);
+ 				break;
++			case RTWS_COND_GET_FULL:
++				cur_ops->get_gp_state_full(&gp_snap_full);
++				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
++				cur_ops->cond_sync_full(&gp_snap_full);
++				break;
+ 			case RTWS_POLL_GET:
+ 				gp_snap = cur_ops->start_gp_poll();
+ 				while (!cur_ops->poll_gp_state(gp_snap)) {
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 0a24ef4d6b823..5c46c0d34ef0d 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3749,7 +3749,6 @@ EXPORT_SYMBOL_GPL(poll_state_synchronize_rcu_full);
+ 
+ /**
+  * cond_synchronize_rcu - Conditionally wait for an RCU grace period
+- *
+  * @oldstate: value from get_state_synchronize_rcu(), start_poll_synchronize_rcu(), or start_poll_synchronize_rcu_expedited()
+  *
+  * If a full RCU grace period has elapsed since the earlier call to
+@@ -3773,6 +3772,33 @@ void cond_synchronize_rcu(unsigned long oldstate)
+ }
+ EXPORT_SYMBOL_GPL(cond_synchronize_rcu);
+ 
++/**
++ * cond_synchronize_rcu_full - Conditionally wait for an RCU grace period
++ * @rgosp: value from get_state_synchronize_rcu_full(), start_poll_synchronize_rcu_full(), or start_poll_synchronize_rcu_expedited_full()
++ *
++ * If a full RCU grace period has elapsed since the call to
++ * get_state_synchronize_rcu_full(), start_poll_synchronize_rcu_full(),
++ * or start_poll_synchronize_rcu_expedited_full() from which @rgosp was
++ * obtained, just return.  Otherwise, invoke synchronize_rcu() to wait
++ * for a full grace period.
++ *
++ * Yes, this function does not take counter wrap into account.
++ * But counter wrap is harmless.  If the counter wraps, we have waited for
++ * more than 2 billion grace periods (and way more on a 64-bit system!),
++ * so waiting for a couple of additional grace periods should be just fine.
++ *
++ * This function provides the same memory-ordering guarantees that
++ * would be provided by a synchronize_rcu() that was invoked at the call
++ * to the function that provided @rgosp and that returned at the end of
++ * this function.
++ */
++void cond_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
++{
++	if (!poll_state_synchronize_rcu_full(rgosp))
++		synchronize_rcu();
++}
++EXPORT_SYMBOL_GPL(cond_synchronize_rcu_full);
++
+ /*
+  * Check to see if there is any immediate RCU-related work to be done by
+  * the current CPU, returning 1 if so and zero otherwise.  The checks are
+-- 
+cgit 
+
+
+From 8df13f01608ea48712956c0b1afce35bdba5a1c5 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 15:23:26 -0700
+Subject: rcu: Add full-sized polling for cond_sync_exp_full()
+
+The cond_synchronize_rcu_expedited() API compresses the combined expedited and
+normal grace-period states into a single unsigned long, which conserves
+storage, but can miss grace periods in certain cases involving overlapping
+normal and expedited grace periods.  Missing the occasional grace period
+is usually not a problem, but there are use cases that care about each
+and every grace period.
+
+This commit therefore adds yet another member of the full-state RCU
+grace-period polling API, which is the cond_synchronize_rcu_exp_full()
+function.  This uses up to three times the storage (rcu_gp_oldstate
+structure instead of unsigned long), but is guaranteed not to miss
+grace periods.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcutiny.h |  5 ++++
+ include/linux/rcutree.h |  1 +
+ kernel/rcu/rcutorture.c | 72 ++++++++++++++++++++++++++++++++++---------------
+ kernel/rcu/tree_exp.h   | 27 +++++++++++++++++++
+ 4 files changed, 83 insertions(+), 22 deletions(-)
+
+diff --git a/include/linux/rcutiny.h b/include/linux/rcutiny.h
+index 3bee97f76bf43..4405e9112cee8 100644
+--- a/include/linux/rcutiny.h
++++ b/include/linux/rcutiny.h
+@@ -64,6 +64,11 @@ static inline void cond_synchronize_rcu_expedited(unsigned long oldstate)
+ 	cond_synchronize_rcu(oldstate);
+ }
+ 
++static inline void cond_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp)
++{
++	cond_synchronize_rcu_expedited(rgosp->rgos_norm);
++}
++
+ extern void rcu_barrier(void);
+ 
+ static inline void synchronize_rcu_expedited(void)
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 1b44288c027da..755b082f4ec62 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -50,6 +50,7 @@ struct rcu_gp_oldstate {
+ unsigned long start_poll_synchronize_rcu_expedited(void);
+ void start_poll_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp);
+ void cond_synchronize_rcu_expedited(unsigned long oldstate);
++void cond_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp);
+ unsigned long get_state_synchronize_rcu(void);
+ void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ unsigned long start_poll_synchronize_rcu(void);
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 9d22161bf7700..8995429c6f1c2 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -85,6 +85,8 @@ torture_param(bool, fwd_progress_need_resched, 1, "Hide cond_resched() behind ne
+ torture_param(bool, gp_cond, false, "Use conditional/async GP wait primitives");
+ torture_param(bool, gp_cond_exp, false, "Use conditional/async expedited GP wait primitives");
+ torture_param(bool, gp_cond_full, false, "Use conditional/async full-state GP wait primitives");
++torture_param(bool, gp_cond_exp_full, false,
++		    "Use conditional/async full-stateexpedited GP wait primitives");
+ torture_param(bool, gp_exp, false, "Use expedited GP wait primitives");
+ torture_param(bool, gp_normal, false, "Use normal (non-expedited) GP wait primitives");
+ torture_param(bool, gp_poll, false, "Use polling GP wait primitives");
+@@ -199,20 +201,22 @@ static int rcu_torture_writer_state;
+ #define RTWS_COND_GET		5
+ #define RTWS_COND_GET_FULL	6
+ #define RTWS_COND_GET_EXP	7
+-#define RTWS_COND_SYNC		8
+-#define RTWS_COND_SYNC_FULL	9
+-#define RTWS_COND_SYNC_EXP	10
+-#define RTWS_POLL_GET		11
+-#define RTWS_POLL_GET_FULL	12
+-#define RTWS_POLL_GET_EXP	13
+-#define RTWS_POLL_GET_EXP_FULL	14
+-#define RTWS_POLL_WAIT		15
+-#define RTWS_POLL_WAIT_FULL	16
+-#define RTWS_POLL_WAIT_EXP	17
+-#define RTWS_POLL_WAIT_EXP_FULL	18
+-#define RTWS_SYNC		19
+-#define RTWS_STUTTER		20
+-#define RTWS_STOPPING		21
++#define RTWS_COND_GET_EXP_FULL	8
++#define RTWS_COND_SYNC		9
++#define RTWS_COND_SYNC_FULL	10
++#define RTWS_COND_SYNC_EXP	11
++#define RTWS_COND_SYNC_EXP_FULL	12
++#define RTWS_POLL_GET		13
++#define RTWS_POLL_GET_FULL	14
++#define RTWS_POLL_GET_EXP	15
++#define RTWS_POLL_GET_EXP_FULL	16
++#define RTWS_POLL_WAIT		17
++#define RTWS_POLL_WAIT_FULL	18
++#define RTWS_POLL_WAIT_EXP	19
++#define RTWS_POLL_WAIT_EXP_FULL	20
++#define RTWS_SYNC		21
++#define RTWS_STUTTER		22
++#define RTWS_STOPPING		23
+ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_FIXED_DELAY",
+ 	"RTWS_DELAY",
+@@ -222,9 +226,11 @@ static const char * const rcu_torture_writer_state_names[] = {
+ 	"RTWS_COND_GET",
+ 	"RTWS_COND_GET_FULL",
+ 	"RTWS_COND_GET_EXP",
++	"RTWS_COND_GET_EXP_FULL",
+ 	"RTWS_COND_SYNC",
+ 	"RTWS_COND_SYNC_FULL",
+ 	"RTWS_COND_SYNC_EXP",
++	"RTWS_COND_SYNC_EXP_FULL",
+ 	"RTWS_POLL_GET",
+ 	"RTWS_POLL_GET_FULL",
+ 	"RTWS_POLL_GET_EXP",
+@@ -350,6 +356,7 @@ struct rcu_torture_ops {
+ 	void (*start_gp_poll_exp_full)(struct rcu_gp_oldstate *rgosp);
+ 	bool (*poll_gp_state_exp)(unsigned long oldstate);
+ 	void (*cond_sync_exp)(unsigned long oldstate);
++	void (*cond_sync_exp_full)(struct rcu_gp_oldstate *rgosp);
+ 	unsigned long (*get_gp_state)(void);
+ 	void (*get_gp_state_full)(struct rcu_gp_oldstate *rgosp);
+ 	unsigned long (*get_gp_completed)(void);
+@@ -1183,16 +1190,17 @@ static int nsynctypes;
+ static void rcu_torture_write_types(void)
+ {
+ 	bool gp_cond1 = gp_cond, gp_cond_exp1 = gp_cond_exp, gp_cond_full1 = gp_cond_full;
+-	bool gp_exp1 = gp_exp, gp_poll_exp1 = gp_poll_exp, gp_poll_exp_full1 = gp_poll_exp_full;
+-	bool gp_normal1 = gp_normal, gp_poll1 = gp_poll, gp_poll_full1 = gp_poll_full;
+-	bool gp_sync1 = gp_sync;
++	bool gp_cond_exp_full1 = gp_cond_exp_full, gp_exp1 = gp_exp, gp_poll_exp1 = gp_poll_exp;
++	bool gp_poll_exp_full1 = gp_poll_exp_full, gp_normal1 = gp_normal, gp_poll1 = gp_poll;
++	bool gp_poll_full1 = gp_poll_full, gp_sync1 = gp_sync;
+ 
+ 	/* Initialize synctype[] array.  If none set, take default. */
+-	if (!gp_cond1 && !gp_cond_exp1 && !gp_cond_full1 && !gp_exp1 && !gp_poll_exp &&
+-	    !gp_poll_exp_full1 && !gp_normal1 && !gp_poll1 && !gp_poll_full1 && !gp_sync1)
+-		gp_cond1 = gp_cond_exp1 = gp_cond_full1 = gp_exp1 = gp_poll_exp1 =
+-			   gp_poll_exp_full1 = gp_normal1 = gp_poll1 = gp_poll_full1 =
+-			   gp_sync1 = true;
++	if (!gp_cond1 && !gp_cond_exp1 && !gp_cond_full1 && !gp_cond_exp_full1 && !gp_exp1 &&
++	    !gp_poll_exp && !gp_poll_exp_full1 && !gp_normal1 && !gp_poll1 && !gp_poll_full1 &&
++	    !gp_sync1)
++		gp_cond1 = gp_cond_exp1 = gp_cond_full1 = gp_cond_exp_full1 = gp_exp1 =
++			   gp_poll_exp1 = gp_poll_exp_full1 = gp_normal1 = gp_poll1 =
++			   gp_poll_full1 = gp_sync1 = true;
+ 	if (gp_cond1 && cur_ops->get_gp_state && cur_ops->cond_sync) {
+ 		synctype[nsynctypes++] = RTWS_COND_GET;
+ 		pr_info("%s: Testing conditional GPs.\n", __func__);
+@@ -1211,6 +1219,13 @@ static void rcu_torture_write_types(void)
+ 	} else if (gp_cond_full && (!cur_ops->get_gp_state || !cur_ops->cond_sync_full)) {
+ 		pr_alert("%s: gp_cond_full without primitives.\n", __func__);
+ 	}
++	if (gp_cond_exp_full1 && cur_ops->get_gp_state_exp && cur_ops->cond_sync_exp_full) {
++		synctype[nsynctypes++] = RTWS_COND_GET_EXP_FULL;
++		pr_info("%s: Testing conditional full-state expedited GPs.\n", __func__);
++	} else if (gp_cond_exp_full &&
++		   (!cur_ops->get_gp_state_exp || !cur_ops->cond_sync_exp_full)) {
++		pr_alert("%s: gp_cond_exp_full without primitives.\n", __func__);
++	}
+ 	if (gp_exp1 && cur_ops->exp_sync) {
+ 		synctype[nsynctypes++] = RTWS_EXP_SYNC;
+ 		pr_info("%s: Testing expedited GPs.\n", __func__);
+@@ -1418,6 +1433,14 @@ rcu_torture_writer(void *arg)
+ 				cur_ops->cond_sync_full(&gp_snap_full);
+ 				rcu_torture_pipe_update(old_rp);
+ 				break;
++			case RTWS_COND_GET_EXP_FULL:
++				rcu_torture_writer_state = RTWS_COND_GET_EXP_FULL;
++				cur_ops->get_gp_state_full(&gp_snap_full);
++				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
++				rcu_torture_writer_state = RTWS_COND_SYNC_EXP_FULL;
++				cur_ops->cond_sync_exp_full(&gp_snap_full);
++				rcu_torture_pipe_update(old_rp);
++				break;
+ 			case RTWS_POLL_GET:
+ 				rcu_torture_writer_state = RTWS_POLL_GET;
+ 				gp_snap = cur_ops->start_gp_poll();
+@@ -1567,6 +1590,11 @@ rcu_torture_fakewriter(void *arg)
+ 				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
+ 				cur_ops->cond_sync_full(&gp_snap_full);
+ 				break;
++			case RTWS_COND_GET_EXP_FULL:
++				cur_ops->get_gp_state_full(&gp_snap_full);
++				torture_hrtimeout_jiffies(torture_random(&rand) % 16, &rand);
++				cur_ops->cond_sync_exp_full(&gp_snap_full);
++				break;
+ 			case RTWS_POLL_GET:
+ 				gp_snap = cur_ops->start_gp_poll();
+ 				while (!cur_ops->poll_gp_state(gp_snap)) {
+diff --git a/kernel/rcu/tree_exp.h b/kernel/rcu/tree_exp.h
+index 18128ee0d36c0..9c0ae834ef076 100644
+--- a/kernel/rcu/tree_exp.h
++++ b/kernel/rcu/tree_exp.h
+@@ -1071,3 +1071,30 @@ void cond_synchronize_rcu_expedited(unsigned long oldstate)
+ 		synchronize_rcu_expedited();
+ }
+ EXPORT_SYMBOL_GPL(cond_synchronize_rcu_expedited);
++
++/**
++ * cond_synchronize_rcu_expedited_full - Conditionally wait for an expedited RCU grace period
++ * @rgosp: value from get_state_synchronize_rcu_full(), start_poll_synchronize_rcu_full(), or start_poll_synchronize_rcu_expedited_full()
++ *
++ * If a full RCU grace period has elapsed since the call to
++ * get_state_synchronize_rcu_full(), start_poll_synchronize_rcu_full(),
++ * or start_poll_synchronize_rcu_expedited_full() from which @rgosp was
++ * obtained, just return.  Otherwise, invoke synchronize_rcu_expedited()
++ * to wait for a full grace period.
++ *
++ * Yes, this function does not take counter wrap into account.
++ * But counter wrap is harmless.  If the counter wraps, we have waited for
++ * more than 2 billion grace periods (and way more on a 64-bit system!),
++ * so waiting for a couple of additional grace periods should be just fine.
++ *
++ * This function provides the same memory-ordering guarantees that
++ * would be provided by a synchronize_rcu() that was invoked at the call
++ * to the function that provided @rgosp and that returned at the end of
++ * this function.
++ */
++void cond_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp)
++{
++	if (!poll_state_synchronize_rcu_full(rgosp))
++		synchronize_rcu_expedited();
++}
++EXPORT_SYMBOL_GPL(cond_synchronize_rcu_expedited_full);
+-- 
+cgit 
+
+
+From 258f887aba60c8fc7946a9f379f9a3889f92fc85 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 16:07:04 -0700
+Subject: rcu: Disable run-time single-CPU grace-period optimization
+
+The run-time single-CPU grace-period optimization applies only to
+kernels built with CONFIG_SMP=y && CONFIG_PREEMPTION=y that are running
+on a single-CPU system.  But a kernel intended for a single-CPU system
+should instead be built with CONFIG_SMP=n, and in any case, single-CPU
+systems running Linux no longer appear to be the common case.  Plus this
+optimization results in the rcu_gp_oldstate structure being half again
+larger than it needs to be.
+
+This commit therefore disables the run-time single-CPU grace-period
+optimization, so that this optimization applies only during the
+pre-scheduler portion of the boot sequence.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 40 +++++++++-------------------------------
+ 1 file changed, 9 insertions(+), 31 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 5c46c0d34ef0d..5c4ec9dd4ce70 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3423,42 +3423,20 @@ void __init kfree_rcu_scheduler_running(void)
+ 
+ /*
+  * During early boot, any blocking grace-period wait automatically
+- * implies a grace period.  Later on, this is never the case for PREEMPTION.
++ * implies a grace period.
+  *
+- * However, because a context switch is a grace period for !PREEMPTION, any
+- * blocking grace-period wait automatically implies a grace period if
+- * there is only one CPU online at any point time during execution of
+- * either synchronize_rcu() or synchronize_rcu_expedited().  It is OK to
+- * occasionally incorrectly indicate that there are multiple CPUs online
+- * when there was in fact only one the whole time, as this just adds some
+- * overhead: RCU still operates correctly.
++ * Later on, this could in theory be the case for kernels built with
++ * CONFIG_SMP=y && CONFIG_PREEMPTION=y running on a single CPU, but this
++ * is not a common case.  Furthermore, this optimization would cause
++ * the rcu_gp_oldstate structure to expand by 50%, so this potential
++ * grace-period optimization is ignored once the scheduler is running.
+  */
+ static int rcu_blocking_is_gp(void)
+ {
+-	int ret;
+-
+-	// Invoking preempt_model_*() too early gets a splat.
+-	if (rcu_scheduler_active == RCU_SCHEDULER_INACTIVE ||
+-	    preempt_model_full() || preempt_model_rt())
+-		return rcu_scheduler_active == RCU_SCHEDULER_INACTIVE;
++	if (rcu_scheduler_active != RCU_SCHEDULER_INACTIVE)
++		return false;
+ 	might_sleep();  /* Check for RCU read-side critical section. */
+-	preempt_disable();
+-	/*
+-	 * If the rcu_state.n_online_cpus counter is equal to one,
+-	 * there is only one CPU, and that CPU sees all prior accesses
+-	 * made by any CPU that was online at the time of its access.
+-	 * Furthermore, if this counter is equal to one, its value cannot
+-	 * change until after the preempt_enable() below.
+-	 *
+-	 * Furthermore, if rcu_state.n_online_cpus is equal to one here,
+-	 * all later CPUs (both this one and any that come online later
+-	 * on) are guaranteed to see all accesses prior to this point
+-	 * in the code, without the need for additional memory barriers.
+-	 * Those memory barriers are provided by CPU-hotplug code.
+-	 */
+-	ret = READ_ONCE(rcu_state.n_online_cpus) <= 1;
+-	preempt_enable();
+-	return ret;
++	return true;
+ }
+ 
+ /**
+-- 
+cgit 
+
+
+From a5d1b0b68a62afb1bce0b36cc9a1875acf8a6dff Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 17:01:55 -0700
+Subject: rcu: Set rcu_data structures' initial ->gpwrap value to true
+
+It would be good do reduce the size of the rcu_gp_oldstate structure
+from three unsigned long instances to two, but this requires that the
+boot-time optimized grace periods update the various ->gp_seq fields.
+Updating these fields in the rcu_state structure and in all of the
+rcu_node structures is at least semi-reasonable, but updating them in
+all of the rcu_data structures is a bridge too far.  This means that if
+there are too many early boot-time grace periods, the ->gp_seq field in
+the rcu_data structure cannot be trusted.  This commit therefore sets
+each rcu_data structure's ->gpwrap field to provide the necessary impetus
+for a suitable level of distrust.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 5c4ec9dd4ce70..03b089184b37e 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -76,6 +76,7 @@
+ /* Data structures. */
+ 
+ static DEFINE_PER_CPU_SHARED_ALIGNED(struct rcu_data, rcu_data) = {
++	.gpwrap = true,
+ #ifdef CONFIG_RCU_NOCB_CPU
+ 	.cblist.flags = SEGCBLIST_RCU_CORE,
+ #endif
+-- 
+cgit 
+
+
+From 5f11bad6b7228858e06729de6dd4079dfc082648 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 17:16:24 -0700
+Subject: rcu-tasks: Remove grace-period fast-path rcu-tasks helper
+
+Now that the grace-period fast path can only happen during the
+pre-scheduler portion of early boot, this fast path can no longer block
+run-time RCU Tasks and RCU Tasks Trace grace periods.  This commit
+therefore removes the conditional cond_resched_tasks_rcu_qs() invocation.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 03b089184b37e..0ff7d5eaa3761 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3492,8 +3492,6 @@ void synchronize_rcu(void)
+ 		// which allows reuse of ->gp_seq_polled_snap.
+ 		rcu_poll_gp_seq_start_unlocked(&rcu_state.gp_seq_polled_snap);
+ 		rcu_poll_gp_seq_end_unlocked(&rcu_state.gp_seq_polled_snap);
+-		if (rcu_init_invoked())
+-			cond_resched_tasks_rcu_qs();
+ 		return;  // Context allows vacuous grace periods.
+ 	}
+ 	if (rcu_gp_is_expedited())
+-- 
+cgit 
+
+
+From 910e12092eac8a9f19b507ed0fdc1c21d8da9483 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 17:28:01 -0700
+Subject: rcu: Make synchronize_rcu() fast path update ->gp_seq counters
+
+This commit causes the early boot single-CPU synchronize_rcu() fastpath to
+update the rcu_state and rcu_node structures' ->gp_seq and ->gp_seq_needed
+counters.  This will allow the full-state polled grace-period APIs to
+detect all normal grace periods without the need to track the special
+combined polling-only counter, which is a step towards removing the
+->rgos_polled field from the rcu_gp_oldstate, thereby reducing its size
+by one third.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 39 ++++++++++++++++++++++++++-------------
+ 1 file changed, 26 insertions(+), 13 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 0ff7d5eaa3761..8fa5ec0f3d111 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3480,24 +3480,37 @@ static int rcu_blocking_is_gp(void)
+  */
+ void synchronize_rcu(void)
+ {
++	unsigned long flags;
++	struct rcu_node *rnp;
++
+ 	RCU_LOCKDEP_WARN(lock_is_held(&rcu_bh_lock_map) ||
+ 			 lock_is_held(&rcu_lock_map) ||
+ 			 lock_is_held(&rcu_sched_lock_map),
+ 			 "Illegal synchronize_rcu() in RCU read-side critical section");
+-	if (rcu_blocking_is_gp()) {
+-		// Note well that this code runs with !PREEMPT && !SMP.
+-		// In addition, all code that advances grace periods runs at
+-		// process level.  Therefore, this normal GP overlaps with
+-		// other normal GPs only by being fully nested within them,
+-		// which allows reuse of ->gp_seq_polled_snap.
+-		rcu_poll_gp_seq_start_unlocked(&rcu_state.gp_seq_polled_snap);
+-		rcu_poll_gp_seq_end_unlocked(&rcu_state.gp_seq_polled_snap);
+-		return;  // Context allows vacuous grace periods.
++	if (!rcu_blocking_is_gp()) {
++		if (rcu_gp_is_expedited())
++			synchronize_rcu_expedited();
++		else
++			wait_rcu_gp(call_rcu);
++		return;
+ 	}
+-	if (rcu_gp_is_expedited())
+-		synchronize_rcu_expedited();
+-	else
+-		wait_rcu_gp(call_rcu);
++
++	// Context allows vacuous grace periods.
++	// Note well that this code runs with !PREEMPT && !SMP.
++	// In addition, all code that advances grace periods runs at
++	// process level.  Therefore, this normal GP overlaps with other
++	// normal GPs only by being fully nested within them, which allows
++	// reuse of ->gp_seq_polled_snap.
++	rcu_poll_gp_seq_start_unlocked(&rcu_state.gp_seq_polled_snap);
++	rcu_poll_gp_seq_end_unlocked(&rcu_state.gp_seq_polled_snap);
++
++	// Update normal grace-period counters to record grace period.
++	local_irq_save(flags);
++	WARN_ON_ONCE(num_online_cpus() > 1);
++	rcu_state.gp_seq += (1 << RCU_SEQ_CTR_SHIFT);
++	rcu_for_each_node_breadth_first(rnp)
++		rnp->gp_seq_needed = rnp->gp_seq = rcu_state.gp_seq;
++	local_irq_restore(flags);
+ }
+ EXPORT_SYMBOL_GPL(synchronize_rcu);
+ 
+-- 
+cgit 
+
+
+From e8755d2bde7c296026fe5d47f1b75c7b19ba46fd Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 17:34:30 -0700
+Subject: rcu: Remove expedited grace-period fast-path forward-progress helper
+
+Now that the expedited grace-period fast path can only happen during
+the pre-scheduler portion of early boot, this fast path can no longer
+block run-time RCU Trace grace periods.  This commit therefore removes
+the conditional cond_resched() invocation.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_exp.h | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/kernel/rcu/tree_exp.h b/kernel/rcu/tree_exp.h
+index 9c0ae834ef076..1a51f9301ebff 100644
+--- a/kernel/rcu/tree_exp.h
++++ b/kernel/rcu/tree_exp.h
+@@ -924,8 +924,6 @@ void synchronize_rcu_expedited(void)
+ 		// them, which allows reuse of ->gp_seq_polled_exp_snap.
+ 		rcu_poll_gp_seq_start_unlocked(&rcu_state.gp_seq_polled_exp_snap);
+ 		rcu_poll_gp_seq_end_unlocked(&rcu_state.gp_seq_polled_exp_snap);
+-		if (rcu_init_invoked())
+-			cond_resched();
+ 		return;  // Context allows vacuous grace periods.
+ 	}
+ 
+-- 
+cgit 
+
+
+From 43ff97cc997f5641127152f97e1fd0fc9fa060f6 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 17:43:53 -0700
+Subject: rcu: Make synchronize_rcu_expedited() fast path update
+ .expedited_sequence
+
+This commit causes the early boot single-CPU synchronize_rcu_expedited()
+fastpath to update the rcu_state structure's ->expedited_sequence
+counter.  This will allow the full-state polled grace-period APIs to
+detect all expedited grace periods without the need to track the special
+combined polling-only counter, which is another step towards removing
+the ->rgos_polled field from the rcu_gp_oldstate, thereby reducing its
+size by one third.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree_exp.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/kernel/rcu/tree_exp.h b/kernel/rcu/tree_exp.h
+index 1a51f9301ebff..54e05d13d1512 100644
+--- a/kernel/rcu/tree_exp.h
++++ b/kernel/rcu/tree_exp.h
+@@ -906,6 +906,7 @@ static int rcu_print_task_exp_stall(struct rcu_node *rnp)
+ void synchronize_rcu_expedited(void)
+ {
+ 	bool boottime = (rcu_scheduler_active == RCU_SCHEDULER_INIT);
++	unsigned long flags;
+ 	struct rcu_exp_work rew;
+ 	struct rcu_node *rnp;
+ 	unsigned long s;
+@@ -924,6 +925,11 @@ void synchronize_rcu_expedited(void)
+ 		// them, which allows reuse of ->gp_seq_polled_exp_snap.
+ 		rcu_poll_gp_seq_start_unlocked(&rcu_state.gp_seq_polled_exp_snap);
+ 		rcu_poll_gp_seq_end_unlocked(&rcu_state.gp_seq_polled_exp_snap);
++
++		local_irq_save(flags);
++		WARN_ON_ONCE(num_online_cpus() > 1);
++		rcu_state.expedited_sequence += (1 << RCU_SEQ_CTR_SHIFT);
++		local_irq_restore(flags);
+ 		return;  // Context allows vacuous grace periods.
+ 	}
+ 
+-- 
+cgit 
+
+
+From 7ecef0871dd9a879038dbe8a681ab48bd0c92988 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 17:54:53 -0700
+Subject: rcu: Remove ->rgos_polled field from rcu_gp_oldstate structure
+
+Because both normal and expedited grace periods increment their respective
+counters on their pre-scheduler early boot fastpaths, the rcu_gp_oldstate
+structure no longer needs its ->rgos_polled field.  This commit therefore
+removes this field, shrinking this structure so that it is the same size
+as an rcu_head structure.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcutree.h | 1 -
+ kernel/rcu/tree.c       | 6 +-----
+ 2 files changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 755b082f4ec62..455a03bdce152 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -44,7 +44,6 @@ bool rcu_gp_might_be_stalled(void);
+ struct rcu_gp_oldstate {
+ 	unsigned long rgos_norm;
+ 	unsigned long rgos_exp;
+-	unsigned long rgos_polled;
+ };
+ 
+ unsigned long start_poll_synchronize_rcu_expedited(void);
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 8fa5ec0f3d111..b9e8ed00536d4 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3526,7 +3526,6 @@ void get_completed_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
+ {
+ 	rgosp->rgos_norm = RCU_GET_STATE_COMPLETED;
+ 	rgosp->rgos_exp = RCU_GET_STATE_COMPLETED;
+-	rgosp->rgos_polled = RCU_GET_STATE_COMPLETED;
+ }
+ EXPORT_SYMBOL_GPL(get_completed_synchronize_rcu_full);
+ 
+@@ -3575,7 +3574,6 @@ void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
+ 	smp_mb();  /* ^^^ */
+ 	rgosp->rgos_norm = rcu_seq_snap(&rnp->gp_seq);
+ 	rgosp->rgos_exp = rcu_seq_snap(&rcu_state.expedited_sequence);
+-	rgosp->rgos_polled = rcu_seq_snap(&rcu_state.gp_seq_polled);
+ }
+ EXPORT_SYMBOL_GPL(get_state_synchronize_rcu_full);
+ 
+@@ -3727,9 +3725,7 @@ bool poll_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
+ 	if (rgosp->rgos_norm == RCU_GET_STATE_COMPLETED ||
+ 	    rcu_seq_done_exact(&rnp->gp_seq, rgosp->rgos_norm) ||
+ 	    rgosp->rgos_exp == RCU_GET_STATE_COMPLETED ||
+-	    rcu_seq_done_exact(&rcu_state.expedited_sequence, rgosp->rgos_exp) ||
+-	    rgosp->rgos_polled == RCU_GET_STATE_COMPLETED ||
+-	    rcu_seq_done_exact(&rcu_state.gp_seq_polled, rgosp->rgos_polled)) {
++	    rcu_seq_done_exact(&rcu_state.expedited_sequence, rgosp->rgos_exp)) {
+ 		smp_mb(); /* Ensure GP ends before subsequent accesses. */
+ 		return true;
+ 	}
+-- 
+cgit 
+
+
+From b3cdd0a79c875d5e9cac9f6555485031ce5bea81 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Thu, 4 Aug 2022 18:05:46 -0700
+Subject: rcutorture: Adjust rcu_poll_need_2gp() for rcu_gp_oldstate field
+ removal
+
+Now that rcu_gp_oldstate can accurately track both normal and
+expedited grace periods regardless of system state, rcutorture's
+rcu_poll_need_2gp() function need only call for a second grace period
+for the old single-unsigned-long grace-period polling APIs
+This commit therefore adjusts rcu_poll_need_2gp() accordingly.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 8995429c6f1c2..029de67a9da91 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -520,7 +520,7 @@ static void rcu_sync_torture_init(void)
+ 
+ static bool rcu_poll_need_2gp(bool poll, bool poll_full)
+ {
+-	return poll || (!IS_ENABLED(CONFIG_TINY_RCU) && poll_full && num_online_cpus() <= 1);
++	return poll;
+ }
+ 
+ static struct rcu_torture_ops rcu_ops = {
+-- 
+cgit 
+
+
+From d761de8a7dcef8e8e9e20a543f85a2c079ae3d0d Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Fri, 5 Aug 2022 15:42:25 -0700
+Subject: rcu: Make synchronize_rcu() fastpath update only boot-CPU counters
+
+Large systems can have hundreds of rcu_node structures, and updating
+counters in each of them might slow down booting.  This commit therefore
+updates only the counters in those rcu_node structures corresponding
+to the boot CPU, up to and including the root rcu_node structure.
+
+The counters for the remaining rcu_node structures are updated by the
+rcu_scheduler_starting() function, which executes just before the first
+non-boot kthread is spawned.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index b9e8ed00536d4..ef15bae3c7c77 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -3504,11 +3504,14 @@ void synchronize_rcu(void)
+ 	rcu_poll_gp_seq_start_unlocked(&rcu_state.gp_seq_polled_snap);
+ 	rcu_poll_gp_seq_end_unlocked(&rcu_state.gp_seq_polled_snap);
+ 
+-	// Update normal grace-period counters to record grace period.
++	// Update the normal grace-period counters to record
++	// this grace period, but only those used by the boot CPU.
++	// The rcu_scheduler_starting() will take care of the rest of
++	// these counters.
+ 	local_irq_save(flags);
+ 	WARN_ON_ONCE(num_online_cpus() > 1);
+ 	rcu_state.gp_seq += (1 << RCU_SEQ_CTR_SHIFT);
+-	rcu_for_each_node_breadth_first(rnp)
++	for (rnp = this_cpu_ptr(&rcu_data)->mynode; rnp; rnp = rnp->parent)
+ 		rnp->gp_seq_needed = rnp->gp_seq = rcu_state.gp_seq;
+ 	local_irq_restore(flags);
+ }
+@@ -4456,9 +4459,20 @@ early_initcall(rcu_spawn_gp_kthread);
+  */
+ void rcu_scheduler_starting(void)
+ {
++	unsigned long flags;
++	struct rcu_node *rnp;
++
+ 	WARN_ON(num_online_cpus() != 1);
+ 	WARN_ON(nr_context_switches() > 0);
+ 	rcu_test_sync_prims();
++
++	// Fix up the ->gp_seq counters.
++	local_irq_save(flags);
++	rcu_for_each_node_breadth_first(rnp)
++		rnp->gp_seq_needed = rnp->gp_seq = rcu_state.gp_seq;
++	local_irq_restore(flags);
++
++	// Switch out of early boot mode.
+ 	rcu_scheduler_active = RCU_SCHEDULER_INIT;
+ 	rcu_test_sync_prims();
+ }
+-- 
+cgit 
+
+
+From cc8faf5b65997a994c77a0122b94240b82c95f23 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Mon, 22 Aug 2022 10:02:56 -0700
+Subject: rcutorture: Use 1-suffixed variable in rcu_torture_write_types()
+ check
+
+This commit changes the use of gp_poll_exp to gp_poll_exp1 in the first
+check in rcu_torture_write_types().  No functional effect, but consistency
+is a good thing.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 029de67a9da91..71d1af9c060e1 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -1196,7 +1196,7 @@ static void rcu_torture_write_types(void)
+ 
+ 	/* Initialize synctype[] array.  If none set, take default. */
+ 	if (!gp_cond1 && !gp_cond_exp1 && !gp_cond_full1 && !gp_cond_exp_full1 && !gp_exp1 &&
+-	    !gp_poll_exp && !gp_poll_exp_full1 && !gp_normal1 && !gp_poll1 && !gp_poll_full1 &&
++	    !gp_poll_exp1 && !gp_poll_exp_full1 && !gp_normal1 && !gp_poll1 && !gp_poll_full1 &&
+ 	    !gp_sync1)
+ 		gp_cond1 = gp_cond_exp1 = gp_cond_full1 = gp_cond_exp_full1 = gp_exp1 =
+ 			   gp_poll_exp1 = gp_poll_exp_full1 = gp_normal1 = gp_poll1 =
+-- 
+cgit 
+
+
+From 5d7801f20170a50252b791c2ce05fb982616665b Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 23 Aug 2022 12:11:12 -0700
+Subject: rcutorture: Expand rcu_torture_write_types() first "if" statement
+
+This commit expands the rcu_torture_write_types() function's first "if"
+condition and body, placing one element per line, in order to make the
+compiler's error messages more helpful.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 29 +++++++++++++++++++++++------
+ 1 file changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index 71d1af9c060e1..fe1836aad6466 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -1195,12 +1195,29 @@ static void rcu_torture_write_types(void)
+ 	bool gp_poll_full1 = gp_poll_full, gp_sync1 = gp_sync;
+ 
+ 	/* Initialize synctype[] array.  If none set, take default. */
+-	if (!gp_cond1 && !gp_cond_exp1 && !gp_cond_full1 && !gp_cond_exp_full1 && !gp_exp1 &&
+-	    !gp_poll_exp1 && !gp_poll_exp_full1 && !gp_normal1 && !gp_poll1 && !gp_poll_full1 &&
+-	    !gp_sync1)
+-		gp_cond1 = gp_cond_exp1 = gp_cond_full1 = gp_cond_exp_full1 = gp_exp1 =
+-			   gp_poll_exp1 = gp_poll_exp_full1 = gp_normal1 = gp_poll1 =
+-			   gp_poll_full1 = gp_sync1 = true;
++	if (!gp_cond1 &&
++	    !gp_cond_exp1 &&
++	    !gp_cond_full1 &&
++	    !gp_cond_exp_full1 &&
++	    !gp_exp1 &&
++	    !gp_poll_exp1 &&
++	    !gp_poll_exp_full1 &&
++	    !gp_normal1 &&
++	    !gp_poll1 &&
++	    !gp_poll_full1 &&
++	    !gp_sync1) {
++		gp_cond1 = true;
++		gp_cond_exp1 = true;
++		gp_cond_full1 = true;
++		gp_cond_exp_full1 = true;
++		gp_exp1 = true;
++		gp_poll_exp1 = true;
++		gp_poll_exp_full1 = true;
++		gp_normal1 = true;
++		gp_poll1 = true;
++		gp_poll_full1 = true;
++		gp_sync1 = true;
++	}
+ 	if (gp_cond1 && cur_ops->get_gp_state && cur_ops->cond_sync) {
+ 		synctype[nsynctypes++] = RTWS_COND_GET;
+ 		pr_info("%s: Testing conditional GPs.\n", __func__);
+-- 
+cgit 
+
+
+From 18538248e5486b0f0e8581083de275176674cd1f Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 24 Aug 2022 15:39:09 -0700
+Subject: rcu: Add functions to compare grace-period state values
+
+This commit adds same_state_synchronize_rcu() and
+same_state_synchronize_rcu_full() functions to compare grace-period state
+values, for example, those obtained from get_state_synchronize_rcu()
+and get_state_synchronize_rcu_full().  These functions allow small
+structures to omit these state values by placing them in list headers for
+lists containing structures with the same token value.  Presumably the
+per-structure list pointers are the same ones used to link the structures
+into whatever reader-accessible data structure was used.
+
+This commit also adds both NUM_ACTIVE_RCU_POLL_OLDSTATE and
+NUM_ACTIVE_RCU_POLL_FULL_OLDSTATE, which define the maximum number of
+distinct unsigned long values and rcu_gp_oldstate values, respectively,
+corresponding to not-yet-completed grace periods.  These values can be
+used to size arrays of the list headers described above.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/rcupdate.h | 21 +++++++++++++++++++++
+ include/linux/rcutiny.h  | 14 ++++++++++++++
+ include/linux/rcutree.h  | 28 ++++++++++++++++++++++++++++
+ 3 files changed, 63 insertions(+)
+
+diff --git a/include/linux/rcupdate.h b/include/linux/rcupdate.h
+index faaa174dfb27c..9941d5c3d5e19 100644
+--- a/include/linux/rcupdate.h
++++ b/include/linux/rcupdate.h
+@@ -47,6 +47,27 @@ struct rcu_gp_oldstate;
+ unsigned long get_completed_synchronize_rcu(void);
+ void get_completed_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp);
+ 
++// Maximum number of unsigned long values corresponding to
++// not-yet-completed RCU grace periods.
++#define NUM_ACTIVE_RCU_POLL_OLDSTATE 2
++
++/**
++ * same_state_synchronize_rcu - Are two old-state values identical?
++ * @oldstate1: First old-state value.
++ * @oldstate2: Second old-state value.
++ *
++ * The two old-state values must have been obtained from either
++ * get_state_synchronize_rcu(), start_poll_synchronize_rcu(), or
++ * get_completed_synchronize_rcu().  Returns @true if the two values are
++ * identical and @false otherwise.  This allows structures whose lifetimes
++ * are tracked by old-state values to push these values to a list header,
++ * allowing those structures to be slightly smaller.
++ */
++static inline bool same_state_synchronize_rcu(unsigned long oldstate1, unsigned long oldstate2)
++{
++	return oldstate1 == oldstate2;
++}
++
+ #ifdef CONFIG_PREEMPT_RCU
+ 
+ void __rcu_read_lock(void);
+diff --git a/include/linux/rcutiny.h b/include/linux/rcutiny.h
+index 4405e9112cee8..768196a5f39d6 100644
+--- a/include/linux/rcutiny.h
++++ b/include/linux/rcutiny.h
+@@ -18,6 +18,20 @@ struct rcu_gp_oldstate {
+ 	unsigned long rgos_norm;
+ };
+ 
++// Maximum number of rcu_gp_oldstate values corresponding to
++// not-yet-completed RCU grace periods.
++#define NUM_ACTIVE_RCU_POLL_FULL_OLDSTATE 2
++
++/*
++ * Are the two oldstate values the same?  See the Tree RCU version for
++ * docbook header.
++ */
++static inline bool same_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp1,
++						   struct rcu_gp_oldstate *rgosp2)
++{
++	return rgosp1->rgos_norm == rgosp2->rgos_norm;
++}
++
+ unsigned long get_state_synchronize_rcu(void);
+ 
+ static inline void get_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp)
+diff --git a/include/linux/rcutree.h b/include/linux/rcutree.h
+index 455a03bdce152..5efb51486e8af 100644
+--- a/include/linux/rcutree.h
++++ b/include/linux/rcutree.h
+@@ -46,6 +46,34 @@ struct rcu_gp_oldstate {
+ 	unsigned long rgos_exp;
+ };
+ 
++// Maximum number of rcu_gp_oldstate values corresponding to
++// not-yet-completed RCU grace periods.
++#define NUM_ACTIVE_RCU_POLL_FULL_OLDSTATE 4
++
++/**
++ * same_state_synchronize_rcu_full - Are two old-state values identical?
++ * @rgosp1: First old-state value.
++ * @rgosp2: Second old-state value.
++ *
++ * The two old-state values must have been obtained from either
++ * get_state_synchronize_rcu_full(), start_poll_synchronize_rcu_full(),
++ * or get_completed_synchronize_rcu_full().  Returns @true if the two
++ * values are identical and @false otherwise.  This allows structures
++ * whose lifetimes are tracked by old-state values to push these values
++ * to a list header, allowing those structures to be slightly smaller.
++ *
++ * Note that equality is judged on a bitwise basis, so that an
++ * @rcu_gp_oldstate structure with an already-completed state in one field
++ * will compare not-equal to a structure with an already-completed state
++ * in the other field.  After all, the @rcu_gp_oldstate structure is opaque
++ * so how did such a situation come to pass in the first place?
++ */
++static inline bool same_state_synchronize_rcu_full(struct rcu_gp_oldstate *rgosp1,
++						   struct rcu_gp_oldstate *rgosp2)
++{
++	return rgosp1->rgos_norm == rgosp2->rgos_norm && rgosp1->rgos_exp == rgosp2->rgos_exp;
++}
++
+ unsigned long start_poll_synchronize_rcu_expedited(void);
+ void start_poll_synchronize_rcu_expedited_full(struct rcu_gp_oldstate *rgosp);
+ void cond_synchronize_rcu_expedited(unsigned long oldstate);
+-- 
+cgit 
+
+
+From 967c298d650e2a8562fb4ea488af36bdf2a71ac4 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 24 Aug 2022 18:57:45 -0700
+Subject: rcutorture: Limit read-side polling-API testing
+
+RCU's polled grace-period API is reasonably lightweight, but still
+contains heavyweight memory barriers.  This commit therefore limits
+testing of this API from rcutorture's readers in order to avoid the
+false negatives that these heavyweight operations could provoke.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 41 +++++++++++++++++++++++------------------
+ 1 file changed, 23 insertions(+), 18 deletions(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index fe1836aad6466..91103279d7b4f 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -1903,6 +1903,7 @@ rcutorture_loop_extend(int *readstate, struct torture_random_state *trsp,
+  */
+ static bool rcu_torture_one_read(struct torture_random_state *trsp, long myid)
+ {
++	bool checkpolling = !(torture_random(trsp) & 0xfff);
+ 	unsigned long cookie;
+ 	struct rcu_gp_oldstate cookie_full;
+ 	int i;
+@@ -1920,10 +1921,12 @@ static bool rcu_torture_one_read(struct torture_random_state *trsp, long myid)
+ 	WARN_ON_ONCE(!rcu_is_watching());
+ 	newstate = rcutorture_extend_mask(readstate, trsp);
+ 	rcutorture_one_extend(&readstate, newstate, trsp, rtrsp++);
+-	if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
+-		cookie = cur_ops->get_gp_state();
+-	if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
+-		cur_ops->get_gp_state_full(&cookie_full);
++	if (checkpolling) {
++		if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
++			cookie = cur_ops->get_gp_state();
++		if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
++			cur_ops->get_gp_state_full(&cookie_full);
++	}
+ 	started = cur_ops->get_gp_seq();
+ 	ts = rcu_trace_clock_local();
+ 	p = rcu_dereference_check(rcu_torture_current,
+@@ -1957,20 +1960,22 @@ static bool rcu_torture_one_read(struct torture_random_state *trsp, long myid)
+ 	}
+ 	__this_cpu_inc(rcu_torture_batch[completed]);
+ 	preempt_enable();
+-	if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
+-		WARN_ONCE(cur_ops->poll_gp_state(cookie),
+-			  "%s: Cookie check 2 failed %s(%d) %lu->%lu\n",
+-			  __func__,
+-			  rcu_torture_writer_state_getname(),
+-			  rcu_torture_writer_state,
+-			  cookie, cur_ops->get_gp_state());
+-	if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
+-		WARN_ONCE(cur_ops->poll_gp_state_full(&cookie_full),
+-			  "%s: Cookie check 6 failed %s(%d) online %*pbl\n",
+-			  __func__,
+-			  rcu_torture_writer_state_getname(),
+-			  rcu_torture_writer_state,
+-			  cpumask_pr_args(cpu_online_mask));
++	if (checkpolling) {
++		if (cur_ops->get_gp_state && cur_ops->poll_gp_state)
++			WARN_ONCE(cur_ops->poll_gp_state(cookie),
++				  "%s: Cookie check 2 failed %s(%d) %lu->%lu\n",
++				  __func__,
++				  rcu_torture_writer_state_getname(),
++				  rcu_torture_writer_state,
++				  cookie, cur_ops->get_gp_state());
++		if (cur_ops->get_gp_state_full && cur_ops->poll_gp_state_full)
++			WARN_ONCE(cur_ops->poll_gp_state_full(&cookie_full),
++				  "%s: Cookie check 6 failed %s(%d) online %*pbl\n",
++				  __func__,
++				  rcu_torture_writer_state_getname(),
++				  rcu_torture_writer_state,
++				  cpumask_pr_args(cpu_online_mask));
++	}
+ 	rcutorture_one_extend(&readstate, 0, trsp, rtrsp);
+ 	WARN_ON_ONCE(readstate);
+ 	// This next splat is expected behavior if leakpointer, especially
+-- 
+cgit 
+
+
+From 599d97e3f2236a0f02a59da05798e8af43d5ce72 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Wed, 27 Jul 2022 16:16:41 -0700
+Subject: rcutorture: Make "srcud" option also test polled grace-period API
+
+This commit brings the "srcud" (dynamically allocated) SRCU test in line
+with the "srcu" (statically allocated) test, so that both test the full
+SRCU polled grace-period API.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index d8e1b270a065f..7168dc8d61e98 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -709,6 +709,9 @@ static struct rcu_torture_ops srcud_ops = {
+ 	.deferred_free	= srcu_torture_deferred_free,
+ 	.sync		= srcu_torture_synchronize,
+ 	.exp_sync	= srcu_torture_synchronize_expedited,
++	.get_gp_state	= srcu_torture_get_gp_state,
++	.start_gp_poll	= srcu_torture_start_gp_poll,
++	.poll_gp_state	= srcu_torture_poll_gp_state,
+ 	.call		= srcu_torture_call,
+ 	.cb_barrier	= srcu_torture_barrier,
+ 	.stats		= srcu_torture_stats,
+-- 
+cgit 
+
+
+From d66e4cf974a53c1195f1f5a96387ee5dbad2bdf2 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 2 Aug 2022 10:18:23 -0700
+Subject: srcu: Add GP and maximum requested GP to Tiny SRCU rcutorture output
+
+This commit adds the ->srcu_idx and ->srcu_max_idx fields to the Tiny
+SRCU rcutorture output for additional diagnostics.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/srcutiny.h | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/srcutiny.h b/include/linux/srcutiny.h
+index 6cfaa0a9a9b96..4fcec6f5af908 100644
+--- a/include/linux/srcutiny.h
++++ b/include/linux/srcutiny.h
+@@ -82,10 +82,12 @@ static inline void srcu_torture_stats_print(struct srcu_struct *ssp,
+ 	int idx;
+ 
+ 	idx = ((data_race(READ_ONCE(ssp->srcu_idx)) + 1) & 0x2) >> 1;
+-	pr_alert("%s%s Tiny SRCU per-CPU(idx=%d): (%hd,%hd)\n",
++	pr_alert("%s%s Tiny SRCU per-CPU(idx=%d): (%hd,%hd) gp: %hu->%hu\n",
+ 		 tt, tf, idx,
+ 		 data_race(READ_ONCE(ssp->srcu_lock_nesting[!idx])),
+-		 data_race(READ_ONCE(ssp->srcu_lock_nesting[idx])));
++		 data_race(READ_ONCE(ssp->srcu_lock_nesting[idx])),
++		 data_race(READ_ONCE(ssp->srcu_idx)),
++		 data_race(READ_ONCE(ssp->srcu_idx_max)));
+ }
+ 
+ #endif
+-- 
+cgit 
+
+
+From de3f2671ae563d24c679dcca36c9e0ebd9564ebd Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 2 Aug 2022 11:59:49 -0700
+Subject: srcu: Make Tiny SRCU poll_state_synchronize_srcu() more precise
+
+This commit applies the more-precise grace-period-state check used by
+rcu_seq_done_exact() to poll_state_synchronize_srcu().  This is important
+because Tiny SRCU uses a 16-bit counter, which can wrap quite quickly.
+If counter wrap continues to be a problem, then expanding ->srcu_idx
+and ->srcu_idx_max to 32 bits might be warranted.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/srcutiny.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/rcu/srcutiny.c b/kernel/rcu/srcutiny.c
+index 92c002d654828..a2af24f214676 100644
+--- a/kernel/rcu/srcutiny.c
++++ b/kernel/rcu/srcutiny.c
+@@ -240,10 +240,10 @@ EXPORT_SYMBOL_GPL(start_poll_synchronize_srcu);
+  */
+ bool poll_state_synchronize_srcu(struct srcu_struct *ssp, unsigned long cookie)
+ {
+-	bool ret = USHORT_CMP_GE(READ_ONCE(ssp->srcu_idx), cookie);
++	unsigned short cur_s = READ_ONCE(ssp->srcu_idx);
+ 
+ 	barrier();
+-	return ret;
++	return USHORT_CMP_GE(cur_s, cookie) || USHORT_CMP_LT(cur_s, cookie - 3);
+ }
+ EXPORT_SYMBOL_GPL(poll_state_synchronize_srcu);
+ 
+-- 
+cgit 
+
+
+From 5fe89191e43fb37e874b8e5177fb2a5c72379b06 Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Tue, 2 Aug 2022 15:32:47 -0700
+Subject: srcu: Make Tiny SRCU use full-sized grace-period counters
+
+This commit makes Tiny SRCU use full-sized grace-period counters to
+further avoid counter-wrap issues when using polled grace-period APIs.
+
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ include/linux/srcutiny.h |  6 +++---
+ kernel/rcu/srcutiny.c    | 14 +++++++-------
+ 2 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/include/linux/srcutiny.h b/include/linux/srcutiny.h
+index 4fcec6f5af908..5aa5e0faf6a12 100644
+--- a/include/linux/srcutiny.h
++++ b/include/linux/srcutiny.h
+@@ -15,10 +15,10 @@
+ 
+ struct srcu_struct {
+ 	short srcu_lock_nesting[2];	/* srcu_read_lock() nesting depth. */
+-	unsigned short srcu_idx;	/* Current reader array element in bit 0x2. */
+-	unsigned short srcu_idx_max;	/* Furthest future srcu_idx request. */
+ 	u8 srcu_gp_running;		/* GP workqueue running? */
+ 	u8 srcu_gp_waiting;		/* GP waiting for readers? */
++	unsigned long srcu_idx;		/* Current reader array element in bit 0x2. */
++	unsigned long srcu_idx_max;	/* Furthest future srcu_idx request. */
+ 	struct swait_queue_head srcu_wq;
+ 					/* Last srcu_read_unlock() wakes GP. */
+ 	struct rcu_head *srcu_cb_head;	/* Pending callbacks: Head. */
+@@ -82,7 +82,7 @@ static inline void srcu_torture_stats_print(struct srcu_struct *ssp,
+ 	int idx;
+ 
+ 	idx = ((data_race(READ_ONCE(ssp->srcu_idx)) + 1) & 0x2) >> 1;
+-	pr_alert("%s%s Tiny SRCU per-CPU(idx=%d): (%hd,%hd) gp: %hu->%hu\n",
++	pr_alert("%s%s Tiny SRCU per-CPU(idx=%d): (%hd,%hd) gp: %lu->%lu\n",
+ 		 tt, tf, idx,
+ 		 data_race(READ_ONCE(ssp->srcu_lock_nesting[!idx])),
+ 		 data_race(READ_ONCE(ssp->srcu_lock_nesting[idx])),
+diff --git a/kernel/rcu/srcutiny.c b/kernel/rcu/srcutiny.c
+index a2af24f214676..33adafdad2613 100644
+--- a/kernel/rcu/srcutiny.c
++++ b/kernel/rcu/srcutiny.c
+@@ -117,7 +117,7 @@ void srcu_drive_gp(struct work_struct *wp)
+ 	struct srcu_struct *ssp;
+ 
+ 	ssp = container_of(wp, struct srcu_struct, srcu_work);
+-	if (ssp->srcu_gp_running || USHORT_CMP_GE(ssp->srcu_idx, READ_ONCE(ssp->srcu_idx_max)))
++	if (ssp->srcu_gp_running || ULONG_CMP_GE(ssp->srcu_idx, READ_ONCE(ssp->srcu_idx_max)))
+ 		return; /* Already running or nothing to do. */
+ 
+ 	/* Remove recently arrived callbacks and wait for readers. */
+@@ -150,17 +150,17 @@ void srcu_drive_gp(struct work_struct *wp)
+ 	 * straighten that out.
+ 	 */
+ 	WRITE_ONCE(ssp->srcu_gp_running, false);
+-	if (USHORT_CMP_LT(ssp->srcu_idx, READ_ONCE(ssp->srcu_idx_max)))
++	if (ULONG_CMP_LT(ssp->srcu_idx, READ_ONCE(ssp->srcu_idx_max)))
+ 		schedule_work(&ssp->srcu_work);
+ }
+ EXPORT_SYMBOL_GPL(srcu_drive_gp);
+ 
+ static void srcu_gp_start_if_needed(struct srcu_struct *ssp)
+ {
+-	unsigned short cookie;
++	unsigned long cookie;
+ 
+ 	cookie = get_state_synchronize_srcu(ssp);
+-	if (USHORT_CMP_GE(READ_ONCE(ssp->srcu_idx_max), cookie))
++	if (ULONG_CMP_GE(READ_ONCE(ssp->srcu_idx_max), cookie))
+ 		return;
+ 	WRITE_ONCE(ssp->srcu_idx_max, cookie);
+ 	if (!READ_ONCE(ssp->srcu_gp_running)) {
+@@ -215,7 +215,7 @@ unsigned long get_state_synchronize_srcu(struct srcu_struct *ssp)
+ 	barrier();
+ 	ret = (READ_ONCE(ssp->srcu_idx) + 3) & ~0x1;
+ 	barrier();
+-	return ret & USHRT_MAX;
++	return ret;
+ }
+ EXPORT_SYMBOL_GPL(get_state_synchronize_srcu);
+ 
+@@ -240,10 +240,10 @@ EXPORT_SYMBOL_GPL(start_poll_synchronize_srcu);
+  */
+ bool poll_state_synchronize_srcu(struct srcu_struct *ssp, unsigned long cookie)
+ {
+-	unsigned short cur_s = READ_ONCE(ssp->srcu_idx);
++	unsigned long cur_s = READ_ONCE(ssp->srcu_idx);
+ 
+ 	barrier();
+-	return USHORT_CMP_GE(cur_s, cookie) || USHORT_CMP_LT(cur_s, cookie - 3);
++	return ULONG_CMP_GE(cur_s, cookie) || ULONG_CMP_LT(cur_s, cookie - 3);
+ }
+ EXPORT_SYMBOL_GPL(poll_state_synchronize_srcu);
+ 
+-- 
+cgit 
+
+
+From fcd53c8a4dfa38bafb89efdd0b0f718f3a03f884 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Tue, 12 Jul 2022 16:26:05 +0800
+Subject: rcu-tasks: Convert RCU_LOCKDEP_WARN() to WARN_ONCE()
+
+Kernels built with CONFIG_PROVE_RCU=y and CONFIG_DEBUG_LOCK_ALLOC=y
+attempt to emit a warning when the synchronize_rcu_tasks_generic()
+function is called during early boot while the rcu_scheduler_active
+variable is RCU_SCHEDULER_INACTIVE.  However the warnings is not
+actually be printed because the debug_lockdep_rcu_enabled() returns
+false, exactly because the rcu_scheduler_active variable is still equal
+to RCU_SCHEDULER_INACTIVE.
+
+This commit therefore replaces RCU_LOCKDEP_WARN() with WARN_ONCE()
+to force these warnings to actually be printed.
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tasks.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/rcu/tasks.h b/kernel/rcu/tasks.h
+index 83c7e6620d403..469bf2a3b505e 100644
+--- a/kernel/rcu/tasks.h
++++ b/kernel/rcu/tasks.h
+@@ -560,7 +560,7 @@ static int __noreturn rcu_tasks_kthread(void *arg)
+ static void synchronize_rcu_tasks_generic(struct rcu_tasks *rtp)
+ {
+ 	/* Complain if the scheduler has not started.  */
+-	RCU_LOCKDEP_WARN(rcu_scheduler_active == RCU_SCHEDULER_INACTIVE,
++	WARN_ONCE(rcu_scheduler_active == RCU_SCHEDULER_INACTIVE,
+ 			 "synchronize_rcu_tasks called too soon");
+ 
+ 	// If the grace-period kthread is running, use it.
+-- 
+cgit 
+
+
+From d6ad60635cafe900bcd11ad588d8accb36c36b1b Mon Sep 17 00:00:00 2001
+From: "Paul E. McKenney" <paulmck@kernel.org>
+Date: Mon, 18 Jul 2022 10:57:26 -0700
+Subject: rcu-tasks: Ensure RCU Tasks Trace loops have quiescent states
+
+The RCU Tasks Trace grace-period kthread loops across all CPUs, and
+there can be quite a few CPUs, with some commercially available systems
+sporting well over a thousand of them.  Some of these loops can feature
+IPIs, which can take some time.  This commit therefore places a call to
+cond_resched_tasks_rcu_qs() in each such loop.
+
+Link: https://docs.google.com/document/d/1V0YnG1HTWMt9WHJjroiJL9lf-hMrud4v8Fn3fhyY0cI/edit?usp=sharing
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tasks.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/kernel/rcu/tasks.h b/kernel/rcu/tasks.h
+index 469bf2a3b505e..f5bf6fb430dab 100644
+--- a/kernel/rcu/tasks.h
++++ b/kernel/rcu/tasks.h
+@@ -1500,6 +1500,7 @@ static void rcu_tasks_trace_pregp_step(struct list_head *hop)
+ 		if (rcu_tasks_trace_pertask_prep(t, true))
+ 			trc_add_holdout(t, hop);
+ 		rcu_read_unlock();
++		cond_resched_tasks_rcu_qs();
+ 	}
+ 
+ 	// Only after all running tasks have been accounted for is it
+@@ -1520,6 +1521,7 @@ static void rcu_tasks_trace_pregp_step(struct list_head *hop)
+ 			raw_spin_lock_irqsave_rcu_node(rtpcp, flags);
+ 		}
+ 		raw_spin_unlock_irqrestore_rcu_node(rtpcp, flags);
++		cond_resched_tasks_rcu_qs();
+ 	}
+ 
+ 	// Re-enable CPU hotplug now that the holdout list is populated.
+@@ -1619,6 +1621,7 @@ static void check_all_holdout_tasks_trace(struct list_head *hop,
+ 			trc_del_holdout(t);
+ 		else if (needreport)
+ 			show_stalled_task_trace(t, firstreport);
++		cond_resched_tasks_rcu_qs();
+ 	}
+ 
+ 	// Re-enable CPU hotplug now that the holdout list scan has completed.
+-- 
+cgit 
+
+
+From 528262f50274079740b53e29bcaaabf219aa7417 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Tue, 19 Jul 2022 12:39:00 +0800
+Subject: rcu-tasks: Make RCU Tasks Trace check for userspace execution
+
+Userspace execution is a valid quiescent state for RCU Tasks Trace,
+but the scheduling-clock interrupt does not currently report such
+quiescent states.
+
+Of course, the scheduling-clock interrupt is not strictly speaking
+userspace execution.  However, the only way that this code is not
+in a quiescent state is if something invoked rcu_read_lock_trace(),
+and that would be reflected in the ->trc_reader_nesting field in
+the task_struct structure.  Furthermore, this field is checked by
+rcu_tasks_trace_qs(), which is invoked by rcu_tasks_qs() which is in
+turn invoked by rcu_note_voluntary_context_switch() in kernels building
+at least one of the RCU Tasks flavors.  It is therefore safe to invoke
+rcu_tasks_trace_qs() from the rcu_sched_clock_irq().
+
+But rcu_tasks_qs() also invokes rcu_tasks_classic_qs() for RCU
+Tasks, which lacks the read-side markers provided by RCU Tasks Trace.
+This raises the possibility that an RCU Tasks grace period could start
+after the interrupt from userspace execution, but before the call to
+rcu_sched_clock_irq().  However, it turns out that this is safe because
+the RCU Tasks grace period waits for an RCU grace period, which will
+wait for the entire scheduling-clock interrupt handler, including any
+RCU Tasks read-side critical section that this handler might contain.
+
+This commit therefore updates the rcu_sched_clock_irq() function's
+check for usermode execution and its call to rcu_tasks_classic_qs()
+to instead check for both usermode execution and interrupt from idle,
+and to instead call rcu_note_voluntary_context_switch().  This
+consolidates code and provides more faster RCU Tasks Trace
+reporting of quiescent states in kernels that do scheduling-clock
+interrupts for userspace execution.
+
+[ paulmck: Consolidate checks into rcu_sched_clock_irq(). ]
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/tree.c        | 4 ++--
+ kernel/rcu/tree_plugin.h | 4 ----
+ 2 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/rcu/tree.c b/kernel/rcu/tree.c
+index 79aea7df4345e..11d5aefd16961 100644
+--- a/kernel/rcu/tree.c
++++ b/kernel/rcu/tree.c
+@@ -2341,8 +2341,8 @@ void rcu_sched_clock_irq(int user)
+ 	rcu_flavor_sched_clock_irq(user);
+ 	if (rcu_pending(user))
+ 		invoke_rcu_core();
+-	if (user)
+-		rcu_tasks_classic_qs(current, false);
++	if (user || rcu_is_cpu_rrupt_from_idle())
++		rcu_note_voluntary_context_switch(current);
+ 	lockdep_assert_irqs_disabled();
+ 
+ 	trace_rcu_utilization(TPS("End scheduler-tick"));
+diff --git a/kernel/rcu/tree_plugin.h b/kernel/rcu/tree_plugin.h
+index 438ecae6bd7e7..aa64b035c24f2 100644
+--- a/kernel/rcu/tree_plugin.h
++++ b/kernel/rcu/tree_plugin.h
+@@ -718,9 +718,6 @@ static void rcu_flavor_sched_clock_irq(int user)
+ 	struct task_struct *t = current;
+ 
+ 	lockdep_assert_irqs_disabled();
+-	if (user || rcu_is_cpu_rrupt_from_idle()) {
+-		rcu_note_voluntary_context_switch(current);
+-	}
+ 	if (rcu_preempt_depth() > 0 ||
+ 	    (preempt_count() & (PREEMPT_MASK | SOFTIRQ_MASK))) {
+ 		/* No QS, force context switch if deferred. */
+@@ -972,7 +969,6 @@ static void rcu_flavor_sched_clock_irq(int user)
+ 		 * neither access nor modify, at least not while the
+ 		 * corresponding CPU is online.
+ 		 */
+-
+ 		rcu_qs();
+ 	}
+ }
+-- 
+cgit 
+
+
+From 48297a22a39adcde7a3ba52b913c5aaa9a990364 Mon Sep 17 00:00:00 2001
+From: Zqiang <qiang1.zhang@intel.com>
+Date: Sun, 31 Jul 2022 18:53:56 +0800
+Subject: rcutorture: Use the barrier operation specified by cur_ops
+
+The rcutorture_oom_notify() function unconditionally invokes
+rcu_barrier(), which is OK when the rcutorture.torture_type value is
+"rcu", but unhelpful otherwise.  The purpose of these barrier calls is to
+wait for all outstanding callback-flooding callbacks to be invoked before
+cleaning up their data.  Using the wrong barrier function therefore
+risks arbitrary memory corruption.  Thus, this commit changes these
+rcu_barrier() calls into cur_ops->cb_barrier() to make things work when
+torturing non-vanilla flavors of RCU.
+
+Signed-off-by: Zqiang <qiang1.zhang@intel.com>
+Signed-off-by: Paul E. McKenney <paulmck@kernel.org>
+---
+ kernel/rcu/rcutorture.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/rcu/rcutorture.c b/kernel/rcu/rcutorture.c
+index d8e1b270a065f..08b7b59d5d05b 100644
+--- a/kernel/rcu/rcutorture.c
++++ b/kernel/rcu/rcutorture.c
+@@ -2600,12 +2600,12 @@ static int rcutorture_oom_notify(struct notifier_block *self,
+ 	for (i = 0; i < fwd_progress; i++)
+ 		ncbs += rcu_torture_fwd_prog_cbfree(&rfp[i]);
+ 	pr_info("%s: Freed %lu RCU callbacks.\n", __func__, ncbs);
+-	rcu_barrier();
++	cur_ops->cb_barrier();
+ 	ncbs = 0;
+ 	for (i = 0; i < fwd_progress; i++)
+ 		ncbs += rcu_torture_fwd_prog_cbfree(&rfp[i]);
+ 	pr_info("%s: Freed %lu RCU callbacks.\n", __func__, ncbs);
+-	rcu_barrier();
++	cur_ops->cb_barrier();
+ 	ncbs = 0;
+ 	for (i = 0; i < fwd_progress; i++)
+ 		ncbs += rcu_torture_fwd_prog_cbfree(&rfp[i]);
+-- 
+cgit 
+
