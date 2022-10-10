@@ -118,6 +118,7 @@ source=(
   "0028-sched-fair-feec-scale_rt_capacity-improvements.patch"
   "0030-platform-x86-AMD-pmf-CnQf.patch"
   "0031-sched-core-affinity_patchwork.patch"
+  "0032-Implement-AMD-Pstate-EPP-Driver.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -497,5 +498,6 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             'c6c7d94199e2a1c607841a57068f6351d299ac5aa159ef777312722150856523'
             'ea7d35280b3a02acbc79a92fa5ddce678d5fdfaecb65ee35ef13a076a0a8eb55'
-            'fb31aa7f60f970d5161cdd06386a96c9fda0504bde27fd5b61fa66c74e84fbb5')
+            'fb31aa7f60f970d5161cdd06386a96c9fda0504bde27fd5b61fa66c74e84fbb5'
+            'c0db4d0fdec2f74b05bfd59a4517c0738ab15afc3dd4c66eaa8e6999c284dddf')
 
