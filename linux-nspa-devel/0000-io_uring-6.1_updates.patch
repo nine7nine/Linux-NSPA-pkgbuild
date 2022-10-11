@@ -1,0 +1,5015 @@
+From 9f0deaa12d832f488500a5afe9b912e9b3cfc432 Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 16 Aug 2022 06:59:59 -0700
+Subject: eventfd: guard wake_up in eventfd fs calls as well
+
+Guard wakeups that the user can trigger, and that may end up triggering a
+call back into eventfd_signal. This is in addition to the current approach
+that only guards in eventfd_signal.
+
+Rename in_eventfd_signal -> in_eventfd at the same time to reflect this.
+
+Without this there would be a deadlock in the following code using libaio:
+
+int main()
+{
+	struct io_context *ctx = NULL;
+	struct iocb iocb;
+	struct iocb *iocbs[] = { &iocb };
+	int evfd;
+        uint64_t val = 1;
+
+	evfd = eventfd(0, EFD_CLOEXEC);
+	assert(!io_setup(2, &ctx));
+	io_prep_poll(&iocb, evfd, POLLIN);
+	io_set_eventfd(&iocb, evfd);
+	assert(1 == io_submit(ctx, 1, iocbs));
+        write(evfd, &val, 8);
+}
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Reviewed-by: Jens Axboe <axboe@kernel.dk>
+Link: https://lore.kernel.org/r/20220816135959.1490641-1-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ fs/eventfd.c            | 10 +++++++---
+ include/linux/eventfd.h |  2 +-
+ include/linux/sched.h   |  2 +-
+ 3 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/fs/eventfd.c b/fs/eventfd.c
+index 3627dd7d25db8..c0ffee99ad238 100644
+--- a/fs/eventfd.c
++++ b/fs/eventfd.c
+@@ -69,17 +69,17 @@ __u64 eventfd_signal(struct eventfd_ctx *ctx, __u64 n)
+ 	 * it returns false, the eventfd_signal() call should be deferred to a
+ 	 * safe context.
+ 	 */
+-	if (WARN_ON_ONCE(current->in_eventfd_signal))
++	if (WARN_ON_ONCE(current->in_eventfd))
+ 		return 0;
+ 
+ 	spin_lock_irqsave(&ctx->wqh.lock, flags);
+-	current->in_eventfd_signal = 1;
++	current->in_eventfd = 1;
+ 	if (ULLONG_MAX - ctx->count < n)
+ 		n = ULLONG_MAX - ctx->count;
+ 	ctx->count += n;
+ 	if (waitqueue_active(&ctx->wqh))
+ 		wake_up_locked_poll(&ctx->wqh, EPOLLIN);
+-	current->in_eventfd_signal = 0;
++	current->in_eventfd = 0;
+ 	spin_unlock_irqrestore(&ctx->wqh.lock, flags);
+ 
+ 	return n;
+@@ -253,8 +253,10 @@ static ssize_t eventfd_read(struct kiocb *iocb, struct iov_iter *to)
+ 		__set_current_state(TASK_RUNNING);
+ 	}
+ 	eventfd_ctx_do_read(ctx, &ucnt);
++	current->in_eventfd = 1;
+ 	if (waitqueue_active(&ctx->wqh))
+ 		wake_up_locked_poll(&ctx->wqh, EPOLLOUT);
++	current->in_eventfd = 0;
+ 	spin_unlock_irq(&ctx->wqh.lock);
+ 	if (unlikely(copy_to_iter(&ucnt, sizeof(ucnt), to) != sizeof(ucnt)))
+ 		return -EFAULT;
+@@ -301,8 +303,10 @@ static ssize_t eventfd_write(struct file *file, const char __user *buf, size_t c
+ 	}
+ 	if (likely(res > 0)) {
+ 		ctx->count += ucnt;
++		current->in_eventfd = 1;
+ 		if (waitqueue_active(&ctx->wqh))
+ 			wake_up_locked_poll(&ctx->wqh, EPOLLIN);
++		current->in_eventfd = 0;
+ 	}
+ 	spin_unlock_irq(&ctx->wqh.lock);
+ 
+diff --git a/include/linux/eventfd.h b/include/linux/eventfd.h
+index 305d5f19093b9..30eb30d6909b0 100644
+--- a/include/linux/eventfd.h
++++ b/include/linux/eventfd.h
+@@ -46,7 +46,7 @@ void eventfd_ctx_do_read(struct eventfd_ctx *ctx, __u64 *cnt);
+ 
+ static inline bool eventfd_signal_allowed(void)
+ {
+-	return !current->in_eventfd_signal;
++	return !current->in_eventfd;
+ }
+ 
+ #else /* CONFIG_EVENTFD */
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index e7b2f8a5c711c..8d82d6d326701 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -936,7 +936,7 @@ struct task_struct {
+ #endif
+ #ifdef CONFIG_EVENTFD
+ 	/* Recursion prevention for eventfd_signal() */
+-	unsigned			in_eventfd_signal:1;
++	unsigned			in_eventfd:1;
+ #endif
+ #ifdef CONFIG_IOMMU_SVA
+ 	unsigned			pasid_activated:1;
+-- 
+cgit 
+
+
+From 32d91f0590080597d5fc46c0c36d8885c241622e Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 30 Aug 2022 05:50:07 -0700
+Subject: io_uring: remove unnecessary variable
+
+'running' is set once and read once, so can easily just remove it
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220830125013.570060-2-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index b9640ad5069f3..b328805d103ad 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1052,12 +1052,9 @@ void io_req_task_work_add(struct io_kiocb *req)
+ 	struct io_uring_task *tctx = req->task->io_uring;
+ 	struct io_ring_ctx *ctx = req->ctx;
+ 	struct llist_node *node;
+-	bool running;
+-
+-	running = !llist_add(&req->io_task_work.node, &tctx->task_list);
+ 
+ 	/* task_work already pending, we're done */
+-	if (running)
++	if (!llist_add(&req->io_task_work.node, &tctx->task_list))
+ 		return;
+ 
+ 	if (ctx->flags & IORING_SETUP_TASKRUN_FLAG)
+-- 
+cgit 
+
+
+From b4c98d59a787eff4c8ee983bcf68266ce2199df6 Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 30 Aug 2022 05:50:08 -0700
+Subject: io_uring: introduce io_has_work
+
+This will be used later to know if the ring has outstanding work. Right
+now just if there is overflow CQEs to copy to the main CQE ring, but later
+will include deferred tasks
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220830125013.570060-3-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index b328805d103ad..471472fe9a569 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -2146,6 +2146,11 @@ struct io_wait_queue {
+ 	unsigned nr_timeouts;
+ };
+ 
++static inline bool io_has_work(struct io_ring_ctx *ctx)
++{
++	return test_bit(IO_CHECK_CQ_OVERFLOW_BIT, &ctx->check_cq);
++}
++
+ static inline bool io_should_wake(struct io_wait_queue *iowq)
+ {
+ 	struct io_ring_ctx *ctx = iowq->ctx;
+@@ -2164,13 +2169,13 @@ static int io_wake_function(struct wait_queue_entry *curr, unsigned int mode,
+ {
+ 	struct io_wait_queue *iowq = container_of(curr, struct io_wait_queue,
+ 							wq);
++	struct io_ring_ctx *ctx = iowq->ctx;
+ 
+ 	/*
+ 	 * Cannot safely flush overflowed CQEs from here, ensure we wake up
+ 	 * the task, and the next invocation will do it.
+ 	 */
+-	if (io_should_wake(iowq) ||
+-	    test_bit(IO_CHECK_CQ_OVERFLOW_BIT, &iowq->ctx->check_cq))
++	if (io_should_wake(iowq) || io_has_work(ctx))
+ 		return autoremove_wake_function(curr, mode, wake_flags, key);
+ 	return -1;
+ }
+@@ -2506,8 +2511,8 @@ static __poll_t io_uring_poll(struct file *file, poll_table *wait)
+ 	 * Users may get EPOLLIN meanwhile seeing nothing in cqring, this
+ 	 * pushs them to do the flush.
+ 	 */
+-	if (io_cqring_events(ctx) ||
+-	    test_bit(IO_CHECK_CQ_OVERFLOW_BIT, &ctx->check_cq))
++
++	if (io_cqring_events(ctx) || io_has_work(ctx))
+ 		mask |= EPOLLIN | EPOLLRDNORM;
+ 
+ 	return mask;
+-- 
+cgit 
+
+
+From 2327337b881d3f24949da4a4d34a6e657a71a79d Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 30 Aug 2022 05:50:09 -0700
+Subject: io_uring: do not run task work at the start of io_uring_enter
+
+This is not needed, and it is normally better to wait for task work until
+after submissions. This will allow greater batching if either work arrives
+in the meanwhile, or if the submissions cause task work to be queued up.
+
+For SQPOLL this also no longer runs task work, but this is handled inside
+the SQPOLL loop anyway.
+
+For IOPOLL io_iopoll_check will run task work anyway
+
+And otherwise io_cqring_wait will run task work
+
+Suggested-by: Pavel Begunkov <asml.silence@gmail.com>
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220830125013.570060-4-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 471472fe9a569..edf7381b0215e 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -2991,8 +2991,6 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
+ 	struct fd f;
+ 	long ret;
+ 
+-	io_run_task_work();
+-
+ 	if (unlikely(flags & ~(IORING_ENTER_GETEVENTS | IORING_ENTER_SQ_WAKEUP |
+ 			       IORING_ENTER_SQ_WAIT | IORING_ENTER_EXT_ARG |
+ 			       IORING_ENTER_REGISTERED_RING)))
+-- 
+cgit 
+
+
+From c0e0d6ba25f180ab76d3c18f8b360a119dffa634 Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 30 Aug 2022 05:50:10 -0700
+Subject: io_uring: add IORING_SETUP_DEFER_TASKRUN
+
+Allow deferring async tasks until the user calls io_uring_enter(2) with
+the IORING_ENTER_GETEVENTS flag. Enable this mode with a flag at
+io_uring_setup time. This functionality requires that the later
+io_uring_enter will be called from the same submission task, and therefore
+restrict this flag to work only when IORING_SETUP_SINGLE_ISSUER is also
+set.
+
+Being able to hand pick when tasks are run prevents the problem where
+there is current work to be done, however task work runs anyway.
+
+For example, a common workload would obtain a batch of CQEs, and process
+each one. Interrupting this to additional taskwork would add latency but
+not gain anything. If instead task work is deferred to just before more
+CQEs are obtained then no additional latency is added.
+
+The way this is implemented is by trying to keep task work local to a
+io_ring_ctx, rather than to the submission task. This is required, as the
+application will want to wake up only a single io_ring_ctx at a time to
+process work, and so the lists of work have to be kept separate.
+
+This has some other benefits like not having to check the task continually
+in handle_tw_list (and potentially unlocking/locking those), and reducing
+locks in the submit & process completions path.
+
+There are networking cases where using this option can reduce request
+latency by 50%. For example a contrived example using [1] where the client
+sends 2k data and receives the same data back while doing some system
+calls (to trigger task work) shows this reduction. The reason ends up
+being that if sending responses is delayed by processing task work, then
+the client side sits idle. Whereas reordering the sends first means that
+the client runs it's workload in parallel with the local task work.
+
+[1]:
+Using https://github.com/DylanZA/netbench/tree/defer_run
+Client:
+./netbench  --client_only 1 --control_port 10000 --host <host> --tx "epoll --threads 16 --per_thread 1 --size 2048 --resp 2048 --workload 1000"
+Server:
+./netbench  --server_only 1 --control_port 10000  --rx "io_uring --defer_taskrun 0 --workload 100"   --rx "io_uring  --defer_taskrun 1 --workload 100"
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220830125013.570060-5-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/io_uring_types.h |   2 +
+ include/uapi/linux/io_uring.h  |   7 ++
+ io_uring/cancel.c              |   2 +-
+ io_uring/io_uring.c            | 147 ++++++++++++++++++++++++++++++++++++-----
+ io_uring/io_uring.h            |  29 ++++++--
+ io_uring/rsrc.c                |   2 +-
+ 6 files changed, 168 insertions(+), 21 deletions(-)
+
+diff --git a/include/linux/io_uring_types.h b/include/linux/io_uring_types.h
+index 677a25d44d7f3..d56ff21851680 100644
+--- a/include/linux/io_uring_types.h
++++ b/include/linux/io_uring_types.h
+@@ -301,6 +301,8 @@ struct io_ring_ctx {
+ 		struct io_hash_table	cancel_table;
+ 		bool			poll_multi_queue;
+ 
++		struct llist_head	work_llist;
++
+ 		struct list_head	io_buffers_comp;
+ 	} ____cacheline_aligned_in_smp;
+ 
+diff --git a/include/uapi/linux/io_uring.h b/include/uapi/linux/io_uring.h
+index 6b83177fd41dd..972b179bc07ae 100644
+--- a/include/uapi/linux/io_uring.h
++++ b/include/uapi/linux/io_uring.h
+@@ -157,6 +157,13 @@ enum {
+  */
+ #define IORING_SETUP_SINGLE_ISSUER	(1U << 12)
+ 
++/*
++ * Defer running task work to get events.
++ * Rather than running bits of task work whenever the task transitions
++ * try to do it just before it is needed.
++ */
++#define IORING_SETUP_DEFER_TASKRUN	(1U << 13)
++
+ enum io_uring_op {
+ 	IORING_OP_NOP,
+ 	IORING_OP_READV,
+diff --git a/io_uring/cancel.c b/io_uring/cancel.c
+index 5fc5d3e80fcb3..2291a53cdabd1 100644
+--- a/io_uring/cancel.c
++++ b/io_uring/cancel.c
+@@ -292,7 +292,7 @@ int io_sync_cancel(struct io_ring_ctx *ctx, void __user *arg)
+ 			break;
+ 
+ 		mutex_unlock(&ctx->uring_lock);
+-		ret = io_run_task_work_sig();
++		ret = io_run_task_work_sig(ctx);
+ 		if (ret < 0) {
+ 			mutex_lock(&ctx->uring_lock);
+ 			break;
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index edf7381b0215e..1f0df14c30624 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -142,7 +142,7 @@ static bool io_uring_try_cancel_requests(struct io_ring_ctx *ctx,
+ static void io_dismantle_req(struct io_kiocb *req);
+ static void io_clean_op(struct io_kiocb *req);
+ static void io_queue_sqe(struct io_kiocb *req);
+-
++static void io_move_task_work_from_local(struct io_ring_ctx *ctx);
+ static void __io_submit_flush_completions(struct io_ring_ctx *ctx);
+ 
+ static struct kmem_cache *req_cachep;
+@@ -316,6 +316,7 @@ static __cold struct io_ring_ctx *io_ring_ctx_alloc(struct io_uring_params *p)
+ 	INIT_LIST_HEAD(&ctx->rsrc_ref_list);
+ 	INIT_DELAYED_WORK(&ctx->rsrc_put_work, io_rsrc_put_work);
+ 	init_llist_head(&ctx->rsrc_put_llist);
++	init_llist_head(&ctx->work_llist);
+ 	INIT_LIST_HEAD(&ctx->tctx_list);
+ 	ctx->submit_state.free_list.next = NULL;
+ 	INIT_WQ_LIST(&ctx->locked_free_list);
+@@ -1047,12 +1048,36 @@ void tctx_task_work(struct callback_head *cb)
+ 	trace_io_uring_task_work_run(tctx, count, loops);
+ }
+ 
+-void io_req_task_work_add(struct io_kiocb *req)
++static void io_req_local_work_add(struct io_kiocb *req)
++{
++	struct io_ring_ctx *ctx = req->ctx;
++
++	if (!llist_add(&req->io_task_work.node, &ctx->work_llist))
++		return;
++
++	if (unlikely(atomic_read(&req->task->io_uring->in_idle))) {
++		io_move_task_work_from_local(ctx);
++		return;
++	}
++
++	if (ctx->flags & IORING_SETUP_TASKRUN_FLAG)
++		atomic_or(IORING_SQ_TASKRUN, &ctx->rings->sq_flags);
++
++	io_cqring_wake(ctx);
++
++}
++
++static inline void __io_req_task_work_add(struct io_kiocb *req, bool allow_local)
+ {
+ 	struct io_uring_task *tctx = req->task->io_uring;
+ 	struct io_ring_ctx *ctx = req->ctx;
+ 	struct llist_node *node;
+ 
++	if (allow_local && ctx->flags & IORING_SETUP_DEFER_TASKRUN) {
++		io_req_local_work_add(req);
++		return;
++	}
++
+ 	/* task_work already pending, we're done */
+ 	if (!llist_add(&req->io_task_work.node, &tctx->task_list))
+ 		return;
+@@ -1074,6 +1099,73 @@ void io_req_task_work_add(struct io_kiocb *req)
+ 	}
+ }
+ 
++void io_req_task_work_add(struct io_kiocb *req)
++{
++	__io_req_task_work_add(req, true);
++}
++
++static void __cold io_move_task_work_from_local(struct io_ring_ctx *ctx)
++{
++	struct llist_node *node;
++
++	node = llist_del_all(&ctx->work_llist);
++	while (node) {
++		struct io_kiocb *req = container_of(node, struct io_kiocb,
++						    io_task_work.node);
++
++		node = node->next;
++		__io_req_task_work_add(req, false);
++	}
++}
++
++int io_run_local_work(struct io_ring_ctx *ctx)
++{
++	bool locked;
++	struct llist_node *node;
++	struct llist_node fake;
++	struct llist_node *current_final = NULL;
++	int ret;
++
++	if (unlikely(ctx->submitter_task != current)) {
++		/* maybe this is before any submissions */
++		if (!ctx->submitter_task)
++			return 0;
++
++		return -EEXIST;
++	}
++
++	locked = mutex_trylock(&ctx->uring_lock);
++
++	node = io_llist_xchg(&ctx->work_llist, &fake);
++	ret = 0;
++again:
++	while (node != current_final) {
++		struct llist_node *next = node->next;
++		struct io_kiocb *req = container_of(node, struct io_kiocb,
++						    io_task_work.node);
++		prefetch(container_of(next, struct io_kiocb, io_task_work.node));
++		req->io_task_work.func(req, &locked);
++		ret++;
++		node = next;
++	}
++
++	if (ctx->flags & IORING_SETUP_TASKRUN_FLAG)
++		atomic_andnot(IORING_SQ_TASKRUN, &ctx->rings->sq_flags);
++
++	node = io_llist_cmpxchg(&ctx->work_llist, &fake, NULL);
++	if (node != &fake) {
++		current_final = &fake;
++		node = io_llist_xchg(&ctx->work_llist, &fake);
++		goto again;
++	}
++
++	if (locked) {
++		io_submit_flush_completions(ctx);
++		mutex_unlock(&ctx->uring_lock);
++	}
++	return ret;
++}
++
+ static void io_req_tw_post(struct io_kiocb *req, bool *locked)
+ {
+ 	io_req_complete_post(req);
+@@ -1285,8 +1377,10 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
+ 			u32 tail = ctx->cached_cq_tail;
+ 
+ 			mutex_unlock(&ctx->uring_lock);
+-			io_run_task_work();
++			ret = io_run_task_work_ctx(ctx);
+ 			mutex_lock(&ctx->uring_lock);
++			if (ret < 0)
++				break;
+ 
+ 			/* some requests don't go through iopoll_list */
+ 			if (tail != ctx->cached_cq_tail ||
+@@ -2148,7 +2242,9 @@ struct io_wait_queue {
+ 
+ static inline bool io_has_work(struct io_ring_ctx *ctx)
+ {
+-	return test_bit(IO_CHECK_CQ_OVERFLOW_BIT, &ctx->check_cq);
++	return test_bit(IO_CHECK_CQ_OVERFLOW_BIT, &ctx->check_cq) ||
++	       ((ctx->flags & IORING_SETUP_DEFER_TASKRUN) &&
++		!llist_empty(&ctx->work_llist));
+ }
+ 
+ static inline bool io_should_wake(struct io_wait_queue *iowq)
+@@ -2180,9 +2276,9 @@ static int io_wake_function(struct wait_queue_entry *curr, unsigned int mode,
+ 	return -1;
+ }
+ 
+-int io_run_task_work_sig(void)
++int io_run_task_work_sig(struct io_ring_ctx *ctx)
+ {
+-	if (io_run_task_work())
++	if (io_run_task_work_ctx(ctx) > 0)
+ 		return 1;
+ 	if (task_sigpending(current))
+ 		return -EINTR;
+@@ -2198,7 +2294,7 @@ static inline int io_cqring_wait_schedule(struct io_ring_ctx *ctx,
+ 	unsigned long check_cq;
+ 
+ 	/* make sure we run task_work before checking for signals */
+-	ret = io_run_task_work_sig();
++	ret = io_run_task_work_sig(ctx);
+ 	if (ret || io_should_wake(iowq))
+ 		return ret;
+ 
+@@ -2229,12 +2325,14 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
+ 	int ret;
+ 
+ 	do {
++		/* always run at least 1 task work to process local work */
++		ret = io_run_task_work_ctx(ctx);
++		if (ret < 0)
++			return ret;
+ 		io_cqring_overflow_flush(ctx);
+ 		if (io_cqring_events(ctx) >= min_events)
+ 			return 0;
+-		if (!io_run_task_work())
+-			break;
+-	} while (1);
++	} while (ret > 0);
+ 
+ 	if (sig) {
+ #ifdef CONFIG_COMPAT
+@@ -2575,6 +2673,9 @@ static __cold void io_ring_exit_work(struct work_struct *work)
+ 	 * as nobody else will be looking for them.
+ 	 */
+ 	do {
++		if (ctx->flags & IORING_SETUP_DEFER_TASKRUN)
++			io_move_task_work_from_local(ctx);
++
+ 		while (io_uring_try_cancel_requests(ctx, NULL, true))
+ 			cond_resched();
+ 
+@@ -2769,13 +2870,15 @@ static __cold bool io_uring_try_cancel_requests(struct io_ring_ctx *ctx,
+ 		}
+ 	}
+ 
++	if (ctx->flags & IORING_SETUP_DEFER_TASKRUN)
++		ret |= io_run_local_work(ctx) > 0;
+ 	ret |= io_cancel_defer_files(ctx, task, cancel_all);
+ 	mutex_lock(&ctx->uring_lock);
+ 	ret |= io_poll_remove_all(ctx, task, cancel_all);
+ 	mutex_unlock(&ctx->uring_lock);
+ 	ret |= io_kill_timeouts(ctx, task, cancel_all);
+ 	if (task)
+-		ret |= io_run_task_work();
++		ret |= io_run_task_work() > 0;
+ 	return ret;
+ }
+ 
+@@ -3060,8 +3163,10 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
+ 			goto iopoll_locked;
+ 		mutex_unlock(&ctx->uring_lock);
+ 	}
++
+ 	if (flags & IORING_ENTER_GETEVENTS) {
+ 		int ret2;
++
+ 		if (ctx->syscall_iopoll) {
+ 			/*
+ 			 * We disallow the app entering submit/complete with
+@@ -3290,17 +3395,29 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
+ 	if (ctx->flags & IORING_SETUP_SQPOLL) {
+ 		/* IPI related flags don't make sense with SQPOLL */
+ 		if (ctx->flags & (IORING_SETUP_COOP_TASKRUN |
+-				  IORING_SETUP_TASKRUN_FLAG))
++				  IORING_SETUP_TASKRUN_FLAG |
++				  IORING_SETUP_DEFER_TASKRUN))
+ 			goto err;
+ 		ctx->notify_method = TWA_SIGNAL_NO_IPI;
+ 	} else if (ctx->flags & IORING_SETUP_COOP_TASKRUN) {
+ 		ctx->notify_method = TWA_SIGNAL_NO_IPI;
+ 	} else {
+-		if (ctx->flags & IORING_SETUP_TASKRUN_FLAG)
++		if (ctx->flags & IORING_SETUP_TASKRUN_FLAG &&
++		    !(ctx->flags & IORING_SETUP_DEFER_TASKRUN))
+ 			goto err;
+ 		ctx->notify_method = TWA_SIGNAL;
+ 	}
+ 
++	/*
++	 * For DEFER_TASKRUN we require the completion task to be the same as the
++	 * submission task. This implies that there is only one submitter, so enforce
++	 * that.
++	 */
++	if (ctx->flags & IORING_SETUP_DEFER_TASKRUN &&
++	    !(ctx->flags & IORING_SETUP_SINGLE_ISSUER)) {
++		goto err;
++	}
++
+ 	/*
+ 	 * This is just grabbed for accounting purposes. When a process exits,
+ 	 * the mm is exited and dropped before the files, hence we need to hang
+@@ -3401,7 +3518,7 @@ static long io_uring_setup(u32 entries, struct io_uring_params __user *params)
+ 			IORING_SETUP_R_DISABLED | IORING_SETUP_SUBMIT_ALL |
+ 			IORING_SETUP_COOP_TASKRUN | IORING_SETUP_TASKRUN_FLAG |
+ 			IORING_SETUP_SQE128 | IORING_SETUP_CQE32 |
+-			IORING_SETUP_SINGLE_ISSUER))
++			IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_DEFER_TASKRUN))
+ 		return -EINVAL;
+ 
+ 	return io_uring_create(entries, &p, params);
+@@ -3864,7 +3981,7 @@ SYSCALL_DEFINE4(io_uring_register, unsigned int, fd, unsigned int, opcode,
+ 
+ 	ctx = f.file->private_data;
+ 
+-	io_run_task_work();
++	io_run_task_work_ctx(ctx);
+ 
+ 	mutex_lock(&ctx->uring_lock);
+ 	ret = __io_uring_register(ctx, opcode, arg, nr_args);
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index 2f73f83af9604..f417d75d7bc1c 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -26,7 +26,8 @@ enum {
+ 
+ struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx);
+ bool io_req_cqe_overflow(struct io_kiocb *req);
+-int io_run_task_work_sig(void);
++int io_run_task_work_sig(struct io_ring_ctx *ctx);
++int io_run_local_work(struct io_ring_ctx *ctx);
+ void io_req_complete_failed(struct io_kiocb *req, s32 res);
+ void __io_req_complete(struct io_kiocb *req, unsigned issue_flags);
+ void io_req_complete_post(struct io_kiocb *req);
+@@ -221,17 +222,37 @@ static inline unsigned int io_sqring_entries(struct io_ring_ctx *ctx)
+ 	return smp_load_acquire(&rings->sq.tail) - ctx->cached_sq_head;
+ }
+ 
+-static inline bool io_run_task_work(void)
++static inline int io_run_task_work(void)
+ {
+ 	if (test_thread_flag(TIF_NOTIFY_SIGNAL)) {
+ 		__set_current_state(TASK_RUNNING);
+ 		clear_notify_signal();
+ 		if (task_work_pending(current))
+ 			task_work_run();
+-		return true;
++		return 1;
+ 	}
+ 
+-	return false;
++	return 0;
++}
++
++static inline int io_run_task_work_ctx(struct io_ring_ctx *ctx)
++{
++	int ret = 0;
++	int ret2;
++
++	if (ctx->flags & IORING_SETUP_DEFER_TASKRUN)
++		ret = io_run_local_work(ctx);
++
++	/* want to run this after in case more is added */
++	ret2 = io_run_task_work();
++
++	/* Try propagate error in favour of if tasks were run,
++	 * but still make sure to run them if requested
++	 */
++	if (ret >= 0)
++		ret += ret2;
++
++	return ret;
+ }
+ 
+ static inline void io_tw_lock(struct io_ring_ctx *ctx, bool *locked)
+diff --git a/io_uring/rsrc.c b/io_uring/rsrc.c
+index cf32721132141..6f88ded0e7e56 100644
+--- a/io_uring/rsrc.c
++++ b/io_uring/rsrc.c
+@@ -341,7 +341,7 @@ __cold static int io_rsrc_ref_quiesce(struct io_rsrc_data *data,
+ 		flush_delayed_work(&ctx->rsrc_put_work);
+ 		reinit_completion(&data->done);
+ 
+-		ret = io_run_task_work_sig();
++		ret = io_run_task_work_sig(ctx);
+ 		mutex_lock(&ctx->uring_lock);
+ 	} while (ret >= 0);
+ 	data->quiesce = false;
+-- 
+cgit 
+
+
+From d8e9214f119db5697382c63a62790a4afb5d00cd Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 30 Aug 2022 05:50:11 -0700
+Subject: io_uring: move io_eventfd_put
+
+Non functional change: move this function above io_eventfd_signal so it
+can be used from there
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220830125013.570060-6-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 1f0df14c30624..0fd03da951139 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -478,6 +478,14 @@ static __cold void io_queue_deferred(struct io_ring_ctx *ctx)
+ 	}
+ }
+ 
++static void io_eventfd_put(struct rcu_head *rcu)
++{
++	struct io_ev_fd *ev_fd = container_of(rcu, struct io_ev_fd, rcu);
++
++	eventfd_ctx_put(ev_fd->cq_ev_fd);
++	kfree(ev_fd);
++}
++
+ static void io_eventfd_signal(struct io_ring_ctx *ctx)
+ {
+ 	struct io_ev_fd *ev_fd;
+@@ -2469,14 +2477,6 @@ static int io_eventfd_register(struct io_ring_ctx *ctx, void __user *arg,
+ 	return 0;
+ }
+ 
+-static void io_eventfd_put(struct rcu_head *rcu)
+-{
+-	struct io_ev_fd *ev_fd = container_of(rcu, struct io_ev_fd, rcu);
+-
+-	eventfd_ctx_put(ev_fd->cq_ev_fd);
+-	kfree(ev_fd);
+-}
+-
+ static int io_eventfd_unregister(struct io_ring_ctx *ctx)
+ {
+ 	struct io_ev_fd *ev_fd;
+-- 
+cgit 
+
+
+From 21a091b970cdbcf3e8ff829234b51be6f9192766 Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 30 Aug 2022 05:50:12 -0700
+Subject: io_uring: signal registered eventfd to process deferred task work
+
+Some workloads rely on a registered eventfd (via
+io_uring_register_eventfd(3)) in order to wake up and process the
+io_uring.
+
+In the case of a ring setup with IORING_SETUP_DEFER_TASKRUN, that eventfd
+also needs to be signalled when there are tasks to run.
+
+This changes an old behaviour which assumed 1 eventfd signal implied at
+least 1 CQE, however only when this new flag is set (and so old users will
+not notice). This should be expected with the IORING_SETUP_DEFER_TASKRUN
+flag as it is not guaranteed that every task will result in a CQE.
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220830125013.570060-7-dylany@fb.com
+[axboe: fold in call_rcu() serialization fix]
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/io_uring_types.h |  2 +
+ io_uring/io_uring.c            | 84 ++++++++++++++++++++++++++++++------------
+ 2 files changed, 63 insertions(+), 23 deletions(-)
+
+diff --git a/include/linux/io_uring_types.h b/include/linux/io_uring_types.h
+index d56ff21851680..aa4d90a538663 100644
+--- a/include/linux/io_uring_types.h
++++ b/include/linux/io_uring_types.h
+@@ -184,6 +184,8 @@ struct io_ev_fd {
+ 	struct eventfd_ctx	*cq_ev_fd;
+ 	unsigned int		eventfd_async: 1;
+ 	struct rcu_head		rcu;
++	atomic_t		refs;
++	atomic_t		ops;
+ };
+ 
+ struct io_alloc_cache {
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 0fd03da951139..3a6badb799eeb 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -125,6 +125,11 @@ enum {
+ 	IO_CHECK_CQ_DROPPED_BIT,
+ };
+ 
++enum {
++	IO_EVENTFD_OP_SIGNAL_BIT,
++	IO_EVENTFD_OP_FREE_BIT,
++};
++
+ struct io_defer_entry {
+ 	struct list_head	list;
+ 	struct io_kiocb		*req;
+@@ -478,33 +483,28 @@ static __cold void io_queue_deferred(struct io_ring_ctx *ctx)
+ 	}
+ }
+ 
+-static void io_eventfd_put(struct rcu_head *rcu)
++
++static void io_eventfd_ops(struct rcu_head *rcu)
+ {
+ 	struct io_ev_fd *ev_fd = container_of(rcu, struct io_ev_fd, rcu);
++	int ops = atomic_xchg(&ev_fd->ops, 0);
++
++	if (ops & BIT(IO_EVENTFD_OP_SIGNAL_BIT))
++		eventfd_signal(ev_fd->cq_ev_fd, 1);
+ 
+-	eventfd_ctx_put(ev_fd->cq_ev_fd);
+-	kfree(ev_fd);
++	/* IO_EVENTFD_OP_FREE_BIT may not be set here depending on callback
++	 * ordering in a race but if references are 0 we know we have to free
++	 * it regardless.
++	 */
++	if (atomic_dec_and_test(&ev_fd->refs)) {
++		eventfd_ctx_put(ev_fd->cq_ev_fd);
++		kfree(ev_fd);
++	}
+ }
+ 
+ static void io_eventfd_signal(struct io_ring_ctx *ctx)
+ {
+-	struct io_ev_fd *ev_fd;
+-	bool skip;
+-
+-	spin_lock(&ctx->completion_lock);
+-	/*
+-	 * Eventfd should only get triggered when at least one event has been
+-	 * posted. Some applications rely on the eventfd notification count only
+-	 * changing IFF a new CQE has been added to the CQ ring. There's no
+-	 * depedency on 1:1 relationship between how many times this function is
+-	 * called (and hence the eventfd count) and number of CQEs posted to the
+-	 * CQ ring.
+-	 */
+-	skip = ctx->cached_cq_tail == ctx->evfd_last_cq_tail;
+-	ctx->evfd_last_cq_tail = ctx->cached_cq_tail;
+-	spin_unlock(&ctx->completion_lock);
+-	if (skip)
+-		return;
++	struct io_ev_fd *ev_fd = NULL;
+ 
+ 	rcu_read_lock();
+ 	/*
+@@ -522,13 +522,46 @@ static void io_eventfd_signal(struct io_ring_ctx *ctx)
+ 		goto out;
+ 	if (READ_ONCE(ctx->rings->cq_flags) & IORING_CQ_EVENTFD_DISABLED)
+ 		goto out;
++	if (ev_fd->eventfd_async && !io_wq_current_is_worker())
++		goto out;
+ 
+-	if (!ev_fd->eventfd_async || io_wq_current_is_worker())
++	if (likely(eventfd_signal_allowed())) {
+ 		eventfd_signal(ev_fd->cq_ev_fd, 1);
++	} else {
++		atomic_inc(&ev_fd->refs);
++		if (!atomic_fetch_or(BIT(IO_EVENTFD_OP_SIGNAL_BIT), &ev_fd->ops))
++			call_rcu(&ev_fd->rcu, io_eventfd_ops);
++		else
++			atomic_dec(&ev_fd->refs);
++	}
++
+ out:
+ 	rcu_read_unlock();
+ }
+ 
++static void io_eventfd_flush_signal(struct io_ring_ctx *ctx)
++{
++	bool skip;
++
++	spin_lock(&ctx->completion_lock);
++
++	/*
++	 * Eventfd should only get triggered when at least one event has been
++	 * posted. Some applications rely on the eventfd notification count
++	 * only changing IFF a new CQE has been added to the CQ ring. There's
++	 * no depedency on 1:1 relationship between how many times this
++	 * function is called (and hence the eventfd count) and number of CQEs
++	 * posted to the CQ ring.
++	 */
++	skip = ctx->cached_cq_tail == ctx->evfd_last_cq_tail;
++	ctx->evfd_last_cq_tail = ctx->cached_cq_tail;
++	spin_unlock(&ctx->completion_lock);
++	if (skip)
++		return;
++
++	io_eventfd_signal(ctx);
++}
++
+ void __io_commit_cqring_flush(struct io_ring_ctx *ctx)
+ {
+ 	if (ctx->off_timeout_used || ctx->drain_active) {
+@@ -540,7 +573,7 @@ void __io_commit_cqring_flush(struct io_ring_ctx *ctx)
+ 		spin_unlock(&ctx->completion_lock);
+ 	}
+ 	if (ctx->has_evfd)
+-		io_eventfd_signal(ctx);
++		io_eventfd_flush_signal(ctx);
+ }
+ 
+ static inline void io_cqring_ev_posted(struct io_ring_ctx *ctx)
+@@ -1071,6 +1104,8 @@ static void io_req_local_work_add(struct io_kiocb *req)
+ 	if (ctx->flags & IORING_SETUP_TASKRUN_FLAG)
+ 		atomic_or(IORING_SQ_TASKRUN, &ctx->rings->sq_flags);
+ 
++	if (ctx->has_evfd)
++		io_eventfd_signal(ctx);
+ 	io_cqring_wake(ctx);
+ 
+ }
+@@ -2474,6 +2509,8 @@ static int io_eventfd_register(struct io_ring_ctx *ctx, void __user *arg,
+ 	ev_fd->eventfd_async = eventfd_async;
+ 	ctx->has_evfd = true;
+ 	rcu_assign_pointer(ctx->io_ev_fd, ev_fd);
++	atomic_set(&ev_fd->refs, 1);
++	atomic_set(&ev_fd->ops, 0);
+ 	return 0;
+ }
+ 
+@@ -2486,7 +2523,8 @@ static int io_eventfd_unregister(struct io_ring_ctx *ctx)
+ 	if (ev_fd) {
+ 		ctx->has_evfd = false;
+ 		rcu_assign_pointer(ctx->io_ev_fd, NULL);
+-		call_rcu(&ev_fd->rcu, io_eventfd_put);
++		if (!atomic_fetch_or(BIT(IO_EVENTFD_OP_FREE_BIT), &ev_fd->ops))
++			call_rcu(&ev_fd->rcu, io_eventfd_ops);
+ 		return 0;
+ 	}
+ 
+-- 
+cgit 
+
+
+From f75d5036d04cd57103fe1a50dffceb7c1040fbe7 Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Tue, 30 Aug 2022 05:50:13 -0700
+Subject: io_uring: trace local task work run
+
+Add tracing for io_run_local_task_work
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220830125013.570060-8-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/trace/events/io_uring.h | 29 +++++++++++++++++++++++++++++
+ io_uring/io_uring.c             |  3 +++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/include/trace/events/io_uring.h b/include/trace/events/io_uring.h
+index c5b21ff0ac859..936fd41bf147e 100644
+--- a/include/trace/events/io_uring.h
++++ b/include/trace/events/io_uring.h
+@@ -655,6 +655,35 @@ TRACE_EVENT(io_uring_short_write,
+ 			  __entry->wanted, __entry->got)
+ );
+ 
++/*
++ * io_uring_local_work_run - ran ring local task work
++ *
++ * @tctx:		pointer to a io_uring_ctx
++ * @count:		how many functions it ran
++ * @loops:		how many loops it ran
++ *
++ */
++TRACE_EVENT(io_uring_local_work_run,
++
++	TP_PROTO(void *ctx, int count, unsigned int loops),
++
++	TP_ARGS(ctx, count, loops),
++
++	TP_STRUCT__entry (
++		__field(void *,		ctx	)
++		__field(int,		count	)
++		__field(unsigned int,	loops	)
++	),
++
++	TP_fast_assign(
++		__entry->ctx		= ctx;
++		__entry->count		= count;
++		__entry->loops		= loops;
++	),
++
++	TP_printk("ring %p, count %d, loops %u", __entry->ctx, __entry->count, __entry->loops)
++);
++
+ #endif /* _TRACE_IO_URING_H */
+ 
+ /* This part must be outside protection */
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 3a6badb799eeb..d99b31aa03ab5 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1168,6 +1168,7 @@ int io_run_local_work(struct io_ring_ctx *ctx)
+ 	struct llist_node fake;
+ 	struct llist_node *current_final = NULL;
+ 	int ret;
++	unsigned int loops = 1;
+ 
+ 	if (unlikely(ctx->submitter_task != current)) {
+ 		/* maybe this is before any submissions */
+@@ -1197,6 +1198,7 @@ again:
+ 
+ 	node = io_llist_cmpxchg(&ctx->work_llist, &fake, NULL);
+ 	if (node != &fake) {
++		loops++;
+ 		current_final = &fake;
+ 		node = io_llist_xchg(&ctx->work_llist, &fake);
+ 		goto again;
+@@ -1206,6 +1208,7 @@ again:
+ 		io_submit_flush_completions(ctx);
+ 		mutex_unlock(&ctx->uring_lock);
+ 	}
++	trace_io_uring_local_work_run(ctx, ret, loops);
+ 	return ret;
+ }
+ 
+-- 
+cgit 
+
+
+From de27e18e86173b704beaa19f0ee376f3305c4794 Mon Sep 17 00:00:00 2001
+From: Kanchan Joshi <joshi.k@samsung.com>
+Date: Tue, 23 Aug 2022 21:44:40 +0530
+Subject: fs: add file_operations->uring_cmd_iopoll
+
+io_uring will invoke this to do completion polling on uring-cmd
+operations.
+
+Signed-off-by: Kanchan Joshi <joshi.k@samsung.com>
+Link: https://lore.kernel.org/r/20220823161443.49436-2-joshi.k@samsung.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/fs.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 9eced4cc286ee..d6badd19784fc 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2132,6 +2132,7 @@ struct file_operations {
+ 				   loff_t len, unsigned int remap_flags);
+ 	int (*fadvise)(struct file *, loff_t, loff_t, int);
+ 	int (*uring_cmd)(struct io_uring_cmd *ioucmd, unsigned int issue_flags);
++	int (*uring_cmd_iopoll)(struct io_uring_cmd *ioucmd);
+ } __randomize_layout;
+ 
+ struct inode_operations {
+-- 
+cgit 
+
+
+From 5756a3a7e713bcab705a5f0c810a2b1f7f4ecfaa Mon Sep 17 00:00:00 2001
+From: Kanchan Joshi <joshi.k@samsung.com>
+Date: Tue, 23 Aug 2022 21:44:41 +0530
+Subject: io_uring: add iopoll infrastructure for io_uring_cmd
+
+Put this up in the same way as iopoll is done for regular read/write IO.
+Make place for storing a cookie into struct io_uring_cmd on submission.
+Perform the completion using the ->uring_cmd_iopoll handler.
+
+Signed-off-by: Kanchan Joshi <joshi.k@samsung.com>
+Signed-off-by: Pankaj Raghav <p.raghav@samsung.com>
+Link: https://lore.kernel.org/r/20220823161443.49436-3-joshi.k@samsung.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/linux/io_uring.h |  8 ++++++--
+ io_uring/io_uring.c      |  6 ++++++
+ io_uring/opdef.c         |  1 +
+ io_uring/rw.c            |  8 +++++++-
+ io_uring/uring_cmd.c     | 11 +++++++++--
+ 5 files changed, 29 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/io_uring.h b/include/linux/io_uring.h
+index 4a2f6cc5a4927..58676c0a398fc 100644
+--- a/include/linux/io_uring.h
++++ b/include/linux/io_uring.h
+@@ -20,8 +20,12 @@ enum io_uring_cmd_flags {
+ struct io_uring_cmd {
+ 	struct file	*file;
+ 	const void	*cmd;
+-	/* callback to defer completions to task context */
+-	void (*task_work_cb)(struct io_uring_cmd *cmd);
++	union {
++		/* callback to defer completions to task context */
++		void (*task_work_cb)(struct io_uring_cmd *cmd);
++		/* used for polled completion */
++		void *cookie;
++	};
+ 	u32		cmd_op;
+ 	u32		pad;
+ 	u8		pdu[32]; /* available inline for free use */
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index d99b31aa03ab5..31ac87ee17b25 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1433,6 +1433,12 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
+ 			    wq_list_empty(&ctx->iopoll_list))
+ 				break;
+ 		}
++
++		if (task_work_pending(current)) {
++			mutex_unlock(&ctx->uring_lock);
++			io_run_task_work();
++			mutex_lock(&ctx->uring_lock);
++		}
+ 		ret = io_do_iopoll(ctx, !min);
+ 		if (ret < 0)
+ 			break;
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index c4dddd0fd7094..008320c5e9584 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -465,6 +465,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.needs_file		= 1,
+ 		.plug			= 1,
+ 		.name			= "URING_CMD",
++		.iopoll			= 1,
+ 		.async_size		= uring_cmd_pdu_size(1),
+ 		.prep			= io_uring_cmd_prep,
+ 		.issue			= io_uring_cmd,
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index 76ebcfebc9a6e..b6f9c756b7a10 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -1011,7 +1011,13 @@ int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
+ 		if (READ_ONCE(req->iopoll_completed))
+ 			break;
+ 
+-		ret = rw->kiocb.ki_filp->f_op->iopoll(&rw->kiocb, &iob, poll_flags);
++		if (req->opcode == IORING_OP_URING_CMD) {
++			struct io_uring_cmd *ioucmd = (struct io_uring_cmd *)rw;
++
++			ret = req->file->f_op->uring_cmd_iopoll(ioucmd);
++		} else
++			ret = rw->kiocb.ki_filp->f_op->iopoll(&rw->kiocb, &iob,
++							poll_flags);
+ 		if (unlikely(ret < 0))
+ 			return ret;
+ 		else if (ret)
+diff --git a/io_uring/uring_cmd.c b/io_uring/uring_cmd.c
+index e78b6f980d775..f3ed61e9bd0fa 100644
+--- a/io_uring/uring_cmd.c
++++ b/io_uring/uring_cmd.c
+@@ -50,7 +50,11 @@ void io_uring_cmd_done(struct io_uring_cmd *ioucmd, ssize_t ret, ssize_t res2)
+ 	io_req_set_res(req, ret, 0);
+ 	if (req->ctx->flags & IORING_SETUP_CQE32)
+ 		io_req_set_cqe32_extra(req, res2, 0);
+-	__io_req_complete(req, 0);
++	if (req->ctx->flags & IORING_SETUP_IOPOLL)
++		/* order with io_iopoll_req_issued() checking ->iopoll_complete */
++		smp_store_release(&req->iopoll_completed, 1);
++	else
++		__io_req_complete(req, 0);
+ }
+ EXPORT_SYMBOL_GPL(io_uring_cmd_done);
+ 
+@@ -97,8 +101,11 @@ int io_uring_cmd(struct io_kiocb *req, unsigned int issue_flags)
+ 		issue_flags |= IO_URING_F_SQE128;
+ 	if (ctx->flags & IORING_SETUP_CQE32)
+ 		issue_flags |= IO_URING_F_CQE32;
+-	if (ctx->flags & IORING_SETUP_IOPOLL)
++	if (ctx->flags & IORING_SETUP_IOPOLL) {
+ 		issue_flags |= IO_URING_F_IOPOLL;
++		req->iopoll_completed = 0;
++		WRITE_ONCE(ioucmd->cookie, NULL);
++	}
+ 
+ 	if (req_has_async_data(req))
+ 		ioucmd->cmd = req->async_data;
+-- 
+cgit 
+
+
+From c6e99ea482e2a9e1fef2488891242f9749584225 Mon Sep 17 00:00:00 2001
+From: Kanchan Joshi <joshi.k@samsung.com>
+Date: Tue, 23 Aug 2022 21:44:42 +0530
+Subject: block: export blk_rq_is_poll
+
+This is in preparation to support iopoll for nvme passthrough.
+
+Signed-off-by: Kanchan Joshi <joshi.k@samsung.com>
+Link: https://lore.kernel.org/r/20220823161443.49436-4-joshi.k@samsung.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ block/blk-mq.c         | 3 ++-
+ include/linux/blk-mq.h | 1 +
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/block/blk-mq.c b/block/blk-mq.c
+index c96c8c4f751b3..0df20184cc3eb 100644
+--- a/block/blk-mq.c
++++ b/block/blk-mq.c
+@@ -1233,7 +1233,7 @@ static void blk_end_sync_rq(struct request *rq, blk_status_t ret)
+ 	complete(&wait->done);
+ }
+ 
+-static bool blk_rq_is_poll(struct request *rq)
++bool blk_rq_is_poll(struct request *rq)
+ {
+ 	if (!rq->mq_hctx)
+ 		return false;
+@@ -1243,6 +1243,7 @@ static bool blk_rq_is_poll(struct request *rq)
+ 		return false;
+ 	return true;
+ }
++EXPORT_SYMBOL_GPL(blk_rq_is_poll);
+ 
+ static void blk_rq_poll_completion(struct request *rq, struct completion *wait)
+ {
+diff --git a/include/linux/blk-mq.h b/include/linux/blk-mq.h
+index 92294a5fb0836..de384f5d2c37d 100644
+--- a/include/linux/blk-mq.h
++++ b/include/linux/blk-mq.h
+@@ -980,6 +980,7 @@ int blk_rq_map_kern(struct request_queue *, struct request *, void *,
+ int blk_rq_append_bio(struct request *rq, struct bio *bio);
+ void blk_execute_rq_nowait(struct request *rq, bool at_head);
+ blk_status_t blk_execute_rq(struct request *rq, bool at_head);
++bool blk_rq_is_poll(struct request *rq);
+ 
+ struct req_iterator {
+ 	struct bvec_iter iter;
+-- 
+cgit 
+
+
+From 585079b6e425387b5f8ec242fc38081c31ca41ee Mon Sep 17 00:00:00 2001
+From: Kanchan Joshi <joshi.k@samsung.com>
+Date: Tue, 23 Aug 2022 21:44:43 +0530
+Subject: nvme: wire up async polling for io passthrough commands
+
+Store a cookie during submission, and use that to implement
+completion-polling inside the ->uring_cmd_iopoll handler.
+This handler makes use of existing bio poll facility.
+
+Signed-off-by: Kanchan Joshi <joshi.k@samsung.com>
+Signed-off-by: Anuj Gupta <anuj20.g@samsung.com>
+Link: https://lore.kernel.org/r/20220823161443.49436-5-joshi.k@samsung.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/nvme/host/core.c      |  1 +
+ drivers/nvme/host/ioctl.c     | 73 ++++++++++++++++++++++++++++++++++++++++---
+ drivers/nvme/host/multipath.c |  1 +
+ drivers/nvme/host/nvme.h      |  2 ++
+ 4 files changed, 72 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/nvme/host/core.c b/drivers/nvme/host/core.c
+index 66446f1e06cf2..0038283702a18 100644
+--- a/drivers/nvme/host/core.c
++++ b/drivers/nvme/host/core.c
+@@ -3976,6 +3976,7 @@ static const struct file_operations nvme_ns_chr_fops = {
+ 	.unlocked_ioctl	= nvme_ns_chr_ioctl,
+ 	.compat_ioctl	= compat_ptr_ioctl,
+ 	.uring_cmd	= nvme_ns_chr_uring_cmd,
++	.uring_cmd_iopoll = nvme_ns_chr_uring_cmd_iopoll,
+ };
+ 
+ static int nvme_add_ns_cdev(struct nvme_ns *ns)
+diff --git a/drivers/nvme/host/ioctl.c b/drivers/nvme/host/ioctl.c
+index 27614bee73806..7756b439a688f 100644
+--- a/drivers/nvme/host/ioctl.c
++++ b/drivers/nvme/host/ioctl.c
+@@ -391,11 +391,19 @@ static void nvme_uring_cmd_end_io(struct request *req, blk_status_t err)
+ 	struct nvme_uring_cmd_pdu *pdu = nvme_uring_cmd_pdu(ioucmd);
+ 	/* extract bio before reusing the same field for request */
+ 	struct bio *bio = pdu->bio;
++	void *cookie = READ_ONCE(ioucmd->cookie);
+ 
+ 	pdu->req = req;
+ 	req->bio = bio;
+-	/* this takes care of moving rest of completion-work to task context */
+-	io_uring_cmd_complete_in_task(ioucmd, nvme_uring_task_cb);
++
++	/*
++	 * For iopoll, complete it directly.
++	 * Otherwise, move the completion to task work.
++	 */
++	if (cookie != NULL && blk_rq_is_poll(req))
++		nvme_uring_task_cb(ioucmd);
++	else
++		io_uring_cmd_complete_in_task(ioucmd, nvme_uring_task_cb);
+ }
+ 
+ static int nvme_uring_cmd_io(struct nvme_ctrl *ctrl, struct nvme_ns *ns,
+@@ -445,7 +453,10 @@ static int nvme_uring_cmd_io(struct nvme_ctrl *ctrl, struct nvme_ns *ns,
+ 		rq_flags = REQ_NOWAIT;
+ 		blk_flags = BLK_MQ_REQ_NOWAIT;
+ 	}
++	if (issue_flags & IO_URING_F_IOPOLL)
++		rq_flags |= REQ_POLLED;
+ 
++retry:
+ 	req = nvme_alloc_user_request(q, &c, nvme_to_user_ptr(d.addr),
+ 			d.data_len, nvme_to_user_ptr(d.metadata),
+ 			d.metadata_len, 0, &meta, d.timeout_ms ?
+@@ -456,6 +467,17 @@ static int nvme_uring_cmd_io(struct nvme_ctrl *ctrl, struct nvme_ns *ns,
+ 	req->end_io = nvme_uring_cmd_end_io;
+ 	req->end_io_data = ioucmd;
+ 
++	if (issue_flags & IO_URING_F_IOPOLL && rq_flags & REQ_POLLED) {
++		if (unlikely(!req->bio)) {
++			/* we can't poll this, so alloc regular req instead */
++			blk_mq_free_request(req);
++			rq_flags &= ~REQ_POLLED;
++			goto retry;
++		} else {
++			WRITE_ONCE(ioucmd->cookie, req->bio);
++			req->bio->bi_opf |= REQ_POLLED;
++		}
++	}
+ 	/* to free bio on completion, as req->bio will be null at that time */
+ 	pdu->bio = req->bio;
+ 	pdu->meta = meta;
+@@ -559,9 +581,6 @@ long nvme_ns_chr_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 
+ static int nvme_uring_cmd_checks(unsigned int issue_flags)
+ {
+-	/* IOPOLL not supported yet */
+-	if (issue_flags & IO_URING_F_IOPOLL)
+-		return -EOPNOTSUPP;
+ 
+ 	/* NVMe passthrough requires big SQE/CQE support */
+ 	if ((issue_flags & (IO_URING_F_SQE128|IO_URING_F_CQE32)) !=
+@@ -604,6 +623,23 @@ int nvme_ns_chr_uring_cmd(struct io_uring_cmd *ioucmd, unsigned int issue_flags)
+ 	return nvme_ns_uring_cmd(ns, ioucmd, issue_flags);
+ }
+ 
++int nvme_ns_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd)
++{
++	struct bio *bio;
++	int ret = 0;
++	struct nvme_ns *ns;
++	struct request_queue *q;
++
++	rcu_read_lock();
++	bio = READ_ONCE(ioucmd->cookie);
++	ns = container_of(file_inode(ioucmd->file)->i_cdev,
++			struct nvme_ns, cdev);
++	q = ns->queue;
++	if (test_bit(QUEUE_FLAG_POLL, &q->queue_flags) && bio && bio->bi_bdev)
++		ret = bio_poll(bio, NULL, 0);
++	rcu_read_unlock();
++	return ret;
++}
+ #ifdef CONFIG_NVME_MULTIPATH
+ static int nvme_ns_head_ctrl_ioctl(struct nvme_ns *ns, unsigned int cmd,
+ 		void __user *argp, struct nvme_ns_head *head, int srcu_idx)
+@@ -685,6 +721,29 @@ int nvme_ns_head_chr_uring_cmd(struct io_uring_cmd *ioucmd,
+ 	srcu_read_unlock(&head->srcu, srcu_idx);
+ 	return ret;
+ }
++
++int nvme_ns_head_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd)
++{
++	struct cdev *cdev = file_inode(ioucmd->file)->i_cdev;
++	struct nvme_ns_head *head = container_of(cdev, struct nvme_ns_head, cdev);
++	int srcu_idx = srcu_read_lock(&head->srcu);
++	struct nvme_ns *ns = nvme_find_path(head);
++	struct bio *bio;
++	int ret = 0;
++	struct request_queue *q;
++
++	if (ns) {
++		rcu_read_lock();
++		bio = READ_ONCE(ioucmd->cookie);
++		q = ns->queue;
++		if (test_bit(QUEUE_FLAG_POLL, &q->queue_flags) && bio
++				&& bio->bi_bdev)
++			ret = bio_poll(bio, NULL, 0);
++		rcu_read_unlock();
++	}
++	srcu_read_unlock(&head->srcu, srcu_idx);
++	return ret;
++}
+ #endif /* CONFIG_NVME_MULTIPATH */
+ 
+ int nvme_dev_uring_cmd(struct io_uring_cmd *ioucmd, unsigned int issue_flags)
+@@ -692,6 +751,10 @@ int nvme_dev_uring_cmd(struct io_uring_cmd *ioucmd, unsigned int issue_flags)
+ 	struct nvme_ctrl *ctrl = ioucmd->file->private_data;
+ 	int ret;
+ 
++	/* IOPOLL not supported yet */
++	if (issue_flags & IO_URING_F_IOPOLL)
++		return -EOPNOTSUPP;
++
+ 	ret = nvme_uring_cmd_checks(issue_flags);
+ 	if (ret)
+ 		return ret;
+diff --git a/drivers/nvme/host/multipath.c b/drivers/nvme/host/multipath.c
+index 6ef497c75a165..00f2f81e20fa1 100644
+--- a/drivers/nvme/host/multipath.c
++++ b/drivers/nvme/host/multipath.c
+@@ -439,6 +439,7 @@ static const struct file_operations nvme_ns_head_chr_fops = {
+ 	.unlocked_ioctl	= nvme_ns_head_chr_ioctl,
+ 	.compat_ioctl	= compat_ptr_ioctl,
+ 	.uring_cmd	= nvme_ns_head_chr_uring_cmd,
++	.uring_cmd_iopoll = nvme_ns_head_chr_uring_cmd_iopoll,
+ };
+ 
+ static int nvme_add_ns_head_cdev(struct nvme_ns_head *head)
+diff --git a/drivers/nvme/host/nvme.h b/drivers/nvme/host/nvme.h
+index 1bdf714dcd9e4..fdcbc93dea216 100644
+--- a/drivers/nvme/host/nvme.h
++++ b/drivers/nvme/host/nvme.h
+@@ -821,6 +821,8 @@ long nvme_ns_head_chr_ioctl(struct file *file, unsigned int cmd,
+ 		unsigned long arg);
+ long nvme_dev_ioctl(struct file *file, unsigned int cmd,
+ 		unsigned long arg);
++int nvme_ns_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd);
++int nvme_ns_head_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd);
+ int nvme_ns_chr_uring_cmd(struct io_uring_cmd *ioucmd,
+ 		unsigned int issue_flags);
+ int nvme_ns_head_chr_uring_cmd(struct io_uring_cmd *ioucmd,
+-- 
+cgit 
+
+
+From a1119fb0711591c2aaf99be79d87ce8ebeb9d250 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Fri, 2 Sep 2022 15:16:29 -0600
+Subject: io_uring: cleanly separate request types for iopoll
+
+After the addition of iopoll support for passthrough, there's a bit of
+a mixup here. Clean it up and get rid of the casting for the passthrough
+command type.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/rw.c | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index b6f9c756b7a10..9187344ae2857 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -1000,7 +1000,7 @@ int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
+ 
+ 	wq_list_for_each(pos, start, &ctx->iopoll_list) {
+ 		struct io_kiocb *req = container_of(pos, struct io_kiocb, comp_list);
+-		struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
++		struct file *file = req->file;
+ 		int ret;
+ 
+ 		/*
+@@ -1012,12 +1012,15 @@ int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
+ 			break;
+ 
+ 		if (req->opcode == IORING_OP_URING_CMD) {
+-			struct io_uring_cmd *ioucmd = (struct io_uring_cmd *)rw;
++			struct io_uring_cmd *ioucmd;
+ 
+-			ret = req->file->f_op->uring_cmd_iopoll(ioucmd);
+-		} else
+-			ret = rw->kiocb.ki_filp->f_op->iopoll(&rw->kiocb, &iob,
+-							poll_flags);
++			ioucmd = io_kiocb_to_cmd(req, struct io_uring_cmd);
++			ret = file->f_op->uring_cmd_iopoll(ioucmd);
++		} else {
++			struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
++
++			ret = file->f_op->iopoll(&rw->kiocb, &iob, poll_flags);
++		}
+ 		if (unlikely(ret < 0))
+ 			return ret;
+ 		else if (ret)
+-- 
+cgit 
+
+
+From 8ac5d85a89b48269e5aefb92b640d38367670a1b Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Sat, 3 Sep 2022 10:09:22 -0600
+Subject: io_uring: add local task_work run helper that is entered locked
+
+We have a few spots that drop the mutex just to run local task_work,
+which immediately tries to grab it again. Add a helper that just passes
+in whether we're locked already.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 23 ++++++++++++++++-------
+ io_uring/io_uring.h |  1 +
+ 2 files changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 31ac87ee17b25..a1692dad52dbf 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1161,9 +1161,8 @@ static void __cold io_move_task_work_from_local(struct io_ring_ctx *ctx)
+ 	}
+ }
+ 
+-int io_run_local_work(struct io_ring_ctx *ctx)
++int __io_run_local_work(struct io_ring_ctx *ctx, bool locked)
+ {
+-	bool locked;
+ 	struct llist_node *node;
+ 	struct llist_node fake;
+ 	struct llist_node *current_final = NULL;
+@@ -1178,8 +1177,6 @@ int io_run_local_work(struct io_ring_ctx *ctx)
+ 		return -EEXIST;
+ 	}
+ 
+-	locked = mutex_trylock(&ctx->uring_lock);
+-
+ 	node = io_llist_xchg(&ctx->work_llist, &fake);
+ 	ret = 0;
+ again:
+@@ -1204,12 +1201,24 @@ again:
+ 		goto again;
+ 	}
+ 
+-	if (locked) {
++	if (locked)
+ 		io_submit_flush_completions(ctx);
+-		mutex_unlock(&ctx->uring_lock);
+-	}
+ 	trace_io_uring_local_work_run(ctx, ret, loops);
+ 	return ret;
++
++}
++
++int io_run_local_work(struct io_ring_ctx *ctx)
++{
++	bool locked;
++	int ret;
++
++	locked = mutex_trylock(&ctx->uring_lock);
++	ret = __io_run_local_work(ctx, locked);
++	if (locked)
++		mutex_unlock(&ctx->uring_lock);
++
++	return ret;
+ }
+ 
+ static void io_req_tw_post(struct io_kiocb *req, bool *locked)
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index f417d75d7bc1c..0f90d1dfa42b9 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -27,6 +27,7 @@ enum {
+ struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx);
+ bool io_req_cqe_overflow(struct io_kiocb *req);
+ int io_run_task_work_sig(struct io_ring_ctx *ctx);
++int __io_run_local_work(struct io_ring_ctx *ctx, bool locked);
+ int io_run_local_work(struct io_ring_ctx *ctx);
+ void io_req_complete_failed(struct io_kiocb *req, s32 res);
+ void __io_req_complete(struct io_kiocb *req, unsigned issue_flags);
+-- 
+cgit 
+
+
+From dac6a0eae793f53c62a0f83d9f5423293a7845c4 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Sat, 3 Sep 2022 09:52:01 -0600
+Subject: io_uring: ensure iopoll runs local task work as well
+
+Combine the two checks we have for task_work running and whether or not
+we need to shuffle the mutex into one, so we unify how task_work is run
+in the iopoll loop. This helps ensure that local task_work is run when
+needed, and also optimizes that path to avoid a mutex shuffle if it's
+not needed.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 39 ++++++++++++++++++++-------------------
+ io_uring/io_uring.h |  6 ++++++
+ 2 files changed, 26 insertions(+), 19 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index a1692dad52dbf..0482087b7c645 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1428,25 +1428,26 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
+ 		 * forever, while the workqueue is stuck trying to acquire the
+ 		 * very same mutex.
+ 		 */
+-		if (wq_list_empty(&ctx->iopoll_list)) {
+-			u32 tail = ctx->cached_cq_tail;
+-
+-			mutex_unlock(&ctx->uring_lock);
+-			ret = io_run_task_work_ctx(ctx);
+-			mutex_lock(&ctx->uring_lock);
+-			if (ret < 0)
+-				break;
+-
+-			/* some requests don't go through iopoll_list */
+-			if (tail != ctx->cached_cq_tail ||
+-			    wq_list_empty(&ctx->iopoll_list))
+-				break;
+-		}
+-
+-		if (task_work_pending(current)) {
+-			mutex_unlock(&ctx->uring_lock);
+-			io_run_task_work();
+-			mutex_lock(&ctx->uring_lock);
++		if (wq_list_empty(&ctx->iopoll_list) ||
++		    io_task_work_pending(ctx)) {
++			if (!llist_empty(&ctx->work_llist))
++				__io_run_local_work(ctx, true);
++			if (task_work_pending(current) ||
++			    wq_list_empty(&ctx->iopoll_list)) {
++				u32 tail = ctx->cached_cq_tail;
++
++				mutex_unlock(&ctx->uring_lock);
++				ret = io_run_task_work();
++				mutex_lock(&ctx->uring_lock);
++
++				if (ret < 0)
++					break;
++
++				/* some requests don't go through iopoll_list */
++				if (tail != ctx->cached_cq_tail ||
++				    wq_list_empty(&ctx->iopoll_list))
++					break;
++			}
+ 		}
+ 		ret = io_do_iopoll(ctx, !min);
+ 		if (ret < 0)
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index 0f90d1dfa42b9..9d89425292b72 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -236,6 +236,12 @@ static inline int io_run_task_work(void)
+ 	return 0;
+ }
+ 
++static inline bool io_task_work_pending(struct io_ring_ctx *ctx)
++{
++	return test_thread_flag(TIF_NOTIFY_SIGNAL) ||
++		!wq_list_empty(&ctx->work_llist);
++}
++
+ static inline int io_run_task_work_ctx(struct io_ring_ctx *ctx)
+ {
+ 	int ret = 0;
+-- 
+cgit 
+
+
+From de97fcb30316410a2c46be102f074a454ecc6cf1 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Fri, 2 Sep 2022 15:18:05 -0600
+Subject: fs: add batch and poll flags to the uring_cmd_iopoll() handler
+
+We need the poll_flags to know how to poll for the IO, and we should
+have the batch structure in preparation for supporting batched
+completions with iopoll.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ drivers/nvme/host/ioctl.c | 12 ++++++++----
+ drivers/nvme/host/nvme.h  |  6 ++++--
+ include/linux/fs.h        |  3 ++-
+ io_uring/rw.c             |  3 ++-
+ 4 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/nvme/host/ioctl.c b/drivers/nvme/host/ioctl.c
+index 7756b439a688f..548aca8b5b9f2 100644
+--- a/drivers/nvme/host/ioctl.c
++++ b/drivers/nvme/host/ioctl.c
+@@ -623,7 +623,9 @@ int nvme_ns_chr_uring_cmd(struct io_uring_cmd *ioucmd, unsigned int issue_flags)
+ 	return nvme_ns_uring_cmd(ns, ioucmd, issue_flags);
+ }
+ 
+-int nvme_ns_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd)
++int nvme_ns_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd,
++				 struct io_comp_batch *iob,
++				 unsigned int poll_flags)
+ {
+ 	struct bio *bio;
+ 	int ret = 0;
+@@ -636,7 +638,7 @@ int nvme_ns_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd)
+ 			struct nvme_ns, cdev);
+ 	q = ns->queue;
+ 	if (test_bit(QUEUE_FLAG_POLL, &q->queue_flags) && bio && bio->bi_bdev)
+-		ret = bio_poll(bio, NULL, 0);
++		ret = bio_poll(bio, iob, poll_flags);
+ 	rcu_read_unlock();
+ 	return ret;
+ }
+@@ -722,7 +724,9 @@ int nvme_ns_head_chr_uring_cmd(struct io_uring_cmd *ioucmd,
+ 	return ret;
+ }
+ 
+-int nvme_ns_head_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd)
++int nvme_ns_head_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd,
++				      struct io_comp_batch *iob,
++				      unsigned int poll_flags)
+ {
+ 	struct cdev *cdev = file_inode(ioucmd->file)->i_cdev;
+ 	struct nvme_ns_head *head = container_of(cdev, struct nvme_ns_head, cdev);
+@@ -738,7 +742,7 @@ int nvme_ns_head_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd)
+ 		q = ns->queue;
+ 		if (test_bit(QUEUE_FLAG_POLL, &q->queue_flags) && bio
+ 				&& bio->bi_bdev)
+-			ret = bio_poll(bio, NULL, 0);
++			ret = bio_poll(bio, iob, poll_flags);
+ 		rcu_read_unlock();
+ 	}
+ 	srcu_read_unlock(&head->srcu, srcu_idx);
+diff --git a/drivers/nvme/host/nvme.h b/drivers/nvme/host/nvme.h
+index fdcbc93dea216..216acbe953b38 100644
+--- a/drivers/nvme/host/nvme.h
++++ b/drivers/nvme/host/nvme.h
+@@ -821,8 +821,10 @@ long nvme_ns_head_chr_ioctl(struct file *file, unsigned int cmd,
+ 		unsigned long arg);
+ long nvme_dev_ioctl(struct file *file, unsigned int cmd,
+ 		unsigned long arg);
+-int nvme_ns_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd);
+-int nvme_ns_head_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd);
++int nvme_ns_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd,
++		struct io_comp_batch *iob, unsigned int poll_flags);
++int nvme_ns_head_chr_uring_cmd_iopoll(struct io_uring_cmd *ioucmd,
++		struct io_comp_batch *iob, unsigned int poll_flags);
+ int nvme_ns_chr_uring_cmd(struct io_uring_cmd *ioucmd,
+ 		unsigned int issue_flags);
+ int nvme_ns_head_chr_uring_cmd(struct io_uring_cmd *ioucmd,
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index d6badd19784fc..01681d061a6a0 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2132,7 +2132,8 @@ struct file_operations {
+ 				   loff_t len, unsigned int remap_flags);
+ 	int (*fadvise)(struct file *, loff_t, loff_t, int);
+ 	int (*uring_cmd)(struct io_uring_cmd *ioucmd, unsigned int issue_flags);
+-	int (*uring_cmd_iopoll)(struct io_uring_cmd *ioucmd);
++	int (*uring_cmd_iopoll)(struct io_uring_cmd *, struct io_comp_batch *,
++				unsigned int poll_flags);
+ } __randomize_layout;
+ 
+ struct inode_operations {
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index 9187344ae2857..da1c0d02aa823 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -1015,7 +1015,8 @@ int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
+ 			struct io_uring_cmd *ioucmd;
+ 
+ 			ioucmd = io_kiocb_to_cmd(req, struct io_uring_cmd);
+-			ret = file->f_op->uring_cmd_iopoll(ioucmd);
++			ret = file->f_op->uring_cmd_iopoll(ioucmd, &iob,
++								poll_flags);
+ 		} else {
+ 			struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
+ 
+-- 
+cgit 
+
+
+From 4ab9d465071beb95e30e2712d4c65b6ab781865b Mon Sep 17 00:00:00 2001
+From: Dylan Yudaken <dylany@fb.com>
+Date: Wed, 7 Sep 2022 09:51:52 -0700
+Subject: io_uring: allow buffer recycling in READV
+
+In commit 934447a603b2 ("io_uring: do not recycle buffer in READV") a
+temporary fix was put in io_kbuf_recycle to simply never recycle READV
+buffers.
+
+Instead of that, rather treat READV with REQ_F_BUFFER_SELECTED the same as
+a READ with REQ_F_BUFFER_SELECTED. Since READV requires iov_len of 1 they
+are essentially the same.
+In order to do this inside io_prep_rw() add some validation to check that
+it is in fact only length 1, and also extract the length of the buffer at
+prep time.
+
+This allows removal of the io_iov_buffer_select codepaths as they are only
+used from the READV op.
+
+Signed-off-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/20220907165152.994979-1-dylany@fb.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/kbuf.h |  12 -----
+ io_uring/rw.c   | 134 ++++++++++++++++++++++----------------------------------
+ 2 files changed, 52 insertions(+), 94 deletions(-)
+
+diff --git a/io_uring/kbuf.h b/io_uring/kbuf.h
+index 746fbf31a703e..c23e15d7d3caf 100644
+--- a/io_uring/kbuf.h
++++ b/io_uring/kbuf.h
+@@ -86,18 +86,6 @@ static inline bool io_do_buffer_select(struct io_kiocb *req)
+ 
+ static inline void io_kbuf_recycle(struct io_kiocb *req, unsigned issue_flags)
+ {
+-	/*
+-	 * READV uses fields in `struct io_rw` (len/addr) to stash the selected
+-	 * buffer data. However if that buffer is recycled the original request
+-	 * data stored in addr is lost. Therefore forbid recycling for now.
+-	 */
+-	if (req->opcode == IORING_OP_READV) {
+-		if ((req->flags & REQ_F_BUFFER_RING) && req->buf_list) {
+-			req->buf_list->head++;
+-			req->buf_list = NULL;
+-		}
+-		return;
+-	}
+ 	if (req->flags & REQ_F_BUFFER_SELECTED)
+ 		io_kbuf_recycle_legacy(req, issue_flags);
+ 	if (req->flags & REQ_F_BUFFER_RING)
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index da1c0d02aa823..e50ba72091acd 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -33,6 +33,46 @@ static inline bool io_file_supports_nowait(struct io_kiocb *req)
+ 	return req->flags & REQ_F_SUPPORT_NOWAIT;
+ }
+ 
++#ifdef CONFIG_COMPAT
++static int io_iov_compat_buffer_select_prep(struct io_rw *rw)
++{
++	struct compat_iovec __user *uiov;
++	compat_ssize_t clen;
++
++	uiov = u64_to_user_ptr(rw->addr);
++	if (!access_ok(uiov, sizeof(*uiov)))
++		return -EFAULT;
++	if (__get_user(clen, &uiov->iov_len))
++		return -EFAULT;
++	if (clen < 0)
++		return -EINVAL;
++
++	rw->len = clen;
++	return 0;
++}
++#endif
++
++static int io_iov_buffer_select_prep(struct io_kiocb *req)
++{
++	struct iovec __user *uiov;
++	struct iovec iov;
++	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
++
++	if (rw->len != 1)
++		return -EINVAL;
++
++#ifdef CONFIG_COMPAT
++	if (req->ctx->compat)
++		return io_iov_compat_buffer_select_prep(rw);
++#endif
++
++	uiov = u64_to_user_ptr(rw->addr);
++	if (copy_from_user(&iov, uiov, sizeof(*uiov)))
++		return -EFAULT;
++	rw->len = iov.iov_len;
++	return 0;
++}
++
+ int io_prep_rw(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ {
+ 	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
+@@ -69,6 +109,16 @@ int io_prep_rw(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ 	rw->addr = READ_ONCE(sqe->addr);
+ 	rw->len = READ_ONCE(sqe->len);
+ 	rw->flags = READ_ONCE(sqe->rw_flags);
++
++	/* Have to do this validation here, as this is in io_read() rw->len might
++	 * have chanaged due to buffer selection
++	 */
++	if (req->opcode == IORING_OP_READV && req->flags & REQ_F_BUFFER_SELECT) {
++		ret = io_iov_buffer_select_prep(req);
++		if (ret)
++			return ret;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -279,79 +329,6 @@ static int kiocb_done(struct io_kiocb *req, ssize_t ret,
+ 	return IOU_ISSUE_SKIP_COMPLETE;
+ }
+ 
+-#ifdef CONFIG_COMPAT
+-static ssize_t io_compat_import(struct io_kiocb *req, struct iovec *iov,
+-				unsigned int issue_flags)
+-{
+-	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
+-	struct compat_iovec __user *uiov;
+-	compat_ssize_t clen;
+-	void __user *buf;
+-	size_t len;
+-
+-	uiov = u64_to_user_ptr(rw->addr);
+-	if (!access_ok(uiov, sizeof(*uiov)))
+-		return -EFAULT;
+-	if (__get_user(clen, &uiov->iov_len))
+-		return -EFAULT;
+-	if (clen < 0)
+-		return -EINVAL;
+-
+-	len = clen;
+-	buf = io_buffer_select(req, &len, issue_flags);
+-	if (!buf)
+-		return -ENOBUFS;
+-	rw->addr = (unsigned long) buf;
+-	iov[0].iov_base = buf;
+-	rw->len = iov[0].iov_len = (compat_size_t) len;
+-	return 0;
+-}
+-#endif
+-
+-static ssize_t __io_iov_buffer_select(struct io_kiocb *req, struct iovec *iov,
+-				      unsigned int issue_flags)
+-{
+-	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
+-	struct iovec __user *uiov = u64_to_user_ptr(rw->addr);
+-	void __user *buf;
+-	ssize_t len;
+-
+-	if (copy_from_user(iov, uiov, sizeof(*uiov)))
+-		return -EFAULT;
+-
+-	len = iov[0].iov_len;
+-	if (len < 0)
+-		return -EINVAL;
+-	buf = io_buffer_select(req, &len, issue_flags);
+-	if (!buf)
+-		return -ENOBUFS;
+-	rw->addr = (unsigned long) buf;
+-	iov[0].iov_base = buf;
+-	rw->len = iov[0].iov_len = len;
+-	return 0;
+-}
+-
+-static ssize_t io_iov_buffer_select(struct io_kiocb *req, struct iovec *iov,
+-				    unsigned int issue_flags)
+-{
+-	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
+-
+-	if (req->flags & (REQ_F_BUFFER_SELECTED|REQ_F_BUFFER_RING)) {
+-		iov[0].iov_base = u64_to_user_ptr(rw->addr);
+-		iov[0].iov_len = rw->len;
+-		return 0;
+-	}
+-	if (rw->len != 1)
+-		return -EINVAL;
+-
+-#ifdef CONFIG_COMPAT
+-	if (req->ctx->compat)
+-		return io_compat_import(req, iov, issue_flags);
+-#endif
+-
+-	return __io_iov_buffer_select(req, iov, issue_flags);
+-}
+-
+ static struct iovec *__io_import_iovec(int ddir, struct io_kiocb *req,
+ 				       struct io_rw_state *s,
+ 				       unsigned int issue_flags)
+@@ -374,7 +351,8 @@ static struct iovec *__io_import_iovec(int ddir, struct io_kiocb *req,
+ 	buf = u64_to_user_ptr(rw->addr);
+ 	sqe_len = rw->len;
+ 
+-	if (opcode == IORING_OP_READ || opcode == IORING_OP_WRITE) {
++	if (opcode == IORING_OP_READ || opcode == IORING_OP_WRITE ||
++	    (req->flags & REQ_F_BUFFER_SELECT)) {
+ 		if (io_do_buffer_select(req)) {
+ 			buf = io_buffer_select(req, &sqe_len, issue_flags);
+ 			if (!buf)
+@@ -390,14 +368,6 @@ static struct iovec *__io_import_iovec(int ddir, struct io_kiocb *req,
+ 	}
+ 
+ 	iovec = s->fast_iov;
+-	if (req->flags & REQ_F_BUFFER_SELECT) {
+-		ret = io_iov_buffer_select(req, iovec, issue_flags);
+-		if (ret)
+-			return ERR_PTR(ret);
+-		iov_iter_init(iter, ddir, iovec, 1, iovec->iov_len);
+-		return NULL;
+-	}
+-
+ 	ret = __import_iovec(ddir, buf, sqe_len, UIO_FASTIOV, &iovec, iter,
+ 			      req->ctx->compat);
+ 	if (unlikely(ret < 0))
+-- 
+cgit 
+
+
+From 385c609f9bfcfcd1e1e649834fc61e48d2316381 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:27 +0100
+Subject: io_uring: kill an outdated comment
+
+Request referencing has changed a while ago and there is no notion left
+of submission/completion references, kill an outdated comment.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/38902e7229d68cecd62702436d627d4858b0d9d4.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 0482087b7c645..339bc19a708a6 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1885,10 +1885,6 @@ static void io_queue_async(struct io_kiocb *req, int ret)
+ 		io_req_task_queue(req);
+ 		break;
+ 	case IO_APOLL_ABORTED:
+-		/*
+-		 * Queued up for async execution, worker will release
+-		 * submit reference when the iocb is actually submitted.
+-		 */
+ 		io_kbuf_recycle(req, 0);
+ 		io_queue_iowq(req, NULL);
+ 		break;
+-- 
+cgit 
+
+
+From e9a884285484a098fd607496d565c3b4e4733f63 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:28 +0100
+Subject: io_uring: use io_cq_lock consistently
+
+There is one place when we forgot to change hand coded spin locking with
+io_cq_lock(), change it to be more consistent. Note, the unlock part is
+already __io_cq_unlock_post().
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/91699b9a00a07128f7ca66136bdbbfc67a64659e.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 339bc19a708a6..b5245c5d102ca 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1327,7 +1327,7 @@ static void __io_submit_flush_completions(struct io_ring_ctx *ctx)
+ 	struct io_wq_work_node *node, *prev;
+ 	struct io_submit_state *state = &ctx->submit_state;
+ 
+-	spin_lock(&ctx->completion_lock);
++	io_cq_lock(ctx);
+ 	wq_list_for_each(node, prev, &state->compl_reqs) {
+ 		struct io_kiocb *req = container_of(node, struct io_kiocb,
+ 					    comp_list);
+-- 
+cgit 
+
+
+From 95eafc74be5e11f9dd6a11504c27321c515ce00f Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:29 +0100
+Subject: io_uring/net: reshuffle error handling
+
+We should prioritise send/recv retry cases over failures, they're more
+important. Shuffle -ERESTARTSYS after we handled retries.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/d9059691b30d0963b7269fa4a0c81ee7720555e6.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 60e392f7f2dcd..d5b80b66feab4 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -291,13 +291,13 @@ int io_sendmsg(struct io_kiocb *req, unsigned int issue_flags)
+ 	if (ret < min_ret) {
+ 		if (ret == -EAGAIN && (issue_flags & IO_URING_F_NONBLOCK))
+ 			return io_setup_async_msg(req, kmsg, issue_flags);
+-		if (ret == -ERESTARTSYS)
+-			ret = -EINTR;
+ 		if (ret > 0 && io_net_retry(sock, flags)) {
+ 			sr->done_io += ret;
+ 			req->flags |= REQ_F_PARTIAL_IO;
+ 			return io_setup_async_msg(req, kmsg, issue_flags);
+ 		}
++		if (ret == -ERESTARTSYS)
++			ret = -EINTR;
+ 		req_set_fail(req);
+ 	}
+ 	/* fast path, check for non-NULL to avoid function call */
+@@ -352,8 +352,6 @@ int io_send(struct io_kiocb *req, unsigned int issue_flags)
+ 	if (ret < min_ret) {
+ 		if (ret == -EAGAIN && (issue_flags & IO_URING_F_NONBLOCK))
+ 			return -EAGAIN;
+-		if (ret == -ERESTARTSYS)
+-			ret = -EINTR;
+ 		if (ret > 0 && io_net_retry(sock, flags)) {
+ 			sr->len -= ret;
+ 			sr->buf += ret;
+@@ -361,6 +359,8 @@ int io_send(struct io_kiocb *req, unsigned int issue_flags)
+ 			req->flags |= REQ_F_PARTIAL_IO;
+ 			return -EAGAIN;
+ 		}
++		if (ret == -ERESTARTSYS)
++			ret = -EINTR;
+ 		req_set_fail(req);
+ 	}
+ 	if (ret >= 0)
+@@ -751,13 +751,13 @@ retry_multishot:
+ 			}
+ 			return ret;
+ 		}
+-		if (ret == -ERESTARTSYS)
+-			ret = -EINTR;
+ 		if (ret > 0 && io_net_retry(sock, flags)) {
+ 			sr->done_io += ret;
+ 			req->flags |= REQ_F_PARTIAL_IO;
+ 			return io_setup_async_msg(req, kmsg, issue_flags);
+ 		}
++		if (ret == -ERESTARTSYS)
++			ret = -EINTR;
+ 		req_set_fail(req);
+ 	} else if ((flags & MSG_WAITALL) && (kmsg->msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC))) {
+ 		req_set_fail(req);
+@@ -847,8 +847,6 @@ retry_multishot:
+ 
+ 			return -EAGAIN;
+ 		}
+-		if (ret == -ERESTARTSYS)
+-			ret = -EINTR;
+ 		if (ret > 0 && io_net_retry(sock, flags)) {
+ 			sr->len -= ret;
+ 			sr->buf += ret;
+@@ -856,6 +854,8 @@ retry_multishot:
+ 			req->flags |= REQ_F_PARTIAL_IO;
+ 			return -EAGAIN;
+ 		}
++		if (ret == -ERESTARTSYS)
++			ret = -EINTR;
+ 		req_set_fail(req);
+ 	} else if ((flags & MSG_WAITALL) && (msg.msg_flags & (MSG_TRUNC | MSG_CTRUNC))) {
+ out_free:
+-- 
+cgit 
+
+
+From 858c293e5d3b7fd3037883fcc0379594517c926c Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:30 +0100
+Subject: io_uring/net: use async caches for async prep
+
+send/recv have async_data caches but there are only used from within
+issue handlers. Extend their use also to ->prep_async, should be handy
+with links and IOSQE_ASYNC.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/b9a2264b807582a97ed606c5bfcdc2399384e8a5.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c   | 16 +++++++++++++---
+ io_uring/opdef.c |  2 ++
+ 2 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index d5b80b66feab4..12412acc6c5e1 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -126,8 +126,8 @@ static void io_netmsg_recycle(struct io_kiocb *req, unsigned int issue_flags)
+ 	}
+ }
+ 
+-static struct io_async_msghdr *io_recvmsg_alloc_async(struct io_kiocb *req,
+-						      unsigned int issue_flags)
++static struct io_async_msghdr *io_msg_alloc_async(struct io_kiocb *req,
++						  unsigned int issue_flags)
+ {
+ 	struct io_ring_ctx *ctx = req->ctx;
+ 	struct io_cache_entry *entry;
+@@ -148,6 +148,12 @@ static struct io_async_msghdr *io_recvmsg_alloc_async(struct io_kiocb *req,
+ 	return NULL;
+ }
+ 
++static inline struct io_async_msghdr *io_msg_alloc_async_prep(struct io_kiocb *req)
++{
++	/* ->prep_async is always called from the submission context */
++	return io_msg_alloc_async(req, 0);
++}
++
+ static int io_setup_async_msg(struct io_kiocb *req,
+ 			      struct io_async_msghdr *kmsg,
+ 			      unsigned int issue_flags)
+@@ -156,7 +162,7 @@ static int io_setup_async_msg(struct io_kiocb *req,
+ 
+ 	if (req_has_async_data(req))
+ 		return -EAGAIN;
+-	async_msg = io_recvmsg_alloc_async(req, issue_flags);
++	async_msg = io_msg_alloc_async(req, issue_flags);
+ 	if (!async_msg) {
+ 		kfree(kmsg->free_iov);
+ 		return -ENOMEM;
+@@ -217,6 +223,8 @@ int io_sendmsg_prep_async(struct io_kiocb *req)
+ {
+ 	int ret;
+ 
++	if (!io_msg_alloc_async_prep(req))
++		return -ENOMEM;
+ 	ret = io_sendmsg_copy_hdr(req, req->async_data);
+ 	if (!ret)
+ 		req->flags |= REQ_F_NEED_CLEANUP;
+@@ -504,6 +512,8 @@ int io_recvmsg_prep_async(struct io_kiocb *req)
+ {
+ 	int ret;
+ 
++	if (!io_msg_alloc_async_prep(req))
++		return -ENOMEM;
+ 	ret = io_recvmsg_copy_hdr(req, req->async_data);
+ 	if (!ret)
+ 		req->flags |= REQ_F_NEED_CLEANUP;
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index 008320c5e9584..c99db6f712445 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -146,6 +146,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.unbound_nonreg_file	= 1,
+ 		.pollout		= 1,
+ 		.ioprio			= 1,
++		.manual_alloc		= 1,
+ 		.name			= "SENDMSG",
+ #if defined(CONFIG_NET)
+ 		.async_size		= sizeof(struct io_async_msghdr),
+@@ -163,6 +164,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.pollin			= 1,
+ 		.buffer_select		= 1,
+ 		.ioprio			= 1,
++		.manual_alloc		= 1,
+ 		.name			= "RECVMSG",
+ #if defined(CONFIG_NET)
+ 		.async_size		= sizeof(struct io_async_msghdr),
+-- 
+cgit 
+
+
+From 6bf8ad25fcd42a719f24613deabcff2fd341c789 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:31 +0100
+Subject: io_uring/net: io_async_msghdr caches for sendzc
+
+We already keep io_async_msghdr caches for normal send/recv requests,
+use them also for zerocopy send.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/42fa615b6e0be25f47a685c35d7b5e4f1b03d348.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 12412acc6c5e1..07f6b9e93c005 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -196,10 +196,9 @@ int io_sendzc_prep_async(struct io_kiocb *req)
+ 
+ 	if (!zc->addr || req_has_async_data(req))
+ 		return 0;
+-	if (io_alloc_async_data(req))
++	io = io_msg_alloc_async_prep(req);
++	if (!io)
+ 		return -ENOMEM;
+-
+-	io = req->async_data;
+ 	ret = move_addr_to_kernel(zc->addr, zc->addr_len, &io->addr);
+ 	return ret;
+ }
+@@ -212,9 +211,9 @@ static int io_setup_async_addr(struct io_kiocb *req,
+ 
+ 	if (!addr || req_has_async_data(req))
+ 		return -EAGAIN;
+-	if (io_alloc_async_data(req))
++	io = io_msg_alloc_async(req, issue_flags);
++	if (!io)
+ 		return -ENOMEM;
+-	io = req->async_data;
+ 	memcpy(&io->addr, addr, sizeof(io->addr));
+ 	return -EAGAIN;
+ }
+-- 
+cgit 
+
+
+From cd9021e88fddf0d9fa9704564153af2bdb5dc13c Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:32 +0100
+Subject: io_uring/net: add non-bvec sg chunking callback
+
+Add a sg_from_iter() for when we initiate non-bvec zerocopy sends, which
+helps us to remove some extra steps from io_sg_from_iter(). The only
+thing the new function has to do before giving control away to
+__zerocopy_sg_from_iter() is to check if the skb has managed frags and
+downgrade them if so.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/cda3dea0d36f7931f63a70f350130f085ac3f3dd.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 07f6b9e93c005..9b76cebc0a657 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -948,6 +948,13 @@ int io_sendzc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ 	return 0;
+ }
+ 
++static int io_sg_from_iter_iovec(struct sock *sk, struct sk_buff *skb,
++				 struct iov_iter *from, size_t length)
++{
++	skb_zcopy_downgrade_managed(skb);
++	return __zerocopy_sg_from_iter(NULL, sk, skb, from, length);
++}
++
+ static int io_sg_from_iter(struct sock *sk, struct sk_buff *skb,
+ 			   struct iov_iter *from, size_t length)
+ {
+@@ -958,13 +965,10 @@ static int io_sg_from_iter(struct sock *sk, struct sk_buff *skb,
+ 	ssize_t copied = 0;
+ 	unsigned long truesize = 0;
+ 
+-	if (!shinfo->nr_frags)
++	if (!frag)
+ 		shinfo->flags |= SKBFL_MANAGED_FRAG_REFS;
+-
+-	if (!skb_zcopy_managed(skb) || !iov_iter_is_bvec(from)) {
+-		skb_zcopy_downgrade_managed(skb);
++	else if (unlikely(!skb_zcopy_managed(skb)))
+ 		return __zerocopy_sg_from_iter(NULL, sk, skb, from, length);
+-	}
+ 
+ 	bi.bi_size = min(from->count, length);
+ 	bi.bi_bvec_done = from->iov_offset;
+@@ -1045,6 +1049,7 @@ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ 					(u64)(uintptr_t)zc->buf, zc->len);
+ 		if (unlikely(ret))
+ 			return ret;
++		msg.sg_from_iter = io_sg_from_iter;
+ 	} else {
+ 		ret = import_single_range(WRITE, zc->buf, zc->len, &iov,
+ 					  &msg.msg_iter);
+@@ -1053,6 +1058,7 @@ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ 		ret = io_notif_account_mem(zc->notif, zc->len);
+ 		if (unlikely(ret))
+ 			return ret;
++		msg.sg_from_iter = io_sg_from_iter_iovec;
+ 	}
+ 
+ 	msg_flags = zc->msg_flags | MSG_ZEROCOPY;
+@@ -1063,7 +1069,6 @@ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ 
+ 	msg.msg_flags = msg_flags;
+ 	msg.msg_ubuf = &io_notif_to_data(zc->notif)->uarg;
+-	msg.sg_from_iter = io_sg_from_iter;
+ 	ret = sock_sendmsg(sock, &msg);
+ 
+ 	if (unlikely(ret < min_ret)) {
+-- 
+cgit 
+
+
+From 0b048557db761d287777360a100e1d010760d209 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:33 +0100
+Subject: io_uring/net: refactor io_sr_msg types
+
+In preparation for using struct io_sr_msg for zerocopy sends, clean up
+types. First, flags can be u16 as it's provided by the userspace in u16
+ioprio, as well as addr_len. This saves us 4 bytes. Also use unsigned
+for size and done_io, both are as well limited to u32.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/42c2639d6385b8b2181342d2af3a42d3b1c5bcd2.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 9b76cebc0a657..3ef2cc54420cd 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -55,21 +55,21 @@ struct io_sr_msg {
+ 		struct user_msghdr __user	*umsg;
+ 		void __user			*buf;
+ 	};
++	unsigned			len;
++	unsigned			done_io;
+ 	unsigned			msg_flags;
+-	unsigned			flags;
+-	size_t				len;
+-	size_t				done_io;
++	u16				flags;
+ };
+ 
+ struct io_sendzc {
+ 	struct file			*file;
+ 	void __user			*buf;
+-	size_t				len;
++	unsigned			len;
++	unsigned			done_io;
+ 	unsigned			msg_flags;
+-	unsigned			flags;
+-	unsigned			addr_len;
++	u16				flags;
++	u16				addr_len;
+ 	void __user			*addr;
+-	size_t				done_io;
+ 	struct io_kiocb 		*notif;
+ };
+ 
+-- 
+cgit 
+
+
+From ac9e5784bbe72f4f603d1af84760ec09bc0b5ccd Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 13:20:34 +0100
+Subject: io_uring/net: use io_sr_msg for sendzc
+
+Reuse struct io_sr_msg for zerocopy sends, which is handy. There is
+only one zerocopy specific field, namely .notif, and we have enough
+space for it.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/408c5b1b2d8869e1a12da5f5a78ed72cac112149.1662639236.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 18 +++++-------------
+ 1 file changed, 5 insertions(+), 13 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 3ef2cc54420cd..97168c7ace260 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -59,15 +59,7 @@ struct io_sr_msg {
+ 	unsigned			done_io;
+ 	unsigned			msg_flags;
+ 	u16				flags;
+-};
+-
+-struct io_sendzc {
+-	struct file			*file;
+-	void __user			*buf;
+-	unsigned			len;
+-	unsigned			done_io;
+-	unsigned			msg_flags;
+-	u16				flags;
++	/* used only for sendzc */
+ 	u16				addr_len;
+ 	void __user			*addr;
+ 	struct io_kiocb 		*notif;
+@@ -190,7 +182,7 @@ static int io_sendmsg_copy_hdr(struct io_kiocb *req,
+ 
+ int io_sendzc_prep_async(struct io_kiocb *req)
+ {
+-	struct io_sendzc *zc = io_kiocb_to_cmd(req, struct io_sendzc);
++	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct io_async_msghdr *io;
+ 	int ret;
+ 
+@@ -890,7 +882,7 @@ out_free:
+ 
+ void io_sendzc_cleanup(struct io_kiocb *req)
+ {
+-	struct io_sendzc *zc = io_kiocb_to_cmd(req, struct io_sendzc);
++	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 
+ 	zc->notif->flags |= REQ_F_CQE_SKIP;
+ 	io_notif_flush(zc->notif);
+@@ -899,7 +891,7 @@ void io_sendzc_cleanup(struct io_kiocb *req)
+ 
+ int io_sendzc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ {
+-	struct io_sendzc *zc = io_kiocb_to_cmd(req, struct io_sendzc);
++	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct io_ring_ctx *ctx = req->ctx;
+ 	struct io_kiocb *notif;
+ 
+@@ -1009,7 +1001,7 @@ static int io_sg_from_iter(struct sock *sk, struct sk_buff *skb,
+ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ {
+ 	struct sockaddr_storage __address, *addr = NULL;
+-	struct io_sendzc *zc = io_kiocb_to_cmd(req, struct io_sendzc);
++	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct msghdr msg;
+ 	struct iovec iov;
+ 	struct socket *sock;
+-- 
+cgit 
+
+
+From 76de6749d1bc1817367fedda94cd7c5d325df6c4 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 16:56:52 +0100
+Subject: io_uring: further limit non-owner defer-tw cq waiting
+
+In case of DEFER_TASK_WORK we try to restrict waiters to only one task,
+which is also the only submitter; however, we don't do it reliably,
+which might be very confusing and backfire in the future. E.g. we
+currently allow multiple tasks in io_iopoll_check().
+
+Fixes: c0e0d6ba25f1 ("io_uring: add IORING_SETUP_DEFER_TASKRUN")
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Reviewed-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/94c83c0a7fe468260ee2ec31bdb0095d6e874ba2.1662652536.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c |  6 ++++++
+ io_uring/io_uring.h | 11 +++++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index b5245c5d102ca..e95877398b57a 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1398,6 +1398,9 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
+ 	int ret = 0;
+ 	unsigned long check_cq;
+ 
++	if (!io_allowed_run_tw(ctx))
++		return -EEXIST;
++
+ 	check_cq = READ_ONCE(ctx->check_cq);
+ 	if (unlikely(check_cq)) {
+ 		if (check_cq & BIT(IO_CHECK_CQ_OVERFLOW_BIT))
+@@ -2382,6 +2385,9 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
+ 	ktime_t timeout = KTIME_MAX;
+ 	int ret;
+ 
++	if (!io_allowed_run_tw(ctx))
++		return -EEXIST;
++
+ 	do {
+ 		/* always run at least 1 task work to process local work */
+ 		ret = io_run_task_work_ctx(ctx);
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index 9d89425292b72..4eea0836170e4 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -329,4 +329,15 @@ static inline struct io_kiocb *io_alloc_req(struct io_ring_ctx *ctx)
+ 	return container_of(node, struct io_kiocb, comp_list);
+ }
+ 
++static inline bool io_allowed_run_tw(struct io_ring_ctx *ctx)
++{
++	if (!(ctx->flags & IORING_SETUP_DEFER_TASKRUN))
++		return true;
++	if (unlikely(ctx->submitter_task != current)) {
++		/* maybe this is before any submissions */
++		return !ctx->submitter_task;
++	}
++	return true;
++}
++
+ #endif
+-- 
+cgit 
+
+
+From 6567506b68b0cae3934f1a58b35d709f38fc2e90 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 16:56:53 +0100
+Subject: io_uring: disallow defer-tw run w/ no submitters
+
+We try to restrict CQ waiters when IORING_SETUP_DEFER_TASKRUN is set,
+but if nothing has been submitted yet it'll allow any waiter, which
+violates the contract.
+
+Fixes: c0e0d6ba25f1 ("io_uring: add IORING_SETUP_DEFER_TASKRUN")
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Reviewed-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/b4f0d3f14236d7059d08c5abe2661ef0b78b5528.1662652536.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 7 +------
+ io_uring/io_uring.h | 9 ++-------
+ 2 files changed, 3 insertions(+), 13 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index e95877398b57a..39dda1b7a6000 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1169,13 +1169,8 @@ int __io_run_local_work(struct io_ring_ctx *ctx, bool locked)
+ 	int ret;
+ 	unsigned int loops = 1;
+ 
+-	if (unlikely(ctx->submitter_task != current)) {
+-		/* maybe this is before any submissions */
+-		if (!ctx->submitter_task)
+-			return 0;
+-
++	if (unlikely(ctx->submitter_task != current))
+ 		return -EEXIST;
+-	}
+ 
+ 	node = io_llist_xchg(&ctx->work_llist, &fake);
+ 	ret = 0;
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index 4eea0836170e4..d38173b9ac198 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -331,13 +331,8 @@ static inline struct io_kiocb *io_alloc_req(struct io_ring_ctx *ctx)
+ 
+ static inline bool io_allowed_run_tw(struct io_ring_ctx *ctx)
+ {
+-	if (!(ctx->flags & IORING_SETUP_DEFER_TASKRUN))
+-		return true;
+-	if (unlikely(ctx->submitter_task != current)) {
+-		/* maybe this is before any submissions */
+-		return !ctx->submitter_task;
+-	}
+-	return true;
++	return likely(!(ctx->flags & IORING_SETUP_DEFER_TASKRUN) ||
++		      ctx->submitter_task == current);
+ }
+ 
+ #endif
+-- 
+cgit 
+
+
+From 9d54bd6a3bb495f2e7e4996efdaf1bef6ad62272 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 16:56:54 +0100
+Subject: io_uring/iopoll: fix unexpected returns
+
+We may propagate a positive return value of io_run_task_work() out of
+io_iopoll_check(), which breaks our tests. io_run_task_work() doesn't
+return anything useful for us, ignore the return value.
+
+Fixes: c0e0d6ba25f1 ("io_uring: add IORING_SETUP_DEFER_TASKRUN")
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Reviewed-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/c442bb87f79cea10b3f857cbd4b9a4f0a0493fa3.1662652536.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 39dda1b7a6000..c6c32aa3bfe9d 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1435,12 +1435,9 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
+ 				u32 tail = ctx->cached_cq_tail;
+ 
+ 				mutex_unlock(&ctx->uring_lock);
+-				ret = io_run_task_work();
++				io_run_task_work();
+ 				mutex_lock(&ctx->uring_lock);
+ 
+-				if (ret < 0)
+-					break;
+-
+ 				/* some requests don't go through iopoll_list */
+ 				if (tail != ctx->cached_cq_tail ||
+ 				    wq_list_empty(&ctx->iopoll_list))
+-- 
+cgit 
+
+
+From 1f8d5bbe98a10da5348b0fab2fa679ef8d033be5 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 16:56:55 +0100
+Subject: io_uring/iopoll: unify tw breaking logic
+
+Let's keep checks for whether to break the iopoll loop or not same for
+normal and defer tw, this includes ->cached_cq_tail checks guarding
+against polling more than asked for.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/d2fa8a44f8114f55a4807528da438cde93815360.1662652536.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index c6c32aa3bfe9d..12e8acd300967 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1428,21 +1428,21 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, long min)
+ 		 */
+ 		if (wq_list_empty(&ctx->iopoll_list) ||
+ 		    io_task_work_pending(ctx)) {
++			u32 tail = ctx->cached_cq_tail;
++
+ 			if (!llist_empty(&ctx->work_llist))
+ 				__io_run_local_work(ctx, true);
++
+ 			if (task_work_pending(current) ||
+ 			    wq_list_empty(&ctx->iopoll_list)) {
+-				u32 tail = ctx->cached_cq_tail;
+-
+ 				mutex_unlock(&ctx->uring_lock);
+ 				io_run_task_work();
+ 				mutex_lock(&ctx->uring_lock);
+-
+-				/* some requests don't go through iopoll_list */
+-				if (tail != ctx->cached_cq_tail ||
+-				    wq_list_empty(&ctx->iopoll_list))
+-					break;
+ 			}
++			/* some requests don't go through iopoll_list */
++			if (tail != ctx->cached_cq_tail ||
++			    wq_list_empty(&ctx->iopoll_list))
++				break;
+ 		}
+ 		ret = io_do_iopoll(ctx, !min);
+ 		if (ret < 0)
+-- 
+cgit 
+
+
+From 7924fdfeea814b4f7ff8a16de00951ad93cccf6c Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 16:56:56 +0100
+Subject: io_uring: add fast path for io_run_local_work()
+
+We'll grab uring_lock and call __io_run_local_work() with several
+atomics inside even if there are no task works. Skip it if ->work_llist
+is empty.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Reviewed-by: Dylan Yudaken <dylany@fb.com>
+Link: https://lore.kernel.org/r/f6a885f372bad2d77d9cd87341b0a86a4000c0ff.1662652536.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 12e8acd300967..433466455a5f6 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1208,6 +1208,9 @@ int io_run_local_work(struct io_ring_ctx *ctx)
+ 	bool locked;
+ 	int ret;
+ 
++	if (llist_empty(&ctx->work_llist))
++		return 0;
++
+ 	locked = mutex_trylock(&ctx->uring_lock);
+ 	ret = __io_run_local_work(ctx, locked);
+ 	if (locked)
+-- 
+cgit 
+
+
+From c0dc995eb2295e1be6b95b60c90c59f87b009bdb Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 8 Sep 2022 16:56:57 +0100
+Subject: io_uring: remove unused return from io_disarm_next
+
+We removed conditional io_commit_cqring_flush() guarding against
+spurious eventfd and the io_disarm_next()'s return value is not used
+anymore, just void it.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/9a441c9a32a58bcc586076fa9a7d0dc33f1fb3cb.1662652536.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/timeout.c | 13 +++----------
+ io_uring/timeout.h |  2 +-
+ 2 files changed, 4 insertions(+), 11 deletions(-)
+
+diff --git a/io_uring/timeout.c b/io_uring/timeout.c
+index 78ea2c64b70e0..e8a8c20994805 100644
+--- a/io_uring/timeout.c
++++ b/io_uring/timeout.c
+@@ -149,11 +149,10 @@ static inline void io_remove_next_linked(struct io_kiocb *req)
+ 	nxt->link = NULL;
+ }
+ 
+-bool io_disarm_next(struct io_kiocb *req)
++void io_disarm_next(struct io_kiocb *req)
+ 	__must_hold(&req->ctx->completion_lock)
+ {
+ 	struct io_kiocb *link = NULL;
+-	bool posted = false;
+ 
+ 	if (req->flags & REQ_F_ARM_LTIMEOUT) {
+ 		link = req->link;
+@@ -161,7 +160,6 @@ bool io_disarm_next(struct io_kiocb *req)
+ 		if (link && link->opcode == IORING_OP_LINK_TIMEOUT) {
+ 			io_remove_next_linked(req);
+ 			io_req_tw_post_queue(link, -ECANCELED, 0);
+-			posted = true;
+ 		}
+ 	} else if (req->flags & REQ_F_LINK_TIMEOUT) {
+ 		struct io_ring_ctx *ctx = req->ctx;
+@@ -169,17 +167,12 @@ bool io_disarm_next(struct io_kiocb *req)
+ 		spin_lock_irq(&ctx->timeout_lock);
+ 		link = io_disarm_linked_timeout(req);
+ 		spin_unlock_irq(&ctx->timeout_lock);
+-		if (link) {
+-			posted = true;
++		if (link)
+ 			io_req_tw_post_queue(link, -ECANCELED, 0);
+-		}
+ 	}
+ 	if (unlikely((req->flags & REQ_F_FAIL) &&
+-		     !(req->flags & REQ_F_HARDLINK))) {
+-		posted |= (req->link != NULL);
++		     !(req->flags & REQ_F_HARDLINK)))
+ 		io_fail_links(req);
+-	}
+-	return posted;
+ }
+ 
+ struct io_kiocb *__io_disarm_linked_timeout(struct io_kiocb *req,
+diff --git a/io_uring/timeout.h b/io_uring/timeout.h
+index 858c62644897a..a6939f18313e8 100644
+--- a/io_uring/timeout.h
++++ b/io_uring/timeout.h
+@@ -27,7 +27,7 @@ int io_timeout_cancel(struct io_ring_ctx *ctx, struct io_cancel_data *cd);
+ __cold bool io_kill_timeouts(struct io_ring_ctx *ctx, struct task_struct *tsk,
+ 			     bool cancel_all);
+ void io_queue_linked_timeout(struct io_kiocb *req);
+-bool io_disarm_next(struct io_kiocb *req);
++void io_disarm_next(struct io_kiocb *req);
+ 
+ int io_timeout_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ int io_link_timeout_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+-- 
+cgit 
+
+
+From 4f731705cc1f1591e15e1c3133de8ae3843c68ff Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Sun, 11 Sep 2022 06:36:09 -0600
+Subject: io_uring/fdinfo: get rid of unnecessary is_cqe32 variable
+
+We already have the cq_shift, just use that to tell if we have doubly
+sized CQEs or not.
+
+While in there, cleanup the CQE32 vs normal CQE size printing.
+
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/fdinfo.c | 16 ++++++----------
+ 1 file changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/io_uring/fdinfo.c b/io_uring/fdinfo.c
+index b29e2d02216f2..d341e73022b12 100644
+--- a/io_uring/fdinfo.c
++++ b/io_uring/fdinfo.c
+@@ -62,10 +62,9 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
+ 	unsigned int cq_shift = 0;
+ 	unsigned int sq_entries, cq_entries;
+ 	bool has_lock;
+-	bool is_cqe32 = (ctx->flags & IORING_SETUP_CQE32);
+ 	unsigned int i;
+ 
+-	if (is_cqe32)
++	if (ctx->flags & IORING_SETUP_CQE32)
+ 		cq_shift = 1;
+ 
+ 	/*
+@@ -102,16 +101,13 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
+ 		unsigned int entry = i + cq_head;
+ 		struct io_uring_cqe *cqe = &r->cqes[(entry & cq_mask) << cq_shift];
+ 
+-		if (!is_cqe32) {
+-			seq_printf(m, "%5u: user_data:%llu, res:%d, flag:%x\n",
++		seq_printf(m, "%5u: user_data:%llu, res:%d, flag:%x",
+ 			   entry & cq_mask, cqe->user_data, cqe->res,
+ 			   cqe->flags);
+-		} else {
+-			seq_printf(m, "%5u: user_data:%llu, res:%d, flag:%x, "
+-				"extra1:%llu, extra2:%llu\n",
+-				entry & cq_mask, cqe->user_data, cqe->res,
+-				cqe->flags, cqe->big_cqe[0], cqe->big_cqe[1]);
+-		}
++		if (cq_shift)
++			seq_printf(m, ", extra1:%llu, extra2:%llu\n",
++					cqe->big_cqe[0], cqe->big_cqe[1]);
++		seq_printf(m, "\n");
+ 	}
+ 
+ 	/*
+-- 
+cgit 
+
+
+From 3b8fdd1dc35e395d19efbc8391a809a5b954ecf4 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Sun, 11 Sep 2022 06:40:37 -0600
+Subject: io_uring/fdinfo: fix sqe dumping for IORING_SETUP_SQE128
+
+If we have doubly sized SQEs, then we need to shift the sq index by 1
+to account for using two entries for a single request. The CQE dumping
+gets this right, but the SQE one does not.
+
+Improve the SQE dumping in general, the information dumped is pretty
+sparse and doesn't even cover the whole basic part of the SQE. Include
+information on the extended part of the SQE, if doubly sized SQEs are
+in use. A typical dump now looks like the following:
+
+[...]
+SQEs:	32
+   32: opcode:URING_CMD, fd:0, flags:1, off:3225964160, addr:0x0, rw_flags:0x0, buf_index:0 user_data:2721, e0:0x0, e1:0xffffb8041000, e2:0x100000000000, e3:0x5500, e4:0x7, e5:0x0, e6:0x0, e7:0x0
+   33: opcode:URING_CMD, fd:0, flags:1, off:3225964160, addr:0x0, rw_flags:0x0, buf_index:0 user_data:2722, e0:0x0, e1:0xffffb8043000, e2:0x100000000000, e3:0x5508, e4:0x7, e5:0x0, e6:0x0, e7:0x0
+   34: opcode:URING_CMD, fd:0, flags:1, off:3225964160, addr:0x0, rw_flags:0x0, buf_index:0 user_data:2723, e0:0x0, e1:0xffffb8045000, e2:0x100000000000, e3:0x5510, e4:0x7, e5:0x0, e6:0x0, e7:0x0
+[...]
+
+Fixes: ebdeb7c01d02 ("io_uring: add support for 128-byte SQEs")
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/fdinfo.c | 32 ++++++++++++++++++++++++++------
+ 1 file changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/io_uring/fdinfo.c b/io_uring/fdinfo.c
+index d341e73022b12..4eae088046d0d 100644
+--- a/io_uring/fdinfo.c
++++ b/io_uring/fdinfo.c
+@@ -60,12 +60,15 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
+ 	unsigned int cq_head = READ_ONCE(r->cq.head);
+ 	unsigned int cq_tail = READ_ONCE(r->cq.tail);
+ 	unsigned int cq_shift = 0;
++	unsigned int sq_shift = 0;
+ 	unsigned int sq_entries, cq_entries;
+ 	bool has_lock;
+ 	unsigned int i;
+ 
+ 	if (ctx->flags & IORING_SETUP_CQE32)
+ 		cq_shift = 1;
++	if (ctx->flags & IORING_SETUP_SQE128)
++		sq_shift = 1;
+ 
+ 	/*
+ 	 * we may get imprecise sqe and cqe info if uring is actively running
+@@ -81,19 +84,36 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
+ 	seq_printf(m, "CqHead:\t%u\n", cq_head);
+ 	seq_printf(m, "CqTail:\t%u\n", cq_tail);
+ 	seq_printf(m, "CachedCqTail:\t%u\n", ctx->cached_cq_tail);
+-	seq_printf(m, "SQEs:\t%u\n", sq_tail - ctx->cached_sq_head);
++	seq_printf(m, "SQEs:\t%u\n", sq_tail - sq_head);
+ 	sq_entries = min(sq_tail - sq_head, ctx->sq_entries);
+ 	for (i = 0; i < sq_entries; i++) {
+ 		unsigned int entry = i + sq_head;
+-		unsigned int sq_idx = READ_ONCE(ctx->sq_array[entry & sq_mask]);
+ 		struct io_uring_sqe *sqe;
++		unsigned int sq_idx;
+ 
++		sq_idx = READ_ONCE(ctx->sq_array[entry & sq_mask]);
+ 		if (sq_idx > sq_mask)
+ 			continue;
+-		sqe = &ctx->sq_sqes[sq_idx];
+-		seq_printf(m, "%5u: opcode:%d, fd:%d, flags:%x, user_data:%llu\n",
+-			   sq_idx, sqe->opcode, sqe->fd, sqe->flags,
+-			   sqe->user_data);
++		sqe = &ctx->sq_sqes[sq_idx << 1];
++		seq_printf(m, "%5u: opcode:%s, fd:%d, flags:%x, off:%llu, "
++			      "addr:0x%llx, rw_flags:0x%x, buf_index:%d "
++			      "user_data:%llu",
++			   sq_idx, io_uring_get_opcode(sqe->opcode), sqe->fd,
++			   sqe->flags, (unsigned long long) sqe->off,
++			   (unsigned long long) sqe->addr, sqe->rw_flags,
++			   sqe->buf_index, sqe->user_data);
++		if (sq_shift) {
++			u64 *sqeb = (void *) (sqe + 1);
++			int size = sizeof(struct io_uring_sqe) / sizeof(u64);
++			int j;
++
++			for (j = 0; j < size; j++) {
++				seq_printf(m, ", e%d:0x%llx", j,
++						(unsigned long long) *sqeb);
++				sqeb++;
++			}
++		}
++		seq_printf(m, "\n");
+ 	}
+ 	seq_printf(m, "CQEs:\t%u\n", cq_tail - cq_head);
+ 	cq_entries = min(cq_tail - cq_head, ctx->cq_entries);
+-- 
+cgit 
+
+
+From a47b255e90395bdb481975ab3d9e96fcf8b3165f Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:46 +0100
+Subject: io_uring: add custom opcode hooks on fail
+
+Sometimes we have to do a little bit of a fixup on a request failuer in
+io_req_complete_failed(). Add a callback in opdef for that.
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/b734cff4e67cb30cca976b9face321023f37549a.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 4 ++++
+ io_uring/opdef.h    | 1 +
+ 2 files changed, 5 insertions(+)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 433466455a5f6..3875ea897cdf2 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -865,8 +865,12 @@ inline void __io_req_complete(struct io_kiocb *req, unsigned issue_flags)
+ 
+ void io_req_complete_failed(struct io_kiocb *req, s32 res)
+ {
++	const struct io_op_def *def = &io_op_defs[req->opcode];
++
+ 	req_set_fail(req);
+ 	io_req_set_res(req, res, io_put_kbuf(req, IO_URING_F_UNLOCKED));
++	if (def->fail)
++		def->fail(req);
+ 	io_req_complete_post(req);
+ }
+ 
+diff --git a/io_uring/opdef.h b/io_uring/opdef.h
+index 763c6e54e2ee5..3efe06d25473a 100644
+--- a/io_uring/opdef.h
++++ b/io_uring/opdef.h
+@@ -36,6 +36,7 @@ struct io_op_def {
+ 	int (*issue)(struct io_kiocb *, unsigned int);
+ 	int (*prep_async)(struct io_kiocb *);
+ 	void (*cleanup)(struct io_kiocb *);
++	void (*fail)(struct io_kiocb *);
+ };
+ 
+ extern const struct io_op_def io_op_defs[];
+-- 
+cgit 
+
+
+From 47b4c68660752facfa6247b1fc9ca9d722b8b601 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:47 +0100
+Subject: io_uring/rw: don't lose partial IO result on fail
+
+A partially done read/write may end up in io_req_complete_failed() and
+loose the result, make sure we return the number of bytes processed.
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/05e0879c226bcd53b441bf92868eadd4bf04e2fc.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/opdef.c | 6 ++++++
+ io_uring/rw.c    | 8 ++++++++
+ io_uring/rw.h    | 1 +
+ 3 files changed, 15 insertions(+)
+
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index c99db6f712445..224e5b30909d0 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -69,6 +69,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.issue			= io_read,
+ 		.prep_async		= io_readv_prep_async,
+ 		.cleanup		= io_readv_writev_cleanup,
++		.fail			= io_rw_fail,
+ 	},
+ 	[IORING_OP_WRITEV] = {
+ 		.needs_file		= 1,
+@@ -85,6 +86,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.issue			= io_write,
+ 		.prep_async		= io_writev_prep_async,
+ 		.cleanup		= io_readv_writev_cleanup,
++		.fail			= io_rw_fail,
+ 	},
+ 	[IORING_OP_FSYNC] = {
+ 		.needs_file		= 1,
+@@ -105,6 +107,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.name			= "READ_FIXED",
+ 		.prep			= io_prep_rw,
+ 		.issue			= io_read,
++		.fail			= io_rw_fail,
+ 	},
+ 	[IORING_OP_WRITE_FIXED] = {
+ 		.needs_file		= 1,
+@@ -119,6 +122,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.name			= "WRITE_FIXED",
+ 		.prep			= io_prep_rw,
+ 		.issue			= io_write,
++		.fail			= io_rw_fail,
+ 	},
+ 	[IORING_OP_POLL_ADD] = {
+ 		.needs_file		= 1,
+@@ -275,6 +279,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.name			= "READ",
+ 		.prep			= io_prep_rw,
+ 		.issue			= io_read,
++		.fail			= io_rw_fail,
+ 	},
+ 	[IORING_OP_WRITE] = {
+ 		.needs_file		= 1,
+@@ -289,6 +294,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.name			= "WRITE",
+ 		.prep			= io_prep_rw,
+ 		.issue			= io_write,
++		.fail			= io_rw_fail,
+ 	},
+ 	[IORING_OP_FADVISE] = {
+ 		.needs_file		= 1,
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index e50ba72091acd..59c92a4616b88 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -954,6 +954,14 @@ static void io_cqring_ev_posted_iopoll(struct io_ring_ctx *ctx)
+ 		io_cqring_wake(ctx);
+ }
+ 
++void io_rw_fail(struct io_kiocb *req)
++{
++	int res;
++
++	res = io_fixup_rw_res(req, req->cqe.res);
++	io_req_set_res(req, res, req->cqe.flags);
++}
++
+ int io_do_iopoll(struct io_ring_ctx *ctx, bool force_nonspin)
+ {
+ 	struct io_wq_work_node *pos, *start, *prev;
+diff --git a/io_uring/rw.h b/io_uring/rw.h
+index 0204c3fcafa51..3b733f4b610ac 100644
+--- a/io_uring/rw.h
++++ b/io_uring/rw.h
+@@ -21,3 +21,4 @@ int io_readv_prep_async(struct io_kiocb *req);
+ int io_write(struct io_kiocb *req, unsigned int issue_flags);
+ int io_writev_prep_async(struct io_kiocb *req);
+ void io_readv_writev_cleanup(struct io_kiocb *req);
++void io_rw_fail(struct io_kiocb *req);
+-- 
+cgit 
+
+
+From 7e6b638ed501cced4e472298d6b08dd16346f3a6 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:48 +0100
+Subject: io_uring/net: don't lose partial send/recv on fail
+
+Just as with rw, partial send/recv may end up in
+io_req_complete_failed() and loose the result, make sure we return the
+number of bytes processed.
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/a4ff95897b5419356fca9ea55db91ac15b2975f9.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c   | 10 ++++++++++
+ io_uring/net.h   |  2 ++
+ io_uring/opdef.c |  4 ++++
+ 3 files changed, 16 insertions(+)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 97168c7ace260..4aabd476499cd 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -1093,6 +1093,16 @@ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ 	return IOU_OK;
+ }
+ 
++void io_sendrecv_fail(struct io_kiocb *req)
++{
++	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
++	int res = req->cqe.res;
++
++	if (req->flags & REQ_F_PARTIAL_IO)
++		res = sr->done_io;
++	io_req_set_res(req, res, req->cqe.flags);
++}
++
+ int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ {
+ 	struct io_accept *accept = io_kiocb_to_cmd(req, struct io_accept);
+diff --git a/io_uring/net.h b/io_uring/net.h
+index d744a0a874e75..109ffb3a1a3ff 100644
+--- a/io_uring/net.h
++++ b/io_uring/net.h
+@@ -43,6 +43,8 @@ int io_recvmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ int io_recvmsg(struct io_kiocb *req, unsigned int issue_flags);
+ int io_recv(struct io_kiocb *req, unsigned int issue_flags);
+ 
++void io_sendrecv_fail(struct io_kiocb *req);
++
+ int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ int io_accept(struct io_kiocb *req, unsigned int issue_flags);
+ 
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index 224e5b30909d0..f0f4ae33b99bc 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -158,6 +158,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.issue			= io_sendmsg,
+ 		.prep_async		= io_sendmsg_prep_async,
+ 		.cleanup		= io_sendmsg_recvmsg_cleanup,
++		.fail			= io_sendrecv_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+ #endif
+@@ -176,6 +177,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.issue			= io_recvmsg,
+ 		.prep_async		= io_recvmsg_prep_async,
+ 		.cleanup		= io_sendmsg_recvmsg_cleanup,
++		.fail			= io_sendrecv_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+ #endif
+@@ -318,6 +320,7 @@ const struct io_op_def io_op_defs[] = {
+ #if defined(CONFIG_NET)
+ 		.prep			= io_sendmsg_prep,
+ 		.issue			= io_send,
++		.fail			= io_sendrecv_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+ #endif
+@@ -333,6 +336,7 @@ const struct io_op_def io_op_defs[] = {
+ #if defined(CONFIG_NET)
+ 		.prep			= io_recvmsg_prep,
+ 		.issue			= io_recv,
++		.fail			= io_sendrecv_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+ #endif
+-- 
+cgit 
+
+
+From 5693bcce892d7b8b15a7a92b011d3d40a023b53c Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:49 +0100
+Subject: io_uring/net: don't lose partial send_zc on fail
+
+Partial zc send may end up in io_req_complete_failed(), which not only
+would return invalid result but also mask out the notification leading
+to lifetime issues.
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/5673285b5e83e6ceca323727b4ddaa584b5cc91e.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c   | 16 ++++++++++++++++
+ io_uring/net.h   |  1 +
+ io_uring/opdef.c |  1 +
+ 3 files changed, 18 insertions(+)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 4aabd476499cd..8d90f8eeb2d0d 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -1103,6 +1103,22 @@ void io_sendrecv_fail(struct io_kiocb *req)
+ 	io_req_set_res(req, res, req->cqe.flags);
+ }
+ 
++void io_send_zc_fail(struct io_kiocb *req)
++{
++	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
++	int res = req->cqe.res;
++
++	if (req->flags & REQ_F_PARTIAL_IO) {
++		if (req->flags & REQ_F_NEED_CLEANUP) {
++			io_notif_flush(sr->notif);
++			sr->notif = NULL;
++			req->flags &= ~REQ_F_NEED_CLEANUP;
++		}
++		res = sr->done_io;
++	}
++	io_req_set_res(req, res, req->cqe.flags);
++}
++
+ int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ {
+ 	struct io_accept *accept = io_kiocb_to_cmd(req, struct io_accept);
+diff --git a/io_uring/net.h b/io_uring/net.h
+index 109ffb3a1a3ff..e7366aac335c2 100644
+--- a/io_uring/net.h
++++ b/io_uring/net.h
+@@ -58,6 +58,7 @@ int io_connect(struct io_kiocb *req, unsigned int issue_flags);
+ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags);
+ int io_sendzc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ void io_sendzc_cleanup(struct io_kiocb *req);
++void io_send_zc_fail(struct io_kiocb *req);
+ 
+ void io_netmsg_cache_free(struct io_cache_entry *entry);
+ #else
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index f0f4ae33b99bc..4fbefb7d70c76 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -497,6 +497,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.issue			= io_sendzc,
+ 		.prep_async		= io_sendzc_prep_async,
+ 		.cleanup		= io_sendzc_cleanup,
++		.fail			= io_send_zc_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+ #endif
+-- 
+cgit 
+
+
+From 6ae61b7aa2c758ce07347ebfa9c79b6f208098d5 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:50 +0100
+Subject: io_uring/net: refactor io_setup_async_addr
+
+Instead of passing the right address into io_setup_async_addr() only
+specify local on-stack storage and let the function infer where to grab
+it from. It optimises out one local variable we have to deal with.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/6bfa9ab810d776853eb26ed59301e2536c3a5471.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 8d90f8eeb2d0d..021ca2edf44a1 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -196,17 +196,18 @@ int io_sendzc_prep_async(struct io_kiocb *req)
+ }
+ 
+ static int io_setup_async_addr(struct io_kiocb *req,
+-			      struct sockaddr_storage *addr,
++			      struct sockaddr_storage *addr_storage,
+ 			      unsigned int issue_flags)
+ {
++	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct io_async_msghdr *io;
+ 
+-	if (!addr || req_has_async_data(req))
++	if (!sr->addr || req_has_async_data(req))
+ 		return -EAGAIN;
+ 	io = io_msg_alloc_async(req, issue_flags);
+ 	if (!io)
+ 		return -ENOMEM;
+-	memcpy(&io->addr, addr, sizeof(io->addr));
++	memcpy(&io->addr, addr_storage, sizeof(io->addr));
+ 	return -EAGAIN;
+ }
+ 
+@@ -1000,7 +1001,7 @@ static int io_sg_from_iter(struct sock *sk, struct sk_buff *skb,
+ 
+ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ {
+-	struct sockaddr_storage __address, *addr = NULL;
++	struct sockaddr_storage __address;
+ 	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct msghdr msg;
+ 	struct iovec iov;
+@@ -1021,20 +1022,19 @@ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ 		if (req_has_async_data(req)) {
+ 			struct io_async_msghdr *io = req->async_data;
+ 
+-			msg.msg_name = addr = &io->addr;
++			msg.msg_name = &io->addr;
+ 		} else {
+ 			ret = move_addr_to_kernel(zc->addr, zc->addr_len, &__address);
+ 			if (unlikely(ret < 0))
+ 				return ret;
+ 			msg.msg_name = (struct sockaddr *)&__address;
+-			addr = &__address;
+ 		}
+ 		msg.msg_namelen = zc->addr_len;
+ 	}
+ 
+ 	if (!(req->flags & REQ_F_POLLED) &&
+ 	    (zc->flags & IORING_RECVSEND_POLL_FIRST))
+-		return io_setup_async_addr(req, addr, issue_flags);
++		return io_setup_async_addr(req, &__address, issue_flags);
+ 
+ 	if (zc->flags & IORING_RECVSEND_FIXED_BUF) {
+ 		ret = io_import_fixed(WRITE, &msg.msg_iter, req->imu,
+@@ -1065,14 +1065,14 @@ int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
+ 
+ 	if (unlikely(ret < min_ret)) {
+ 		if (ret == -EAGAIN && (issue_flags & IO_URING_F_NONBLOCK))
+-			return io_setup_async_addr(req, addr, issue_flags);
++			return io_setup_async_addr(req, &__address, issue_flags);
+ 
+ 		if (ret > 0 && io_net_retry(sock, msg.msg_flags)) {
+ 			zc->len -= ret;
+ 			zc->buf += ret;
+ 			zc->done_io += ret;
+ 			req->flags |= REQ_F_PARTIAL_IO;
+-			return io_setup_async_addr(req, addr, issue_flags);
++			return io_setup_async_addr(req, &__address, issue_flags);
+ 		}
+ 		if (ret < 0 && !zc->done_io)
+ 			zc->notif->flags |= REQ_F_CQE_SKIP;
+-- 
+cgit 
+
+
+From 516e82f0e043a1a0e8d00800ed0ffe2137cf0e7e Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:51 +0100
+Subject: io_uring/net: support non-zerocopy sendto
+
+We have normal sends, but what is missing is sendto-like requests. Add
+sendto() capabilities to IORING_OP_SEND by passing in addr just as we do
+for IORING_OP_SEND_ZC.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/69fbd8b2cb830e57d1bf9ec351e9bf95c5b77e3f.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c   | 35 +++++++++++++++++++++++++++++------
+ io_uring/net.h   |  3 ++-
+ io_uring/opdef.c |  5 ++++-
+ 3 files changed, 35 insertions(+), 8 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 021ca2edf44a1..fdb69a3fde765 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -59,9 +59,10 @@ struct io_sr_msg {
+ 	unsigned			done_io;
+ 	unsigned			msg_flags;
+ 	u16				flags;
+-	/* used only for sendzc */
++	/* initialised and used only by !msg send variants */
+ 	u16				addr_len;
+ 	void __user			*addr;
++	/* used only for send zerocopy */
+ 	struct io_kiocb 		*notif;
+ };
+ 
+@@ -180,7 +181,7 @@ static int io_sendmsg_copy_hdr(struct io_kiocb *req,
+ 					&iomsg->free_iov);
+ }
+ 
+-int io_sendzc_prep_async(struct io_kiocb *req)
++int io_send_prep_async(struct io_kiocb *req)
+ {
+ 	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct io_async_msghdr *io;
+@@ -234,8 +235,14 @@ int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ {
+ 	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 
+-	if (unlikely(sqe->file_index || sqe->addr2))
++	if (req->opcode == IORING_OP_SEND) {
++		if (READ_ONCE(sqe->__pad3[0]))
++			return -EINVAL;
++		sr->addr = u64_to_user_ptr(READ_ONCE(sqe->addr2));
++		sr->addr_len = READ_ONCE(sqe->addr_len);
++	} else if (sqe->addr2 || sqe->file_index) {
+ 		return -EINVAL;
++	}
+ 
+ 	sr->umsg = u64_to_user_ptr(READ_ONCE(sqe->addr));
+ 	sr->len = READ_ONCE(sqe->len);
+@@ -315,6 +322,7 @@ int io_sendmsg(struct io_kiocb *req, unsigned int issue_flags)
+ 
+ int io_send(struct io_kiocb *req, unsigned int issue_flags)
+ {
++	struct sockaddr_storage __address;
+ 	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct msghdr msg;
+ 	struct iovec iov;
+@@ -323,9 +331,23 @@ int io_send(struct io_kiocb *req, unsigned int issue_flags)
+ 	int min_ret = 0;
+ 	int ret;
+ 
++	if (sr->addr) {
++		if (req_has_async_data(req)) {
++			struct io_async_msghdr *io = req->async_data;
++
++			msg.msg_name = &io->addr;
++		} else {
++			ret = move_addr_to_kernel(sr->addr, sr->addr_len, &__address);
++			if (unlikely(ret < 0))
++				return ret;
++			msg.msg_name = (struct sockaddr *)&__address;
++		}
++		msg.msg_namelen = sr->addr_len;
++	}
++
+ 	if (!(req->flags & REQ_F_POLLED) &&
+ 	    (sr->flags & IORING_RECVSEND_POLL_FIRST))
+-		return -EAGAIN;
++		return io_setup_async_addr(req, &__address, issue_flags);
+ 
+ 	sock = sock_from_file(req->file);
+ 	if (unlikely(!sock))
+@@ -351,13 +373,14 @@ int io_send(struct io_kiocb *req, unsigned int issue_flags)
+ 	ret = sock_sendmsg(sock, &msg);
+ 	if (ret < min_ret) {
+ 		if (ret == -EAGAIN && (issue_flags & IO_URING_F_NONBLOCK))
+-			return -EAGAIN;
++			return io_setup_async_addr(req, &__address, issue_flags);
++
+ 		if (ret > 0 && io_net_retry(sock, flags)) {
+ 			sr->len -= ret;
+ 			sr->buf += ret;
+ 			sr->done_io += ret;
+ 			req->flags |= REQ_F_PARTIAL_IO;
+-			return -EAGAIN;
++			return io_setup_async_addr(req, &__address, issue_flags);
+ 		}
+ 		if (ret == -ERESTARTSYS)
+ 			ret = -EINTR;
+diff --git a/io_uring/net.h b/io_uring/net.h
+index e7366aac335c2..488d4dc7eee23 100644
+--- a/io_uring/net.h
++++ b/io_uring/net.h
+@@ -31,12 +31,13 @@ struct io_async_connect {
+ int io_shutdown_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ int io_shutdown(struct io_kiocb *req, unsigned int issue_flags);
+ 
+-int io_sendzc_prep_async(struct io_kiocb *req);
+ int io_sendmsg_prep_async(struct io_kiocb *req);
+ void io_sendmsg_recvmsg_cleanup(struct io_kiocb *req);
+ int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ int io_sendmsg(struct io_kiocb *req, unsigned int issue_flags);
++
+ int io_send(struct io_kiocb *req, unsigned int issue_flags);
++int io_send_prep_async(struct io_kiocb *req);
+ 
+ int io_recvmsg_prep_async(struct io_kiocb *req);
+ int io_recvmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index 4fbefb7d70c76..849514abd0469 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -316,11 +316,14 @@ const struct io_op_def io_op_defs[] = {
+ 		.pollout		= 1,
+ 		.audit_skip		= 1,
+ 		.ioprio			= 1,
++		.manual_alloc		= 1,
+ 		.name			= "SEND",
+ #if defined(CONFIG_NET)
++		.async_size		= sizeof(struct io_async_msghdr),
+ 		.prep			= io_sendmsg_prep,
+ 		.issue			= io_send,
+ 		.fail			= io_sendrecv_fail,
++		.prep_async		= io_send_prep_async,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+ #endif
+@@ -495,7 +498,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.async_size		= sizeof(struct io_async_msghdr),
+ 		.prep			= io_sendzc_prep,
+ 		.issue			= io_sendzc,
+-		.prep_async		= io_sendzc_prep_async,
++		.prep_async		= io_send_prep_async,
+ 		.cleanup		= io_sendzc_cleanup,
+ 		.fail			= io_send_zc_fail,
+ #else
+-- 
+cgit 
+
+
+From b0e9b5517eb12fa80c72e205fe28534c2e2f39b9 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:52 +0100
+Subject: io_uring/net: rename io_sendzc()
+
+Simple renaming of io_sendzc*() functions in preparatio to adding
+a zerocopy sendmsg variant.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/265af46829e6076dd220011b1858dc3151969226.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c   | 6 +++---
+ io_uring/net.h   | 6 +++---
+ io_uring/opdef.c | 6 +++---
+ 3 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index fdb69a3fde765..145beb455f61c 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -904,7 +904,7 @@ out_free:
+ 	return ret;
+ }
+ 
+-void io_sendzc_cleanup(struct io_kiocb *req)
++void io_send_zc_cleanup(struct io_kiocb *req)
+ {
+ 	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 
+@@ -913,7 +913,7 @@ void io_sendzc_cleanup(struct io_kiocb *req)
+ 	zc->notif = NULL;
+ }
+ 
+-int io_sendzc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
++int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ {
+ 	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct io_ring_ctx *ctx = req->ctx;
+@@ -1022,7 +1022,7 @@ static int io_sg_from_iter(struct sock *sk, struct sk_buff *skb,
+ 	return ret;
+ }
+ 
+-int io_sendzc(struct io_kiocb *req, unsigned int issue_flags)
++int io_send_zc(struct io_kiocb *req, unsigned int issue_flags)
+ {
+ 	struct sockaddr_storage __address;
+ 	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
+diff --git a/io_uring/net.h b/io_uring/net.h
+index 488d4dc7eee23..337541f25b79b 100644
+--- a/io_uring/net.h
++++ b/io_uring/net.h
+@@ -56,9 +56,9 @@ int io_connect_prep_async(struct io_kiocb *req);
+ int io_connect_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ int io_connect(struct io_kiocb *req, unsigned int issue_flags);
+ 
+-int io_sendzc(struct io_kiocb *req, unsigned int issue_flags);
+-int io_sendzc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+-void io_sendzc_cleanup(struct io_kiocb *req);
++int io_send_zc(struct io_kiocb *req, unsigned int issue_flags);
++int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
++void io_send_zc_cleanup(struct io_kiocb *req);
+ void io_send_zc_fail(struct io_kiocb *req);
+ 
+ void io_netmsg_cache_free(struct io_cache_entry *entry);
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index 849514abd0469..c7d0a2fed42e8 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -496,10 +496,10 @@ const struct io_op_def io_op_defs[] = {
+ 		.manual_alloc		= 1,
+ #if defined(CONFIG_NET)
+ 		.async_size		= sizeof(struct io_async_msghdr),
+-		.prep			= io_sendzc_prep,
+-		.issue			= io_sendzc,
++		.prep			= io_send_zc_prep,
++		.issue			= io_send_zc,
+ 		.prep_async		= io_send_prep_async,
+-		.cleanup		= io_sendzc_cleanup,
++		.cleanup		= io_send_zc_cleanup,
+ 		.fail			= io_send_zc_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+-- 
+cgit 
+
+
+From c4c0009e0b56ef9920020bcade1e45be52653bae Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:53 +0100
+Subject: io_uring/net: combine fail handlers
+
+Merge io_send_zc_fail() into io_sendrecv_fail(), saves a few lines of
+code and some headache for following patch.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/e0eba1d577413aef5602cd45f588b9230207082d.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c   | 31 ++++++++++++++++---------------
+ io_uring/net.h   |  1 -
+ io_uring/opdef.c |  2 +-
+ 3 files changed, 17 insertions(+), 17 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 145beb455f61c..209bc69b3707a 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -192,6 +192,7 @@ int io_send_prep_async(struct io_kiocb *req)
+ 	io = io_msg_alloc_async_prep(req);
+ 	if (!io)
+ 		return -ENOMEM;
++	io->free_iov = NULL;
+ 	ret = move_addr_to_kernel(zc->addr, zc->addr_len, &io->addr);
+ 	return ret;
+ }
+@@ -208,6 +209,7 @@ static int io_setup_async_addr(struct io_kiocb *req,
+ 	io = io_msg_alloc_async(req, issue_flags);
+ 	if (!io)
+ 		return -ENOMEM;
++	io->free_iov = NULL;
+ 	memcpy(&io->addr, addr_storage, sizeof(io->addr));
+ 	return -EAGAIN;
+ }
+@@ -1119,26 +1121,25 @@ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags)
+ void io_sendrecv_fail(struct io_kiocb *req)
+ {
+ 	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
++	struct io_async_msghdr *io;
+ 	int res = req->cqe.res;
+ 
+ 	if (req->flags & REQ_F_PARTIAL_IO)
+ 		res = sr->done_io;
+-	io_req_set_res(req, res, req->cqe.flags);
+-}
+-
+-void io_send_zc_fail(struct io_kiocb *req)
+-{
+-	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+-	int res = req->cqe.res;
+-
+-	if (req->flags & REQ_F_PARTIAL_IO) {
+-		if (req->flags & REQ_F_NEED_CLEANUP) {
+-			io_notif_flush(sr->notif);
+-			sr->notif = NULL;
+-			req->flags &= ~REQ_F_NEED_CLEANUP;
+-		}
+-		res = sr->done_io;
++	if ((req->flags & REQ_F_NEED_CLEANUP) &&
++	    req->opcode == IORING_OP_SEND_ZC) {
++		/* preserve notification for partial I/O */
++		if (res < 0)
++			sr->notif->flags |= REQ_F_CQE_SKIP;
++		io_notif_flush(sr->notif);
++		sr->notif = NULL;
+ 	}
++	if (req_has_async_data(req)) {
++		io = req->async_data;
++		kfree(io->free_iov);
++		io->free_iov = NULL;
++	}
++	req->flags &= ~REQ_F_NEED_CLEANUP;
+ 	io_req_set_res(req, res, req->cqe.flags);
+ }
+ 
+diff --git a/io_uring/net.h b/io_uring/net.h
+index 337541f25b79b..45558e2b0a831 100644
+--- a/io_uring/net.h
++++ b/io_uring/net.h
+@@ -59,7 +59,6 @@ int io_connect(struct io_kiocb *req, unsigned int issue_flags);
+ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags);
+ int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ void io_send_zc_cleanup(struct io_kiocb *req);
+-void io_send_zc_fail(struct io_kiocb *req);
+ 
+ void io_netmsg_cache_free(struct io_cache_entry *entry);
+ #else
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index c7d0a2fed42e8..0fdeb1bc21de5 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -500,7 +500,7 @@ const struct io_op_def io_op_defs[] = {
+ 		.issue			= io_send_zc,
+ 		.prep_async		= io_send_prep_async,
+ 		.cleanup		= io_send_zc_cleanup,
+-		.fail			= io_send_zc_fail,
++		.fail			= io_sendrecv_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
+ #endif
+-- 
+cgit 
+
+
+From 493108d95f1464ccd101d4e5cfa7e93f1fc64d47 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 21 Sep 2022 12:17:54 +0100
+Subject: io_uring/net: zerocopy sendmsg
+
+Add a zerocopy version of sendmsg.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/6aabc4bdfc0ec78df6ec9328137e394af9d4e7ef.1663668091.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/uapi/linux/io_uring.h |  1 +
+ io_uring/net.c                | 91 ++++++++++++++++++++++++++++++++++++++++---
+ io_uring/net.h                |  1 +
+ io_uring/opdef.c              | 19 +++++++++
+ 4 files changed, 107 insertions(+), 5 deletions(-)
+
+diff --git a/include/uapi/linux/io_uring.h b/include/uapi/linux/io_uring.h
+index 972b179bc07ae..92f29d9505a64 100644
+--- a/include/uapi/linux/io_uring.h
++++ b/include/uapi/linux/io_uring.h
+@@ -213,6 +213,7 @@ enum io_uring_op {
+ 	IORING_OP_SOCKET,
+ 	IORING_OP_URING_CMD,
+ 	IORING_OP_SEND_ZC,
++	IORING_OP_SENDMSG_ZC,
+ 
+ 	/* this goes last, obviously */
+ 	IORING_OP_LAST,
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 209bc69b3707a..757a300578f48 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -909,7 +909,12 @@ out_free:
+ void io_send_zc_cleanup(struct io_kiocb *req)
+ {
+ 	struct io_sr_msg *zc = io_kiocb_to_cmd(req, struct io_sr_msg);
++	struct io_async_msghdr *io;
+ 
++	if (req_has_async_data(req)) {
++		io = req->async_data;
++		kfree(io->free_iov);
++	}
+ 	zc->notif->flags |= REQ_F_CQE_SKIP;
+ 	io_notif_flush(zc->notif);
+ 	zc->notif = NULL;
+@@ -921,8 +926,7 @@ int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ 	struct io_ring_ctx *ctx = req->ctx;
+ 	struct io_kiocb *notif;
+ 
+-	if (READ_ONCE(sqe->__pad2[0]) || READ_ONCE(sqe->addr3) ||
+-	    READ_ONCE(sqe->__pad3[0]))
++	if (unlikely(READ_ONCE(sqe->__pad2[0]) || READ_ONCE(sqe->addr3)))
+ 		return -EINVAL;
+ 	/* we don't support IOSQE_CQE_SKIP_SUCCESS just yet */
+ 	if (req->flags & REQ_F_CQE_SKIP)
+@@ -949,14 +953,24 @@ int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ 		io_req_set_rsrc_node(notif, ctx, 0);
+ 	}
+ 
++	if (req->opcode == IORING_OP_SEND_ZC) {
++		if (READ_ONCE(sqe->__pad3[0]))
++			return -EINVAL;
++		zc->addr = u64_to_user_ptr(READ_ONCE(sqe->addr2));
++		zc->addr_len = READ_ONCE(sqe->addr_len);
++	} else {
++		if (unlikely(sqe->addr2 || sqe->file_index))
++			return -EINVAL;
++		if (unlikely(zc->flags & IORING_RECVSEND_FIXED_BUF))
++			return -EINVAL;
++	}
++
+ 	zc->buf = u64_to_user_ptr(READ_ONCE(sqe->addr));
+ 	zc->len = READ_ONCE(sqe->len);
+ 	zc->msg_flags = READ_ONCE(sqe->msg_flags) | MSG_NOSIGNAL;
+ 	if (zc->msg_flags & MSG_DONTWAIT)
+ 		req->flags |= REQ_F_NOWAIT;
+ 
+-	zc->addr = u64_to_user_ptr(READ_ONCE(sqe->addr2));
+-	zc->addr_len = READ_ONCE(sqe->addr_len);
+ 	zc->done_io = 0;
+ 
+ #ifdef CONFIG_COMPAT
+@@ -1118,6 +1132,73 @@ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 	return IOU_OK;
+ }
+ 
++int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags)
++{
++	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
++	struct io_async_msghdr iomsg, *kmsg;
++	struct socket *sock;
++	unsigned flags, cflags;
++	int ret, min_ret = 0;
++
++	sock = sock_from_file(req->file);
++	if (unlikely(!sock))
++		return -ENOTSOCK;
++
++	if (req_has_async_data(req)) {
++		kmsg = req->async_data;
++	} else {
++		ret = io_sendmsg_copy_hdr(req, &iomsg);
++		if (ret)
++			return ret;
++		kmsg = &iomsg;
++	}
++
++	if (!(req->flags & REQ_F_POLLED) &&
++	    (sr->flags & IORING_RECVSEND_POLL_FIRST))
++		return io_setup_async_msg(req, kmsg, issue_flags);
++
++	flags = sr->msg_flags | MSG_ZEROCOPY;
++	if (issue_flags & IO_URING_F_NONBLOCK)
++		flags |= MSG_DONTWAIT;
++	if (flags & MSG_WAITALL)
++		min_ret = iov_iter_count(&kmsg->msg.msg_iter);
++
++	kmsg->msg.msg_ubuf = &io_notif_to_data(sr->notif)->uarg;
++	kmsg->msg.sg_from_iter = io_sg_from_iter_iovec;
++	ret = __sys_sendmsg_sock(sock, &kmsg->msg, flags);
++
++	if (unlikely(ret < min_ret)) {
++		if (ret == -EAGAIN && (issue_flags & IO_URING_F_NONBLOCK))
++			return io_setup_async_msg(req, kmsg, issue_flags);
++
++		if (ret > 0 && io_net_retry(sock, flags)) {
++			sr->done_io += ret;
++			req->flags |= REQ_F_PARTIAL_IO;
++			return io_setup_async_msg(req, kmsg, issue_flags);
++		}
++		if (ret < 0 && !sr->done_io)
++			sr->notif->flags |= REQ_F_CQE_SKIP;
++		if (ret == -ERESTARTSYS)
++			ret = -EINTR;
++		req_set_fail(req);
++	}
++	/* fast path, check for non-NULL to avoid function call */
++	if (kmsg->free_iov)
++		kfree(kmsg->free_iov);
++
++	io_netmsg_recycle(req, issue_flags);
++	if (ret >= 0)
++		ret += sr->done_io;
++	else if (sr->done_io)
++		ret = sr->done_io;
++
++	io_notif_flush(sr->notif);
++	req->flags &= ~REQ_F_NEED_CLEANUP;
++	cflags = ret >= 0 ? IORING_CQE_F_MORE : 0;
++	io_req_set_res(req, ret, cflags);
++	return IOU_OK;
++}
++
+ void io_sendrecv_fail(struct io_kiocb *req)
+ {
+ 	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+@@ -1127,7 +1208,7 @@ void io_sendrecv_fail(struct io_kiocb *req)
+ 	if (req->flags & REQ_F_PARTIAL_IO)
+ 		res = sr->done_io;
+ 	if ((req->flags & REQ_F_NEED_CLEANUP) &&
+-	    req->opcode == IORING_OP_SEND_ZC) {
++	    (req->opcode == IORING_OP_SEND_ZC || req->opcode == IORING_OP_SENDMSG_ZC)) {
+ 		/* preserve notification for partial I/O */
+ 		if (res < 0)
+ 			sr->notif->flags |= REQ_F_CQE_SKIP;
+diff --git a/io_uring/net.h b/io_uring/net.h
+index 45558e2b0a831..5ffa11bf5d2e7 100644
+--- a/io_uring/net.h
++++ b/io_uring/net.h
+@@ -57,6 +57,7 @@ int io_connect_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ int io_connect(struct io_kiocb *req, unsigned int issue_flags);
+ 
+ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags);
++int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags);
+ int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
+ void io_send_zc_cleanup(struct io_kiocb *req);
+ 
+diff --git a/io_uring/opdef.c b/io_uring/opdef.c
+index 0fdeb1bc21de5..2330f6da791e1 100644
+--- a/io_uring/opdef.c
++++ b/io_uring/opdef.c
+@@ -503,6 +503,25 @@ const struct io_op_def io_op_defs[] = {
+ 		.fail			= io_sendrecv_fail,
+ #else
+ 		.prep			= io_eopnotsupp_prep,
++#endif
++	},
++	[IORING_OP_SENDMSG_ZC] = {
++		.name			= "SENDMSG_ZC",
++		.needs_file		= 1,
++		.unbound_nonreg_file	= 1,
++		.pollout		= 1,
++		.audit_skip		= 1,
++		.ioprio			= 1,
++		.manual_alloc		= 1,
++#if defined(CONFIG_NET)
++		.async_size		= sizeof(struct io_async_msghdr),
++		.prep			= io_send_zc_prep,
++		.issue			= io_sendmsg_zc,
++		.prep_async		= io_sendmsg_prep_async,
++		.cleanup		= io_send_zc_cleanup,
++		.fail			= io_sendrecv_fail,
++#else
++		.prep			= io_eopnotsupp_prep,
+ #endif
+ 	},
+ };
+-- 
+cgit 
+
+
+From ec7fd2562f57fcfd96f15fbc8ad088f954c2dcf5 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Wed, 21 Sep 2022 13:15:44 -0600
+Subject: io_uring: ensure local task_work marks task as running
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+io_uring will run task_work from contexts that have been prepared for
+waiting, and in doing so it'll implicitly set the task running again
+to avoid issues with blocking conditions. The new deferred local
+task_work doesn't do that, which can result in spews on this being
+an invalid condition:
+
+  [  112.917576] do not call blocking ops when !TASK_RUNNING; state=1 set at [<00000000ad64af64>] prepare_to_wait_exclusive+0x3f/0xd0
+[  112.983088] WARNING: CPU: 1 PID: 190 at kernel/sched/core.c:9819 __might_sleep+0x5a/0x60
+[  112.987240] Modules linked in:
+[  112.990504] CPU: 1 PID: 190 Comm: io_uring Not tainted 6.0.0-rc6+ #1617
+[  113.053136] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.15.0-0-g2dd4b9b3f840-prebuilt.qemu.org 04/01/2014
+[  113.133650] RIP: 0010:__might_sleep+0x5a/0x60
+[  113.136507] Code: ee 48 89 df 5b 31 d2 5d e9 33 ff ff ff 48 8b 90 30 0b 00 00 48 c7 c7 90 de 45 82 c6 05 20 8b 79 01 01 48 89 d1 e8 3a 49 77 00 <0f> 0b eb d1 66 90 0f 1f 44 00 00 9c 58 f6 c4 02 74 35 65 8b 05 ed
+[  113.223940] RSP: 0018:ffffc90000537ca0 EFLAGS: 00010286
+[  113.232903] RAX: 0000000000000000 RBX: ffffffff8246782c RCX: ffffffff8270bcc8
+IOPS=133.15K, BW=520MiB/s, IOS/call=32/31
+[  113.353457] RDX: ffffc90000537b50 RSI: 00000000ffffdfff RDI: 0000000000000001
+[  113.358970] RBP: 00000000000003bc R08: 0000000000000000 R09: c0000000ffffdfff
+[  113.361746] R10: 0000000000000001 R11: ffffc90000537b48 R12: ffff888103f97280
+[  113.424038] R13: 0000000000000000 R14: 0000000000000001 R15: 0000000000000001
+[  113.428009] FS:  00007f67ae7fc700(0000) GS:ffff88842fc80000(0000) knlGS:0000000000000000
+[  113.432794] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[  113.503186] CR2: 00007f67b8b9b3b0 CR3: 0000000102b9b005 CR4: 0000000000770ee0
+[  113.507291] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+[  113.512669] DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+[  113.574374] PKRU: 55555554
+[  113.576800] Call Trace:
+[  113.578325]  <TASK>
+[  113.579799]  set_page_dirty_lock+0x1b/0x90
+[  113.582411]  __bio_release_pages+0x141/0x160
+[  113.673078]  ? set_next_entity+0xd7/0x190
+[  113.675632]  blk_rq_unmap_user+0xaa/0x210
+[  113.678398]  ? timerqueue_del+0x2a/0x40
+[  113.679578]  nvme_uring_task_cb+0x94/0xb0
+[  113.683025]  __io_run_local_work+0x8a/0x150
+[  113.743724]  ? io_cqring_wait+0x33d/0x500
+[  113.746091]  io_run_local_work.part.76+0x2e/0x60
+[  113.750091]  io_cqring_wait+0x2e7/0x500
+[  113.752395]  ? trace_event_raw_event_io_uring_req_failed+0x180/0x180
+[  113.823533]  __x64_sys_io_uring_enter+0x131/0x3c0
+[  113.827382]  ? switch_fpu_return+0x49/0xc0
+[  113.830753]  do_syscall_64+0x34/0x80
+[  113.832620]  entry_SYSCALL_64_after_hwframe+0x5e/0xc8
+
+Ensure that we mark current as TASK_RUNNING for deferred task_work
+as well.
+
+Fixes: c0e0d6ba25f1 ("io_uring: add IORING_SETUP_DEFER_TASKRUN")
+Reported-by: Stefan Roesch <shr@fb.com>
+Reviewed-by: Dylan Yudaken <dylany@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 3875ea897cdf2..f359e24b46c3c 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -1215,6 +1215,7 @@ int io_run_local_work(struct io_ring_ctx *ctx)
+ 	if (llist_empty(&ctx->work_llist))
+ 		return 0;
+ 
++	__set_current_state(TASK_RUNNING);
+ 	locked = mutex_trylock(&ctx->uring_lock);
+ 	ret = __io_run_local_work(ctx, locked);
+ 	if (locked)
+-- 
+cgit 
+
+
+From 4781185da411c0b51ef9b1db557c1ea28ac11de4 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Fri, 23 Sep 2022 18:12:09 +0100
+Subject: selftest/net: adjust io_uring sendzc notif handling
+
+It's not currently possible but in the future we may get
+IORING_CQE_F_MORE and so a notification even for a failed request, i.e.
+when cqe->res <= 0. That's precisely what the documentation says, so
+adjust the test and do IORING_CQE_F_MORE checks regardless of the main
+completion cqe->res.
+
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/aac948ea753a8bfe1fa3b82fe45debcb54586369.1663953085.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ tools/testing/selftests/net/io_uring_zerocopy_tx.c | 22 +++++++++++++---------
+ 1 file changed, 13 insertions(+), 9 deletions(-)
+
+diff --git a/tools/testing/selftests/net/io_uring_zerocopy_tx.c b/tools/testing/selftests/net/io_uring_zerocopy_tx.c
+index 8ce48aca83217..1542877401726 100644
+--- a/tools/testing/selftests/net/io_uring_zerocopy_tx.c
++++ b/tools/testing/selftests/net/io_uring_zerocopy_tx.c
+@@ -400,7 +400,6 @@ static void do_tx(int domain, int type, int protocol)
+ 						   cfg_payload_len, msg_flags);
+ 				sqe->user_data = NONZC_TAG;
+ 			} else {
+-				compl_cqes++;
+ 				io_uring_prep_sendzc(sqe, fd, payload,
+ 						     cfg_payload_len,
+ 						     msg_flags, zc_flags);
+@@ -430,18 +429,23 @@ static void do_tx(int domain, int type, int protocol)
+ 			if (cqe->flags & IORING_CQE_F_NOTIF) {
+ 				if (cqe->flags & IORING_CQE_F_MORE)
+ 					error(1, -EINVAL, "invalid notif flags");
++				if (compl_cqes <= 0)
++					error(1, -EINVAL, "notification mismatch");
+ 				compl_cqes--;
+ 				i--;
+-			} else if (cqe->res <= 0) {
+-				if (cqe->flags & IORING_CQE_F_MORE)
+-					error(1, cqe->res, "more with a failed send");
+-				error(1, cqe->res, "send failed");
+-			} else {
+-				if (cqe->user_data == ZC_TAG &&
+-				    !(cqe->flags & IORING_CQE_F_MORE))
+-					error(1, cqe->res, "missing more flag");
++				io_uring_cqe_seen(&ring);
++				continue;
++			}
++			if (cqe->flags & IORING_CQE_F_MORE) {
++				if (cqe->user_data != ZC_TAG)
++					error(1, cqe->res, "unexpected F_MORE");
++				compl_cqes++;
++			}
++			if (cqe->res >= 0) {
+ 				packets++;
+ 				bytes += cqe->res;
++			} else if (cqe->res != -EAGAIN) {
++				error(1, cqe->res, "send failed");
+ 			}
+ 			io_uring_cqe_seen(&ring);
+ 		}
+-- 
+cgit 
+
+
+From a75155faef4efcb9791f77e2652e29ce8906e05a Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Fri, 23 Sep 2022 16:23:34 +0100
+Subject: io_uring/net: fix UAF in io_sendrecv_fail()
+
+We should not assume anything about ->free_iov just from
+REQ_F_ASYNC_DATA but rather rely on REQ_F_NEED_CLEANUP, as we may
+allocate ->async_data but failed init would leave the field in not
+consistent state. The easiest solution is to remove removing
+REQ_F_NEED_CLEANUP and so ->async_data dealloc from io_sendrecv_fail()
+and let io_send_zc_cleanup() do the job. The catch here is that we also
+need to prevent double notif flushing, just test it for NULL and zero
+where it's needed.
+
+BUG: KASAN: use-after-free in io_sendrecv_fail+0x3b0/0x3e0 io_uring/net.c:1221
+Write of size 8 at addr ffff8880771b4080 by task syz-executor.3/30199
+
+CPU: 1 PID: 30199 Comm: syz-executor.3 Not tainted 6.0.0-rc6-next-20220923-syzkaller #0
+Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/26/2022
+Call Trace:
+ <TASK>
+ __dump_stack lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0xcd/0x134 lib/dump_stack.c:106
+ print_address_description mm/kasan/report.c:284 [inline]
+ print_report+0x15e/0x45d mm/kasan/report.c:395
+ kasan_report+0xbb/0x1f0 mm/kasan/report.c:495
+ io_sendrecv_fail+0x3b0/0x3e0 io_uring/net.c:1221
+ io_req_complete_failed+0x155/0x1b0 io_uring/io_uring.c:873
+ io_drain_req io_uring/io_uring.c:1648 [inline]
+ io_queue_sqe_fallback.cold+0x29f/0x788 io_uring/io_uring.c:1931
+ io_submit_sqe io_uring/io_uring.c:2160 [inline]
+ io_submit_sqes+0x1180/0x1df0 io_uring/io_uring.c:2276
+ __do_sys_io_uring_enter+0xac6/0x2410 io_uring/io_uring.c:3216
+ do_syscall_x64 arch/x86/entry/common.c:50 [inline]
+ do_syscall_64+0x35/0xb0 arch/x86/entry/common.c:80
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+
+Fixes: c4c0009e0b56e ("io_uring/net: combine fail handlers")
+Reported-by: syzbot+4c597a574a3f5a251bda@syzkaller.appspotmail.com
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/23ab8346e407ea50b1198a172c8a97e1cf22915b.1663945875.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 15 +++++----------
+ 1 file changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 757a300578f48..2af56661590a4 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -915,9 +915,11 @@ void io_send_zc_cleanup(struct io_kiocb *req)
+ 		io = req->async_data;
+ 		kfree(io->free_iov);
+ 	}
+-	zc->notif->flags |= REQ_F_CQE_SKIP;
+-	io_notif_flush(zc->notif);
+-	zc->notif = NULL;
++	if (zc->notif) {
++		zc->notif->flags |= REQ_F_CQE_SKIP;
++		io_notif_flush(zc->notif);
++		zc->notif = NULL;
++	}
+ }
+ 
+ int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+@@ -1202,7 +1204,6 @@ int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags)
+ void io_sendrecv_fail(struct io_kiocb *req)
+ {
+ 	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+-	struct io_async_msghdr *io;
+ 	int res = req->cqe.res;
+ 
+ 	if (req->flags & REQ_F_PARTIAL_IO)
+@@ -1215,12 +1216,6 @@ void io_sendrecv_fail(struct io_kiocb *req)
+ 		io_notif_flush(sr->notif);
+ 		sr->notif = NULL;
+ 	}
+-	if (req_has_async_data(req)) {
+-		io = req->async_data;
+-		kfree(io->free_iov);
+-		io->free_iov = NULL;
+-	}
+-	req->flags &= ~REQ_F_NEED_CLEANUP;
+ 	io_req_set_res(req, res, req->cqe.flags);
+ }
+ 
+-- 
+cgit 
+
+
+From aa1df3a360a0c50e0f0086a785d75c2785c29967 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Fri, 23 Sep 2022 14:53:25 +0100
+Subject: io_uring: fix CQE reordering
+
+Overflowing CQEs may result in reordering, which is buggy in case of
+links, F_MORE and so on. If we guarantee that we don't reorder for
+the unlikely event of a CQ ring overflow, then we can further extend
+this to not have to terminate multishot requests if it happens. For
+other operations, like zerocopy sends, we have no choice but to honor
+CQE ordering.
+
+Reported-by: Dylan Yudaken <dylany@fb.com>
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/ec3bc55687b0768bbe20fb62d7d06cfced7d7e70.1663892031.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.c | 12 ++++++++++--
+ io_uring/io_uring.h | 12 +++++++++---
+ 2 files changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index f359e24b46c3c..62d1f55fde559 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -609,7 +609,7 @@ static bool __io_cqring_overflow_flush(struct io_ring_ctx *ctx, bool force)
+ 
+ 	io_cq_lock(ctx);
+ 	while (!list_empty(&ctx->cq_overflow_list)) {
+-		struct io_uring_cqe *cqe = io_get_cqe(ctx);
++		struct io_uring_cqe *cqe = io_get_cqe_overflow(ctx, true);
+ 		struct io_overflow_cqe *ocqe;
+ 
+ 		if (!cqe && !force)
+@@ -736,12 +736,19 @@ bool io_req_cqe_overflow(struct io_kiocb *req)
+  * control dependency is enough as we're using WRITE_ONCE to
+  * fill the cq entry
+  */
+-struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx)
++struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx, bool overflow)
+ {
+ 	struct io_rings *rings = ctx->rings;
+ 	unsigned int off = ctx->cached_cq_tail & (ctx->cq_entries - 1);
+ 	unsigned int free, queued, len;
+ 
++	/*
++	 * Posting into the CQ when there are pending overflowed CQEs may break
++	 * ordering guarantees, which will affect links, F_MORE users and more.
++	 * Force overflow the completion.
++	 */
++	if (!overflow && (ctx->check_cq & BIT(IO_CHECK_CQ_OVERFLOW_BIT)))
++		return NULL;
+ 
+ 	/* userspace may cheat modifying the tail, be safe and do min */
+ 	queued = min(__io_cqring_events(ctx), ctx->cq_entries);
+@@ -2394,6 +2401,7 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
+ 		if (ret < 0)
+ 			return ret;
+ 		io_cqring_overflow_flush(ctx);
++
+ 		if (io_cqring_events(ctx) >= min_events)
+ 			return 0;
+ 	} while (ret > 0);
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index d38173b9ac198..177bd55357d74 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -24,7 +24,7 @@ enum {
+ 	IOU_STOP_MULTISHOT	= -ECANCELED,
+ };
+ 
+-struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx);
++struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx, bool overflow);
+ bool io_req_cqe_overflow(struct io_kiocb *req);
+ int io_run_task_work_sig(struct io_ring_ctx *ctx);
+ int __io_run_local_work(struct io_ring_ctx *ctx, bool locked);
+@@ -93,7 +93,8 @@ static inline void io_cq_lock(struct io_ring_ctx *ctx)
+ 
+ void io_cq_unlock_post(struct io_ring_ctx *ctx);
+ 
+-static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
++static inline struct io_uring_cqe *io_get_cqe_overflow(struct io_ring_ctx *ctx,
++						       bool overflow)
+ {
+ 	if (likely(ctx->cqe_cached < ctx->cqe_sentinel)) {
+ 		struct io_uring_cqe *cqe = ctx->cqe_cached;
+@@ -105,7 +106,12 @@ static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
+ 		return cqe;
+ 	}
+ 
+-	return __io_get_cqe(ctx);
++	return __io_get_cqe(ctx, overflow);
++}
++
++static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
++{
++	return io_get_cqe_overflow(ctx, false);
+ }
+ 
+ static inline bool __io_fill_cqe_req(struct io_ring_ctx *ctx,
+-- 
+cgit 
+
+
+From 4c17a496a7a0730fdfc9e249b83cc58249111532 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Mon, 26 Sep 2022 14:35:09 +0100
+Subject: io_uring/net: fix cleanup double free free_iov init
+
+Having ->async_data doesn't mean it's initialised and previously we vere
+relying on setting F_CLEANUP at the right moment. With zc sendmsg
+though, we set F_CLEANUP early in prep when we alloc a notif and so we
+may allocate async_data, fail in copy_msg_hdr() leaving
+struct io_async_msghdr not initialised correctly but with F_CLEANUP
+set, which causes a ->free_iov double free and probably other nastiness.
+
+Always initialise ->free_iov. Also, now it might point to fast_iov when
+fails, so avoid freeing it during cleanups.
+
+Reported-by: syzbot+edfd15cd4246a3fc615a@syzkaller.appspotmail.com
+Fixes: 493108d95f146 ("io_uring/net: zerocopy sendmsg")
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 20 ++++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 2af56661590a4..6b69eff6887ea 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -124,20 +124,22 @@ static struct io_async_msghdr *io_msg_alloc_async(struct io_kiocb *req,
+ {
+ 	struct io_ring_ctx *ctx = req->ctx;
+ 	struct io_cache_entry *entry;
++	struct io_async_msghdr *hdr;
+ 
+ 	if (!(issue_flags & IO_URING_F_UNLOCKED) &&
+ 	    (entry = io_alloc_cache_get(&ctx->netmsg_cache)) != NULL) {
+-		struct io_async_msghdr *hdr;
+-
+ 		hdr = container_of(entry, struct io_async_msghdr, cache);
++		hdr->free_iov = NULL;
+ 		req->flags |= REQ_F_ASYNC_DATA;
+ 		req->async_data = hdr;
+ 		return hdr;
+ 	}
+ 
+-	if (!io_alloc_async_data(req))
+-		return req->async_data;
+-
++	if (!io_alloc_async_data(req)) {
++		hdr = req->async_data;
++		hdr->free_iov = NULL;
++		return hdr;
++	}
+ 	return NULL;
+ }
+ 
+@@ -192,7 +194,6 @@ int io_send_prep_async(struct io_kiocb *req)
+ 	io = io_msg_alloc_async_prep(req);
+ 	if (!io)
+ 		return -ENOMEM;
+-	io->free_iov = NULL;
+ 	ret = move_addr_to_kernel(zc->addr, zc->addr_len, &io->addr);
+ 	return ret;
+ }
+@@ -209,7 +210,6 @@ static int io_setup_async_addr(struct io_kiocb *req,
+ 	io = io_msg_alloc_async(req, issue_flags);
+ 	if (!io)
+ 		return -ENOMEM;
+-	io->free_iov = NULL;
+ 	memcpy(&io->addr, addr_storage, sizeof(io->addr));
+ 	return -EAGAIN;
+ }
+@@ -479,7 +479,6 @@ static int __io_compat_recvmsg_copy_hdr(struct io_kiocb *req,
+ 
+ 		if (msg.msg_iovlen == 0) {
+ 			sr->len = 0;
+-			iomsg->free_iov = NULL;
+ 		} else if (msg.msg_iovlen > 1) {
+ 			return -EINVAL;
+ 		} else {
+@@ -490,7 +489,6 @@ static int __io_compat_recvmsg_copy_hdr(struct io_kiocb *req,
+ 			if (clen < 0)
+ 				return -EINVAL;
+ 			sr->len = clen;
+-			iomsg->free_iov = NULL;
+ 		}
+ 
+ 		if (req->flags & REQ_F_APOLL_MULTISHOT) {
+@@ -913,7 +911,9 @@ void io_send_zc_cleanup(struct io_kiocb *req)
+ 
+ 	if (req_has_async_data(req)) {
+ 		io = req->async_data;
+-		kfree(io->free_iov);
++		/* might be ->fast_iov if *msg_copy_hdr failed */
++		if (io->free_iov != io->fast_iov)
++			kfree(io->free_iov);
+ 	}
+ 	if (zc->notif) {
+ 		zc->notif->flags |= REQ_F_CQE_SKIP;
+-- 
+cgit 
+
+
+From bf68b5b34311ee57ed40749a1257a30b46127556 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Tue, 27 Sep 2022 00:44:39 +0100
+Subject: io_uring/rw: fix unexpected link breakage
+
+req->cqe.res is set in io_read() to the amount of bytes left to be done,
+which is used to figure out whether to fail a read or not. However,
+io_read() may do another without returning, and we stash the previous
+value into ->bytes_done but forget to update cqe.res. Then we ask a read
+to do strictly less than cqe.res but expect the return to be exactly
+cqe.res.
+
+Fix the bug by updating cqe.res for retries.
+
+Cc: stable@vger.kernel.org
+Reported-and-Tested-by: Beld Zhang <beldzhang@gmail.com>
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/3a1088440c7be98e5800267af922a67da0ef9f13.1664235732.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/rw.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index 59c92a4616b88..ed14322aadb90 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -793,6 +793,7 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
+ 			return -EAGAIN;
+ 		}
+ 
++		req->cqe.res = iov_iter_count(&s->iter);
+ 		/*
+ 		 * Now retry read with the IOCB_WAITQ parts set in the iocb. If
+ 		 * we get -EIOCBQUEUED, then we'll get a notification when the
+-- 
+cgit 
+
+
+From c278d9f8ac0db5590909e6d9e85b5ca2b786704f Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Tue, 27 Sep 2022 00:44:40 +0100
+Subject: io_uring/rw: don't lose short results on io_setup_async_rw()
+
+If a retry io_setup_async_rw() fails we lose result from the first
+io_iter_do_read(), which is a problem mostly for streams/sockets.
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/0e8d20cebe5fc9c96ed268463c394237daabc384.1664235732.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/rw.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index ed14322aadb90..1ae1e52ab4cbd 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -764,10 +764,12 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
+ 	iov_iter_restore(&s->iter, &s->iter_state);
+ 
+ 	ret2 = io_setup_async_rw(req, iovec, s, true);
+-	if (ret2)
+-		return ret2;
+-
+ 	iovec = NULL;
++	if (ret2) {
++		ret = ret > 0 ? ret : ret2;
++		goto done;
++	}
++
+ 	io = req->async_data;
+ 	s = &io->s;
+ 	/*
+-- 
+cgit 
+
+
+From 6ae91ac9a6aa7d6005c3c6d0f4d263fbab9f377f Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Wed, 28 Sep 2022 00:51:49 +0100
+Subject: io_uring/net: don't skip notifs for failed requests
+
+We currently only add a notification CQE when the send succeded, i.e.
+cqe.res >= 0. However, it'd be more robust to do buffer notifications
+for failed requests as well in case drivers decide do something fanky.
+
+Always return a buffer notification after initial prep, don't hide it.
+This behaviour is better aligned with documentation and the patch also
+helps the userspace to respect it.
+
+Cc: stable@vger.kernel.org # 6.0
+Suggested-by: Stefan Metzmacher <metze@samba.org>
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/9c8bead87b2b980fcec441b8faef52188b4a6588.1664292100.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 29 ++++++++---------------------
+ 1 file changed, 8 insertions(+), 21 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 6b69eff6887ea..5058a9fc9e9c1 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -916,7 +916,6 @@ void io_send_zc_cleanup(struct io_kiocb *req)
+ 			kfree(io->free_iov);
+ 	}
+ 	if (zc->notif) {
+-		zc->notif->flags |= REQ_F_CQE_SKIP;
+ 		io_notif_flush(zc->notif);
+ 		zc->notif = NULL;
+ 	}
+@@ -1047,7 +1046,7 @@ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 	struct msghdr msg;
+ 	struct iovec iov;
+ 	struct socket *sock;
+-	unsigned msg_flags, cflags;
++	unsigned msg_flags;
+ 	int ret, min_ret = 0;
+ 
+ 	sock = sock_from_file(req->file);
+@@ -1115,8 +1114,6 @@ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 			req->flags |= REQ_F_PARTIAL_IO;
+ 			return io_setup_async_addr(req, &__address, issue_flags);
+ 		}
+-		if (ret < 0 && !zc->done_io)
+-			zc->notif->flags |= REQ_F_CQE_SKIP;
+ 		if (ret == -ERESTARTSYS)
+ 			ret = -EINTR;
+ 		req_set_fail(req);
+@@ -1129,8 +1126,7 @@ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 
+ 	io_notif_flush(zc->notif);
+ 	req->flags &= ~REQ_F_NEED_CLEANUP;
+-	cflags = ret >= 0 ? IORING_CQE_F_MORE : 0;
+-	io_req_set_res(req, ret, cflags);
++	io_req_set_res(req, ret, IORING_CQE_F_MORE);
+ 	return IOU_OK;
+ }
+ 
+@@ -1139,7 +1135,7 @@ int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+ 	struct io_async_msghdr iomsg, *kmsg;
+ 	struct socket *sock;
+-	unsigned flags, cflags;
++	unsigned flags;
+ 	int ret, min_ret = 0;
+ 
+ 	sock = sock_from_file(req->file);
+@@ -1178,8 +1174,6 @@ int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 			req->flags |= REQ_F_PARTIAL_IO;
+ 			return io_setup_async_msg(req, kmsg, issue_flags);
+ 		}
+-		if (ret < 0 && !sr->done_io)
+-			sr->notif->flags |= REQ_F_CQE_SKIP;
+ 		if (ret == -ERESTARTSYS)
+ 			ret = -EINTR;
+ 		req_set_fail(req);
+@@ -1196,27 +1190,20 @@ int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 
+ 	io_notif_flush(sr->notif);
+ 	req->flags &= ~REQ_F_NEED_CLEANUP;
+-	cflags = ret >= 0 ? IORING_CQE_F_MORE : 0;
+-	io_req_set_res(req, ret, cflags);
++	io_req_set_res(req, ret, IORING_CQE_F_MORE);
+ 	return IOU_OK;
+ }
+ 
+ void io_sendrecv_fail(struct io_kiocb *req)
+ {
+ 	struct io_sr_msg *sr = io_kiocb_to_cmd(req, struct io_sr_msg);
+-	int res = req->cqe.res;
+ 
+ 	if (req->flags & REQ_F_PARTIAL_IO)
+-		res = sr->done_io;
++		req->cqe.res = sr->done_io;
++
+ 	if ((req->flags & REQ_F_NEED_CLEANUP) &&
+-	    (req->opcode == IORING_OP_SEND_ZC || req->opcode == IORING_OP_SENDMSG_ZC)) {
+-		/* preserve notification for partial I/O */
+-		if (res < 0)
+-			sr->notif->flags |= REQ_F_CQE_SKIP;
+-		io_notif_flush(sr->notif);
+-		sr->notif = NULL;
+-	}
+-	io_req_set_res(req, res, req->cqe.flags);
++	    (req->opcode == IORING_OP_SEND_ZC || req->opcode == IORING_OP_SENDMSG_ZC))
++		req->cqe.flags |= IORING_CQE_F_MORE;
+ }
+ 
+ int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+-- 
+cgit 
+
+
+From 04360d3e05e885621a5860f987c6a8a2eac4bb27 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 29 Sep 2022 01:03:29 +0100
+Subject: io_uring/net: fix non-zc send with address
+
+We're currently ignoring the dest address with non-zerocopy send because
+even though we copy it from the userspace shortly after ->msg_name gets
+zeroed. Move msghdr init earlier.
+
+Fixes: 516e82f0e043a ("io_uring/net: support non-zerocopy sendto")
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/176ced5e8568aa5d300ca899b7f05b303ebc49fd.1664409532.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 5058a9fc9e9c1..23922365f08f7 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -333,6 +333,12 @@ int io_send(struct io_kiocb *req, unsigned int issue_flags)
+ 	int min_ret = 0;
+ 	int ret;
+ 
++	msg.msg_name = NULL;
++	msg.msg_control = NULL;
++	msg.msg_controllen = 0;
++	msg.msg_namelen = 0;
++	msg.msg_ubuf = NULL;
++
+ 	if (sr->addr) {
+ 		if (req_has_async_data(req)) {
+ 			struct io_async_msghdr *io = req->async_data;
+@@ -359,12 +365,6 @@ int io_send(struct io_kiocb *req, unsigned int issue_flags)
+ 	if (unlikely(ret))
+ 		return ret;
+ 
+-	msg.msg_name = NULL;
+-	msg.msg_control = NULL;
+-	msg.msg_controllen = 0;
+-	msg.msg_namelen = 0;
+-	msg.msg_ubuf = NULL;
+-
+ 	flags = sr->msg_flags;
+ 	if (issue_flags & IO_URING_F_NONBLOCK)
+ 		flags |= MSG_DONTWAIT;
+-- 
+cgit 
+
+
+From 3e4cb6ebbb2bad201c1186bc0b7e8cf41dd7f7e6 Mon Sep 17 00:00:00 2001
+From: Stefan Metzmacher <metze@samba.org>
+Date: Thu, 29 Sep 2022 09:39:10 +0200
+Subject: io_uring/net: fix fast_iov assignment in io_setup_async_msg()
+
+I hit a very bad problem during my tests of SENDMSG_ZC.
+BUG(); in first_iovec_segment() triggered very easily.
+The problem was io_setup_async_msg() in the partial retry case,
+which seems to happen more often with _ZC.
+
+iov_iter_iovec_advance() may change i->iov in order to have i->iov_offset
+being only relative to the first element.
+
+Which means kmsg->msg.msg_iter.iov is no longer the
+same as kmsg->fast_iov.
+
+But this would rewind the copy to be the start of
+async_msg->fast_iov, which means the internal
+state of sync_msg->msg.msg_iter is inconsitent.
+
+I tested with 5 vectors with length like this 4, 0, 64, 20, 8388608
+and got a short writes with:
+- ret=2675244 min_ret=8388692 => remaining 5713448 sr->done_io=2675244
+- ret=-EAGAIN => io_uring_poll_arm
+- ret=4911225 min_ret=5713448 => remaining 802223  sr->done_io=7586469
+- ret=-EAGAIN => io_uring_poll_arm
+- ret=802223  min_ret=802223  => res=8388692
+
+While this was easily triggered with SENDMSG_ZC (queued for 6.1),
+it was a potential problem starting with 7ba89d2af17aa879dda30f5d5d3f152e587fc551
+in 5.18 for IORING_OP_RECVMSG.
+And also with 4c3c09439c08b03d9503df0ca4c7619c5842892e in 5.19
+for IORING_OP_SENDMSG.
+
+However 257e84a5377fbbc336ff563833a8712619acce56 introduced the critical
+code into io_setup_async_msg() in 5.11.
+
+Fixes: 7ba89d2af17aa ("io_uring: ensure recv and recvmsg handle MSG_WAITALL correctly")
+Fixes: 257e84a5377fb ("io_uring: refactor sendmsg/recvmsg iov managing")
+Cc: stable@vger.kernel.org
+Signed-off-by: Stefan Metzmacher <metze@samba.org>
+Reviewed-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/b2e7be246e2fb173520862b0c7098e55767567a2.1664436949.git.metze@samba.org
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 23922365f08f7..9ada9da02d045 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -166,8 +166,10 @@ static int io_setup_async_msg(struct io_kiocb *req,
+ 	memcpy(async_msg, kmsg, sizeof(*kmsg));
+ 	async_msg->msg.msg_name = &async_msg->addr;
+ 	/* if were using fast_iov, set it to the new one */
+-	if (!async_msg->free_iov)
+-		async_msg->msg.msg_iter.iov = async_msg->fast_iov;
++	if (!kmsg->free_iov) {
++		size_t fast_idx = kmsg->msg.msg_iter.iov - kmsg->fast_iov;
++		async_msg->msg.msg_iter.iov = &async_msg->fast_iov[fast_idx];
++	}
+ 
+ 	return -EAGAIN;
+ }
+-- 
+cgit 
+
+
+From b000145e9907809406d8164c3b2b8861d95aecd1 Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 29 Sep 2022 10:57:05 -0600
+Subject: io_uring/rw: defer fsnotify calls to task context
+
+We can't call these off the kiocb completion as that might be off
+soft/hard irq context. Defer the calls to when we process the
+task_work for this request. That avoids valid complaints like:
+
+stack backtrace:
+CPU: 1 PID: 0 Comm: swapper/1 Not tainted 6.0.0-rc6-syzkaller-00321-g105a36f3694e #0
+Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 08/26/2022
+Call Trace:
+ <IRQ>
+ __dump_stack lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0xcd/0x134 lib/dump_stack.c:106
+ print_usage_bug kernel/locking/lockdep.c:3961 [inline]
+ valid_state kernel/locking/lockdep.c:3973 [inline]
+ mark_lock_irq kernel/locking/lockdep.c:4176 [inline]
+ mark_lock.part.0.cold+0x18/0xd8 kernel/locking/lockdep.c:4632
+ mark_lock kernel/locking/lockdep.c:4596 [inline]
+ mark_usage kernel/locking/lockdep.c:4527 [inline]
+ __lock_acquire+0x11d9/0x56d0 kernel/locking/lockdep.c:5007
+ lock_acquire kernel/locking/lockdep.c:5666 [inline]
+ lock_acquire+0x1ab/0x570 kernel/locking/lockdep.c:5631
+ __fs_reclaim_acquire mm/page_alloc.c:4674 [inline]
+ fs_reclaim_acquire+0x115/0x160 mm/page_alloc.c:4688
+ might_alloc include/linux/sched/mm.h:271 [inline]
+ slab_pre_alloc_hook mm/slab.h:700 [inline]
+ slab_alloc mm/slab.c:3278 [inline]
+ __kmem_cache_alloc_lru mm/slab.c:3471 [inline]
+ kmem_cache_alloc+0x39/0x520 mm/slab.c:3491
+ fanotify_alloc_fid_event fs/notify/fanotify/fanotify.c:580 [inline]
+ fanotify_alloc_event fs/notify/fanotify/fanotify.c:813 [inline]
+ fanotify_handle_event+0x1130/0x3f40 fs/notify/fanotify/fanotify.c:948
+ send_to_group fs/notify/fsnotify.c:360 [inline]
+ fsnotify+0xafb/0x1680 fs/notify/fsnotify.c:570
+ __fsnotify_parent+0x62f/0xa60 fs/notify/fsnotify.c:230
+ fsnotify_parent include/linux/fsnotify.h:77 [inline]
+ fsnotify_file include/linux/fsnotify.h:99 [inline]
+ fsnotify_access include/linux/fsnotify.h:309 [inline]
+ __io_complete_rw_common+0x485/0x720 io_uring/rw.c:195
+ io_complete_rw+0x1a/0x1f0 io_uring/rw.c:228
+ iomap_dio_complete_work fs/iomap/direct-io.c:144 [inline]
+ iomap_dio_bio_end_io+0x438/0x5e0 fs/iomap/direct-io.c:178
+ bio_endio+0x5f9/0x780 block/bio.c:1564
+ req_bio_endio block/blk-mq.c:695 [inline]
+ blk_update_request+0x3fc/0x1300 block/blk-mq.c:825
+ scsi_end_request+0x7a/0x9a0 drivers/scsi/scsi_lib.c:541
+ scsi_io_completion+0x173/0x1f70 drivers/scsi/scsi_lib.c:971
+ scsi_complete+0x122/0x3b0 drivers/scsi/scsi_lib.c:1438
+ blk_complete_reqs+0xad/0xe0 block/blk-mq.c:1022
+ __do_softirq+0x1d3/0x9c6 kernel/softirq.c:571
+ invoke_softirq kernel/softirq.c:445 [inline]
+ __irq_exit_rcu+0x123/0x180 kernel/softirq.c:650
+ irq_exit_rcu+0x5/0x20 kernel/softirq.c:662
+ common_interrupt+0xa9/0xc0 arch/x86/kernel/irq.c:240
+
+Fixes: f63cf5192fe3 ("io_uring: ensure that fsnotify is always called")
+Link: https://lore.kernel.org/all/20220929135627.ykivmdks2w5vzrwg@quack3/
+Reported-by: syzbot+dfcc5f4da15868df7d4d@syzkaller.appspotmail.com
+Reported-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/rw.c | 24 +++++++++++++++---------
+ 1 file changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index 1ae1e52ab4cbd..a25cd44cd4153 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -236,14 +236,6 @@ static void kiocb_end_write(struct io_kiocb *req)
+ 
+ static bool __io_complete_rw_common(struct io_kiocb *req, long res)
+ {
+-	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
+-
+-	if (rw->kiocb.ki_flags & IOCB_WRITE) {
+-		kiocb_end_write(req);
+-		fsnotify_modify(req->file);
+-	} else {
+-		fsnotify_access(req->file);
+-	}
+ 	if (unlikely(res != req->cqe.res)) {
+ 		if ((res == -EAGAIN || res == -EOPNOTSUPP) &&
+ 		    io_rw_should_reissue(req)) {
+@@ -270,6 +262,20 @@ static inline int io_fixup_rw_res(struct io_kiocb *req, long res)
+ 	return res;
+ }
+ 
++static void io_req_rw_complete(struct io_kiocb *req, bool *locked)
++{
++	struct io_rw *rw = io_kiocb_to_cmd(req, struct io_rw);
++
++	if (rw->kiocb.ki_flags & IOCB_WRITE) {
++		kiocb_end_write(req);
++		fsnotify_modify(req->file);
++	} else {
++		fsnotify_access(req->file);
++	}
++
++	io_req_task_complete(req, locked);
++}
++
+ static void io_complete_rw(struct kiocb *kiocb, long res)
+ {
+ 	struct io_rw *rw = container_of(kiocb, struct io_rw, kiocb);
+@@ -278,7 +284,7 @@ static void io_complete_rw(struct kiocb *kiocb, long res)
+ 	if (__io_complete_rw_common(req, res))
+ 		return;
+ 	io_req_set_res(req, io_fixup_rw_res(req, res), 0);
+-	req->io_task_work.func = io_req_task_complete;
++	req->io_task_work.func = io_req_rw_complete;
+ 	io_req_task_work_add(req);
+ }
+ 
+-- 
+cgit 
+
+
+From 46a525e199e4037516f7e498c18f065b09df32ac Mon Sep 17 00:00:00 2001
+From: Jens Axboe <axboe@kernel.dk>
+Date: Thu, 29 Sep 2022 15:29:13 -0600
+Subject: io_uring: don't gate task_work run on TIF_NOTIFY_SIGNAL
+
+This isn't a reliable mechanism to tell if we have task_work pending, we
+really should be looking at whether we have any items queued. This is
+problematic if forward progress is gated on running said task_work. One
+such example is reading from a pipe, where the write side has been closed
+right before the read is started. The fput() of the file queues TWA_RESUME
+task_work, and we need that task_work to be run before ->release() is
+called for the pipe. If ->release() isn't called, then the read will sit
+forever waiting on data that will never arise.
+
+Fix this by io_run_task_work() so it checks if we have task_work pending
+rather than rely on TIF_NOTIFY_SIGNAL for that. The latter obviously
+doesn't work for task_work that is queued without TWA_SIGNAL.
+
+Reported-by: Christiano Haesbaert <haesbaert@haesbaert.org>
+Cc: stable@vger.kernel.org
+Link: https://github.com/axboe/liburing/issues/665
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/io_uring.h | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index 177bd55357d74..48ce2348c8c1e 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -231,11 +231,11 @@ static inline unsigned int io_sqring_entries(struct io_ring_ctx *ctx)
+ 
+ static inline int io_run_task_work(void)
+ {
+-	if (test_thread_flag(TIF_NOTIFY_SIGNAL)) {
++	if (task_work_pending(current)) {
++		if (test_thread_flag(TIF_NOTIFY_SIGNAL))
++			clear_notify_signal();
+ 		__set_current_state(TASK_RUNNING);
+-		clear_notify_signal();
+-		if (task_work_pending(current))
+-			task_work_run();
++		task_work_run();
+ 		return 1;
+ 	}
+ 
+-- 
+cgit 
+
+
+From 6f10ae8a155446248055c7ddd480ef40139af788 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 29 Sep 2022 22:23:18 +0100
+Subject: io_uring/net: don't update msg_name if not provided
+
+io_sendmsg_copy_hdr() may clear msg->msg_name if the userspace didn't
+provide it, we should retain NULL in this case.
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/97d49f61b5ec76d0900df658cfde3aa59ff22121.1664486545.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 9ada9da02d045..604eac5f7a348 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -164,7 +164,8 @@ static int io_setup_async_msg(struct io_kiocb *req,
+ 	}
+ 	req->flags |= REQ_F_NEED_CLEANUP;
+ 	memcpy(async_msg, kmsg, sizeof(*kmsg));
+-	async_msg->msg.msg_name = &async_msg->addr;
++	if (async_msg->msg.msg_name)
++		async_msg->msg.msg_name = &async_msg->addr;
+ 	/* if were using fast_iov, set it to the new one */
+ 	if (!kmsg->free_iov) {
+ 		size_t fast_idx = kmsg->msg.msg_iter.iov - kmsg->fast_iov;
+-- 
+cgit 
+
+
+From 108893ddcc4d3aa0a4a02aeb02d478e997001227 Mon Sep 17 00:00:00 2001
+From: Pavel Begunkov <asml.silence@gmail.com>
+Date: Thu, 29 Sep 2022 22:23:19 +0100
+Subject: io_uring/net: fix notif cqe reordering
+
+send zc is not restricted to !IO_URING_F_UNLOCKED anymore and so
+we can't use task-tw ordering trick to order notification cqes
+with requests completions. In this case leave it alone and let
+io_send_zc_cleanup() flush it.
+
+Cc: stable@vger.kernel.org
+Fixes: 53bdc88aac9a2 ("io_uring/notif: order notif vs send CQEs")
+Signed-off-by: Pavel Begunkov <asml.silence@gmail.com>
+Link: https://lore.kernel.org/r/0031f3a00d492e814a4a0935a2029a46d9c9ba06.1664486545.git.asml.silence@gmail.com
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ io_uring/net.c | 24 +++++++++++++++++++-----
+ 1 file changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/io_uring/net.c b/io_uring/net.c
+index 604eac5f7a348..caa6a803cb72c 100644
+--- a/io_uring/net.c
++++ b/io_uring/net.c
+@@ -1127,8 +1127,14 @@ int io_send_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 	else if (zc->done_io)
+ 		ret = zc->done_io;
+ 
+-	io_notif_flush(zc->notif);
+-	req->flags &= ~REQ_F_NEED_CLEANUP;
++	/*
++	 * If we're in io-wq we can't rely on tw ordering guarantees, defer
++	 * flushing notif to io_send_zc_cleanup()
++	 */
++	if (!(issue_flags & IO_URING_F_UNLOCKED)) {
++		io_notif_flush(zc->notif);
++		req->flags &= ~REQ_F_NEED_CLEANUP;
++	}
+ 	io_req_set_res(req, ret, IORING_CQE_F_MORE);
+ 	return IOU_OK;
+ }
+@@ -1182,8 +1188,10 @@ int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 		req_set_fail(req);
+ 	}
+ 	/* fast path, check for non-NULL to avoid function call */
+-	if (kmsg->free_iov)
++	if (kmsg->free_iov) {
+ 		kfree(kmsg->free_iov);
++		kmsg->free_iov = NULL;
++	}
+ 
+ 	io_netmsg_recycle(req, issue_flags);
+ 	if (ret >= 0)
+@@ -1191,8 +1199,14 @@ int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags)
+ 	else if (sr->done_io)
+ 		ret = sr->done_io;
+ 
+-	io_notif_flush(sr->notif);
+-	req->flags &= ~REQ_F_NEED_CLEANUP;
++	/*
++	 * If we're in io-wq we can't rely on tw ordering guarantees, defer
++	 * flushing notif to io_send_zc_cleanup()
++	 */
++	if (!(issue_flags & IO_URING_F_UNLOCKED)) {
++		io_notif_flush(sr->notif);
++		req->flags &= ~REQ_F_NEED_CLEANUP;
++	}
+ 	io_req_set_res(req, ret, IORING_CQE_F_MORE);
+ 	return IOU_OK;
+ }
+-- 
+cgit 
+
+
