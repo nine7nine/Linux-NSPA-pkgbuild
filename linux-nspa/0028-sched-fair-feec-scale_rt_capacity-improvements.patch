@@ -576,7 +576,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index 2d71d18a04af8..8435a0065f415 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -6620,10 +6756,13 @@ select_idle_capacity(struct task_struct
+@@ -6796,10 +6932,13 @@ select_idle_capacity(struct task_struct
  	return best_cpu;
  }
  
@@ -586,7 +586,7 @@ index 2d71d18a04af8..8435a0065f415 100644
 +				 unsigned long util_max,
 +				 int cpu)
  {
- 	if (static_branch_unlikely(&sched_asym_cpucapacity))
+ 	if (sched_asym_cpucap_active())
 -		return fits_capacity(task_util, capacity_of(cpu));
 +		return util_fits_cpu(util, util_min, util_max, cpu);
  
