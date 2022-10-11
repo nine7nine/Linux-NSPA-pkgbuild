@@ -89,7 +89,7 @@ source=(
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0000-TIP-locking-core_6.1-oct7.patch"
   "0000-TIP-rcu.2022.09.30-oct7.patch"
-  "0000-TIP-sched-core_6.1-parital-backport.patch"
+  "0000-TIP-sched-core_6.1-mostly_oct10.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-MM-Maple-Tree-MGlru-all_6.1.patch"
   "0004-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"
@@ -119,7 +119,8 @@ source=(
   "0032-Implement-AMD-Pstate-EPP-Driver.patch"
   "0033-ALSA-dmaengine-increment_buffer_pointer_atomically.patch"
   "0034-HID-multitouch-Add_memory_barriers.patch"
-  "0035-Signal-break_out_of_wait_loops_on_kthread_stop.patch"  
+  "0035-Signal-break_out_of_wait_loops_on_kthread_stop.patch"
+  "0036-io_uring-6.1_updates.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -467,11 +468,11 @@ done
 sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             'd1281eef29cd790c8416086b6ffde806f3555aeeceb17a4a248e032a788b77f8'
             '9abdc6c5f40b81c044f5549e8f29d474dc51e2765ee2b5e9a5fba9e62499dd9e'
-            '65ec9ac5b8b28d5b61df1c72498059be2e7cb1f9b965bac0e4ffed3c05520b2b'
+            'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             'd6df293139a7a04720b74832a726ebcf733f467b3af051570c6ba0c602d1fa8e'
             'f8769d0090df6cf9b89dd6b7874697629fde5b8a1aac0a59f007d0cfa0f2b24c'
-            'c3ebc4128dd4794193559cc2bdc9436f6b374c1381567f6d8b320d32cd978a40'
+            'c99b5546efd7ab8d78fa927e8c7541b1878d8b0ca76bc4c6da76239c858f0bf7'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
             'a16d854c622377ba752d5e17c1fc728a10802ac43289c17feef9bcb153385cde'
             'f6383abef027fd9a430fd33415355e0df492cdc3c90e9938bf2d98f4f63b32e6'
@@ -501,5 +502,6 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             'c0db4d0fdec2f74b05bfd59a4517c0738ab15afc3dd4c66eaa8e6999c284dddf'
             '86030c72531b045bc9fc27329334f7c6a506fb789d0b81e08ff192b43491ae9b'
             'ccc57033c40817060be1399e4be9e1db585c695967a74c0f3b94bc342c242bea'
-            'a32576a1c21e3cc1a892e36ea221677d5da318c141693127ab00bb863378638b')
+            'a32576a1c21e3cc1a892e36ea221677d5da318c141693127ab00bb863378638b'
+            '9d6ac17bf79e322299471161465003da0e1168a51846da9561bef74edba0d7d3')
 

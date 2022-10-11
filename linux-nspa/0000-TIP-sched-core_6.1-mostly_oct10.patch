@@ -4827,3 +4827,73 @@ index 4c91efd6df821..15e3bd96e4ce2 100644
  /*
 -- 
 cgit 
+
+From: Lin Shengwang <linshengwang1@huawei.com>
+To: <peterz@infradead.org>, <mingo@redhat.com>,
+	<juri.lelli@redhat.com>, <vincent.guittot@linaro.org>,
+	<aubrey.li@linux.intel.com>
+Cc: <dietmar.eggemann@arm.com>, <rostedt@goodmis.org>,
+	<bsegall@google.com>, <mgorman@suse.de>, <bristot@redhat.com>,
+	<vschneid@redhat.com>, <linux-kernel@vger.kernel.org>,
+	<cj.chengjian@huawei.com>
+Subject: [PATCH -next] sched/core: Fix the bug that traversal in sched_group_cookie_match is wrong
+Date: Sat, 8 Oct 2022 10:27:09 +0800	[thread overview]
+Message-ID: <20221008022709.642-1-linshengwang1@huawei.com> (raw)
+
+In commit 97886d9dcd86 ("sched: Migration changes for core scheduling"),
+sched_group_cookie_match() was added to help finding cookie matched
+group, but was inconsistent with the actual purpose.
+
+Using cpu_rq(cpu) instead of rq to fix the bug.
+
+Fixes: 97886d9dcd86 ("sched: Migration changes for core scheduling")
+Signed-off-by: Lin Shengwang <linshengwang1@huawei.com>
+---
+ kernel/sched/sched.h | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 23c6f9f42ba1..1ba602139840 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1182,6 +1182,14 @@ static inline bool is_migration_disabled(struct task_struct *p)
+ #endif
+ }
+ 
++DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
++
++#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
++#define this_rq()		this_cpu_ptr(&runqueues)
++#define task_rq(p)		cpu_rq(task_cpu(p))
++#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
++#define raw_rq()		raw_cpu_ptr(&runqueues)
++
+ struct sched_group;
+ #ifdef CONFIG_SCHED_CORE
+ static inline struct cpumask *sched_group_span(struct sched_group *sg);
+@@ -1269,7 +1277,7 @@ static inline bool sched_group_cookie_match(struct rq *rq,
+ 		return true;
+ 
+ 	for_each_cpu_and(cpu, sched_group_span(group), p->cpus_ptr) {
+-		if (sched_core_cookie_match(rq, p))
++		if (sched_core_cookie_match(cpu_rq(cpu), p))
+ 			return true;
+ 	}
+ 	return false;
+@@ -1384,14 +1392,6 @@ static inline void update_idle_core(struct rq *rq)
+ static inline void update_idle_core(struct rq *rq) { }
+ #endif
+ 
+-DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+-
+-#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
+-#define this_rq()		this_cpu_ptr(&runqueues)
+-#define task_rq(p)		cpu_rq(task_cpu(p))
+-#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
+-#define raw_rq()		raw_cpu_ptr(&runqueues)
+-
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ static inline struct task_struct *task_of(struct sched_entity *se)
+ {
+-- 
+2.17.1
