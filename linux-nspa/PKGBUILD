@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=10
+pkgrel=11
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -90,6 +90,7 @@ source=(
   "0000-TIP-locking-core_6.1-oct7.patch"
   "0000-TIP-rcu.2022.09.30-oct7.patch"
   "0000-TIP-sched-core_6.1-mostly_oct10.patch"
+  "0000-MM-nonmm-stable_oct10.patch"
   "0000-io_uring-6.1_updates.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-MM-Maple-Tree-MGlru-all_6.1.patch"
@@ -122,6 +123,7 @@ source=(
   "0034-HID-multitouch-Add_memory_barriers.patch"
   "0035-Signal-break_out_of_wait_loops_on_kthread_stop.patch"
   "0037-softirq_rt_optmizations_v4.patch"
+  "0038-designware-Fix_handling_of_real_but_unexpected_device_interrupts.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -474,6 +476,7 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             'd6df293139a7a04720b74832a726ebcf733f467b3af051570c6ba0c602d1fa8e'
             'f8769d0090df6cf9b89dd6b7874697629fde5b8a1aac0a59f007d0cfa0f2b24c'
             'c99b5546efd7ab8d78fa927e8c7541b1878d8b0ca76bc4c6da76239c858f0bf7'
+            '550ee05b3b79d1481e68bb1de75abba14cadffd7e3bad848410eb5262aef0fe2'
             '9d6ac17bf79e322299471161465003da0e1168a51846da9561bef74edba0d7d3'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
             'a16d854c622377ba752d5e17c1fc728a10802ac43289c17feef9bcb153385cde'
@@ -505,5 +508,6 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '86030c72531b045bc9fc27329334f7c6a506fb789d0b81e08ff192b43491ae9b'
             'ccc57033c40817060be1399e4be9e1db585c695967a74c0f3b94bc342c242bea'
             'a32576a1c21e3cc1a892e36ea221677d5da318c141693127ab00bb863378638b'
-            '2b392ce19b2e924d4e8b2603179eb859595e7710b7c594bba22f6e9099fc329d')
+            '2b392ce19b2e924d4e8b2603179eb859595e7710b7c594bba22f6e9099fc329d'
+            'd965b53e37b982cf9681ea2251f2be2e3f64a55bfea094a9ace55c88da4f0d49')
 
