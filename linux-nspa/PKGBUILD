@@ -63,7 +63,7 @@ _zstd_compression=y
 _nf_cone=y
 
  pkgbase=linux-nspa
-_major=6.0
+_major=6.x
 #_minor=4
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=12
+pkgrel=13
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -88,12 +88,13 @@ source=(
   "auto-cpu-optimization.sh"
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0000-TIP-locking-core_6.1-oct7.patch"
-  "0000-TIP-rcu.2022.09.30-oct7.patch"
+  "0000-TIP-rcu.2022.09.30-oct7_urgent-oct20.patch"
   "0000-TIP-sched-core_6.1-mostly_oct10.patch"
   "0000-MM-nonmm-stable_oct10.patch"
   "0000-io_uring-6.1_updates.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-MM-Maple-Tree-MGlru-all_6.1.patch"
+  "0003-MM-stable-nonmm-hotfixes_oct28.patch"
   "0004-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"
   "0005-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
   "0006-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
@@ -474,12 +475,13 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             'd6df293139a7a04720b74832a726ebcf733f467b3af051570c6ba0c602d1fa8e'
-            'f8769d0090df6cf9b89dd6b7874697629fde5b8a1aac0a59f007d0cfa0f2b24c'
-            'c99b5546efd7ab8d78fa927e8c7541b1878d8b0ca76bc4c6da76239c858f0bf7'
+            '1f2d5ead4a66bb615ea6f9830d15740c0f2d82b9e1df3f321b7940901657b596'
+            '92d1dcd9dab57cc8157e86ecb5e4ef62f60b6482300d6be2ff1ab486e328c97d'
             '550ee05b3b79d1481e68bb1de75abba14cadffd7e3bad848410eb5262aef0fe2'
             '9d6ac17bf79e322299471161465003da0e1168a51846da9561bef74edba0d7d3'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
             'a16d854c622377ba752d5e17c1fc728a10802ac43289c17feef9bcb153385cde'
+            'f0b92151ebac232020ea048968a3d1bd2beb2b7d2a04d51b1d77ffe53dab26cc'
             'f6383abef027fd9a430fd33415355e0df492cdc3c90e9938bf2d98f4f63b32e6'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             'e3c106cfac323c6f677b698b080b48798ea63786a7153f81d9a21f749e73168d'
