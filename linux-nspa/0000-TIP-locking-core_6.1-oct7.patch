@@ -646,3 +646,56 @@ index 64a13eb560781..e3375bc40dadc 100644
 -- 
 cgit 
 
+From d0c006402e7941558e5283ae434e2847c7999378 Mon Sep 17 00:00:00 2001
+From: Uros Bizjak <ubizjak@gmail.com>
+Date: Wed, 19 Oct 2022 16:08:50 +0200
+Subject: jump_label: Use atomic_try_cmpxchg() in
+ static_key_slow_inc_cpuslocked()
+
+Use atomic_try_cmpxchg() instead of atomic_cmpxchg (*ptr, old, new) ==
+old in static_key_slow_inc_cpuslocked().  x86 CMPXCHG instruction
+returns success in ZF flag, so this change saves a compare after
+cmpxchg (and related move instruction in front of cmpxchg).
+
+Also, atomic_try_cmpxchg() implicitly assigns old *ptr value to "old" when
+cmpxchg fails, enabling further code simplifications.
+
+No functional change intended.
+
+Signed-off-by: Uros Bizjak <ubizjak@gmail.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20221019140850.3395-1-ubizjak@gmail.com
+---
+ kernel/jump_label.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/jump_label.c b/kernel/jump_label.c
+index 714ac4c3b556d..4d6c6f5f60db8 100644
+--- a/kernel/jump_label.c
++++ b/kernel/jump_label.c
+@@ -115,8 +115,6 @@ EXPORT_SYMBOL_GPL(static_key_count);
+ 
+ void static_key_slow_inc_cpuslocked(struct static_key *key)
+ {
+-	int v, v1;
+-
+ 	STATIC_KEY_CHECK_USE(key);
+ 	lockdep_assert_cpus_held();
+ 
+@@ -132,11 +130,9 @@ void static_key_slow_inc_cpuslocked(struct static_key *key)
+ 	 * so it counts as "enabled" in jump_label_update().  Note that
+ 	 * atomic_inc_unless_negative() checks >= 0, so roll our own.
+ 	 */
+-	for (v = atomic_read(&key->enabled); v > 0; v = v1) {
+-		v1 = atomic_cmpxchg(&key->enabled, v, v + 1);
+-		if (likely(v1 == v))
++	for (int v = atomic_read(&key->enabled); v > 0; )
++		if (likely(atomic_try_cmpxchg(&key->enabled, &v, v + 1)))
+ 			return;
+-	}
+ 
+ 	jump_label_lock();
+ 	if (atomic_read(&key->enabled) == 0) {
+-- 
+cgit 
+
