@@ -1,0 +1,206 @@
+From e238f368fbe461ad9084d6cf654783d5a3ba0a86 Mon Sep 17 00:00:00 2001
+From: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+Date: Wed, 2 Nov 2022 09:06:35 -0400
+Subject: rseq: Use pr_warn_once() when deprecated/unknown ABI flags are
+ encountered
+
+These commits use WARN_ON_ONCE() and kill the offending processes when
+deprecated and unknown flags are encountered:
+
+commit c17a6ff93213 ("rseq: Kill process when unknown flags are encountered in ABI structures")
+commit 0190e4198e47 ("rseq: Deprecate RSEQ_CS_FLAG_NO_RESTART_ON_* flags")
+
+The WARN_ON_ONCE() triggered by userspace input prevents use of
+Syzkaller to fuzz the rseq system call.
+
+Replace this WARN_ON_ONCE() by pr_warn_once() messages which contain
+actually useful information.
+
+Reported-by: Mark Rutland <mark.rutland@arm.com>
+Signed-off-by: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Mark Rutland <mark.rutland@arm.com>
+Acked-by: Paul E. McKenney <paulmck@kernel.org>
+Link: https://lkml.kernel.org/r/20221102130635.7379-1-mathieu.desnoyers@efficios.com
+---
+ kernel/rseq.c | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/rseq.c b/kernel/rseq.c
+index bda8175f8f993..d38ab944105d7 100644
+--- a/kernel/rseq.c
++++ b/kernel/rseq.c
+@@ -171,12 +171,27 @@ static int rseq_get_rseq_cs(struct task_struct *t, struct rseq_cs *rseq_cs)
+ 	return 0;
+ }
+ 
++static bool rseq_warn_flags(const char *str, u32 flags)
++{
++	u32 test_flags;
++
++	if (!flags)
++		return false;
++	test_flags = flags & RSEQ_CS_NO_RESTART_FLAGS;
++	if (test_flags)
++		pr_warn_once("Deprecated flags (%u) in %s ABI structure", test_flags, str);
++	test_flags = flags & ~RSEQ_CS_NO_RESTART_FLAGS;
++	if (test_flags)
++		pr_warn_once("Unknown flags (%u) in %s ABI structure", test_flags, str);
++	return true;
++}
++
+ static int rseq_need_restart(struct task_struct *t, u32 cs_flags)
+ {
+ 	u32 flags, event_mask;
+ 	int ret;
+ 
+-	if (WARN_ON_ONCE(cs_flags & RSEQ_CS_NO_RESTART_FLAGS) || cs_flags)
++	if (rseq_warn_flags("rseq_cs", cs_flags))
+ 		return -EINVAL;
+ 
+ 	/* Get thread flags. */
+@@ -184,7 +199,7 @@ static int rseq_need_restart(struct task_struct *t, u32 cs_flags)
+ 	if (ret)
+ 		return ret;
+ 
+-	if (WARN_ON_ONCE(flags & RSEQ_CS_NO_RESTART_FLAGS) || flags)
++	if (rseq_warn_flags("rseq", flags))
+ 		return -EINVAL;
+ 
+ 	/*
+-- 
+cgit 
+
+From 9ac3af37b887fef13c3ef8305f5feb8324d8a706 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Wed, 26 Oct 2022 13:43:00 +0200
+Subject: sched: Fix race in task_call_func()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+There is a very narrow race between schedule() and task_call_func().
+
+  CPU0						CPU1
+
+  __schedule()
+    rq_lock();
+    prev_state = READ_ONCE(prev->__state);
+    if (... && prev_state) {
+      deactivate_tasl(rq, prev, ...)
+        prev->on_rq = 0;
+
+						task_call_func()
+						  raw_spin_lock_irqsave(p->pi_lock);
+						  state = READ_ONCE(p->__state);
+						  smp_rmb();
+						  if (... || p->on_rq) // false!!!
+						    rq = __task_rq_lock()
+
+						  ret = func();
+
+    next = pick_next_task();
+    rq = context_switch(prev, next)
+      prepare_lock_switch()
+        spin_release(&__rq_lockp(rq)->dep_map...)
+
+So while the task is on it's way out, it still holds rq->lock for a
+little while, and right then task_call_func() comes in and figures it
+doesn't need rq->lock anymore (because the task is already dequeued --
+but still running there) and then the __set_task_frozen() thing observes
+it's holding rq->lock and yells murder.
+
+Avoid this by waiting for p->on_cpu to get cleared, which guarantees
+the task is fully finished on the old CPU.
+
+( While arguably the fixes tag is 'wrong' -- none of the previous
+  task_call_func() users appears to care for this case. )
+
+Fixes: f5d39b020809 ("freezer,sched: Rewrite core freezer logic")
+Reported-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Link: https://lkml.kernel.org/r/Y1kdRNNfUeAU+FNl@hirez.programming.kicks-ass.net
+---
+ kernel/sched/core.c | 52 +++++++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 35 insertions(+), 17 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index cb2aa2b54c7a4..daff72f003858 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4200,6 +4200,40 @@ out:
+ 	return success;
+ }
+ 
++static bool __task_needs_rq_lock(struct task_struct *p)
++{
++	unsigned int state = READ_ONCE(p->__state);
++
++	/*
++	 * Since pi->lock blocks try_to_wake_up(), we don't need rq->lock when
++	 * the task is blocked. Make sure to check @state since ttwu() can drop
++	 * locks at the end, see ttwu_queue_wakelist().
++	 */
++	if (state == TASK_RUNNING || state == TASK_WAKING)
++		return true;
++
++	/*
++	 * Ensure we load p->on_rq after p->__state, otherwise it would be
++	 * possible to, falsely, observe p->on_rq == 0.
++	 *
++	 * See try_to_wake_up() for a longer comment.
++	 */
++	smp_rmb();
++	if (p->on_rq)
++		return true;
++
++#ifdef CONFIG_SMP
++	/*
++	 * Ensure the task has finished __schedule() and will not be referenced
++	 * anymore. Again, see try_to_wake_up() for a longer comment.
++	 */
++	smp_rmb();
++	smp_cond_load_acquire(&p->on_cpu, !VAL);
++#endif
++
++	return false;
++}
++
+ /**
+  * task_call_func - Invoke a function on task in fixed state
+  * @p: Process for which the function is to be invoked, can be @current.
+@@ -4217,28 +4251,12 @@ out:
+ int task_call_func(struct task_struct *p, task_call_f func, void *arg)
+ {
+ 	struct rq *rq = NULL;
+-	unsigned int state;
+ 	struct rq_flags rf;
+ 	int ret;
+ 
+ 	raw_spin_lock_irqsave(&p->pi_lock, rf.flags);
+ 
+-	state = READ_ONCE(p->__state);
+-
+-	/*
+-	 * Ensure we load p->on_rq after p->__state, otherwise it would be
+-	 * possible to, falsely, observe p->on_rq == 0.
+-	 *
+-	 * See try_to_wake_up() for a longer comment.
+-	 */
+-	smp_rmb();
+-
+-	/*
+-	 * Since pi->lock blocks try_to_wake_up(), we don't need rq->lock when
+-	 * the task is blocked. Make sure to check @state since ttwu() can drop
+-	 * locks at the end, see ttwu_queue_wakelist().
+-	 */
+-	if (state == TASK_RUNNING || state == TASK_WAKING || p->on_rq)
++	if (__task_needs_rq_lock(p))
+ 		rq = __task_rq_lock(p, &rf);
+ 
+ 	/*
+-- 
+cgit 
+
+

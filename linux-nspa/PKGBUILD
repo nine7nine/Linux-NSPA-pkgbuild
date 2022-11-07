@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=16
+pkgrel=18
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -130,6 +130,8 @@ source=(
   "0042-v2_sched-sched_fork-optimizations.patch"
   "0043-Kernel_tuning-CONFIG_NSPA.patch"
   "0044-amdpgu_misc_fixes_oct21.patch"
+  "0045-ACPI-fixes_updates.patch"
+  "0046-v5-locking-rwsem-Enable-direct-rwsem-lock-handoff.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -521,5 +523,7 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '5bd4a1e9c0a7f86531b98f0d9252e89da6cb375f0fde2ece9cf5fb82568c3a03'
             '6763b3ce2e74b474445f455fd45cf82554e61d53a56ec50a73592710031b9383'
             'c97dbb598c77553f6312bd3572cc055e44f271ca399173732ead77b88e484c90'
-            '7deab169ff35045afdbe13ff225e6f4dfebbfa1c84d97da6697c7931ecc17ed8')
+            '7deab169ff35045afdbe13ff225e6f4dfebbfa1c84d97da6697c7931ecc17ed8'
+            '7042db914dc7287782ff5d04b8e62da0e9200dc4b4d370d623a1ababb54535d2'
+            'a3aa689da7950661fbbe5fb796807a676072bae60a21d1eaf9d5401558ecaef5')
 

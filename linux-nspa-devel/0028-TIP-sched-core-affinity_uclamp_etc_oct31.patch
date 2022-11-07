@@ -1,4 +1,4 @@
-From 431cba926aca965bcbc4f29d8fa1b47577a90575 Mon Sep 17 00:00:00 2001
+From 48d5e9daa8b767e75ed9421665b037a49ce4bc04 Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:01 +0100
 Subject: sched/uclamp: Fix relationship between uclamp and migration margin
@@ -57,10 +57,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-2-qais.yousef@arm.com
  1 file changed, 123 insertions(+)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5ffec43706023..dec78e0a8ff65 100644
+index e4a0b8bd941c7..0d193ef03730a 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -4257,6 +4257,129 @@ done:
+@@ -4426,6 +4426,129 @@ done:
  	trace_sched_util_est_se_tp(&p->se);
  }
  
@@ -193,7 +193,8 @@ index 5ffec43706023..dec78e0a8ff65 100644
 -- 
 cgit 
 
-From 929072dc4c1234ac01b34d61e6dcfa0f83072c49 Mon Sep 17 00:00:00 2001
+
+From b48e16a69792b5dc4a09d6807369d11b2970cc36 Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:02 +0100
 Subject: sched/uclamp: Make task_fits_capacity() use util_fits_cpu()
@@ -212,10 +213,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-3-qais.yousef@arm.com
  2 files changed, 25 insertions(+), 10 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index dec78e0a8ff65..30e3524a806ba 100644
+index 0d193ef03730a..db6174b989ed0 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -4380,10 +4380,12 @@ static inline int util_fits_cpu(unsigned long util,
+@@ -4549,10 +4549,12 @@ static inline int util_fits_cpu(unsigned long util,
  	return fits;
  }
  
@@ -231,7 +232,7 @@ index dec78e0a8ff65..30e3524a806ba 100644
  }
  
  static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
-@@ -4396,7 +4398,7 @@ static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
+@@ -4565,7 +4567,7 @@ static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
  		return;
  	}
  
@@ -240,7 +241,7 @@ index dec78e0a8ff65..30e3524a806ba 100644
  		rq->misfit_task_load = 0;
  		return;
  	}
-@@ -8230,7 +8232,7 @@ static int detach_tasks(struct lb_env *env)
+@@ -8399,7 +8401,7 @@ static int detach_tasks(struct lb_env *env)
  
  		case migrate_misfit:
  			/* This is not a misfit task */
@@ -249,7 +250,7 @@ index dec78e0a8ff65..30e3524a806ba 100644
  				goto next;
  
  			env->imbalance = 0;
-@@ -9235,6 +9237,10 @@ static inline void update_sg_wakeup_stats(struct sched_domain *sd,
+@@ -9404,6 +9406,10 @@ static inline void update_sg_wakeup_stats(struct sched_domain *sd,
  
  	memset(sgs, 0, sizeof(*sgs));
  
@@ -260,7 +261,7 @@ index dec78e0a8ff65..30e3524a806ba 100644
  	for_each_cpu(i, sched_group_span(group)) {
  		struct rq *rq = cpu_rq(i);
  		unsigned int local;
-@@ -9254,12 +9260,12 @@ static inline void update_sg_wakeup_stats(struct sched_domain *sd,
+@@ -9423,12 +9429,12 @@ static inline void update_sg_wakeup_stats(struct sched_domain *sd,
  		if (!nr_running && idle_cpu_without(i, p))
  			sgs->idle_cpus++;
  
@@ -279,10 +280,10 @@ index dec78e0a8ff65..30e3524a806ba 100644
  
  	sgs->group_capacity = group->sgc->capacity;
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 1fc198be1ffd0..7174c5a8a7a86 100644
+index a4a20046e586e..0ab091b9d91be 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -3053,6 +3053,15 @@ static inline bool uclamp_is_used(void)
+@@ -3060,6 +3060,15 @@ static inline bool uclamp_is_used(void)
  	return static_branch_likely(&sched_uclamp_used);
  }
  #else /* CONFIG_UCLAMP_TASK */
@@ -301,7 +302,8 @@ index 1fc198be1ffd0..7174c5a8a7a86 100644
 -- 
 cgit 
 
-From 7f6fa42ed12647c6663d2cc1e431539545969372 Mon Sep 17 00:00:00 2001
+
+From 244226035a1f9b2b6c326e55ae5188fab4f428cb Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:03 +0100
 Subject: sched/uclamp: Fix fits_capacity() check in feec()
@@ -335,10 +337,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-4-qais.yousef@arm.com
  3 files changed, 68 insertions(+), 10 deletions(-)
 
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 02dc1b8e3cb6b..1fec52e2b26be 100644
+index cb2aa2b54c7a4..069da4a7ab727 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -1393,7 +1393,7 @@ static inline void uclamp_idle_reset(struct rq *rq, enum uclamp_id clamp_id,
+@@ -1392,7 +1392,7 @@ static inline void uclamp_idle_reset(struct rq *rq, enum uclamp_id clamp_id,
  	if (!(rq->uclamp_flags & UCLAMP_FLAG_IDLE))
  		return;
  
@@ -347,7 +349,7 @@ index 02dc1b8e3cb6b..1fec52e2b26be 100644
  }
  
  static inline
-@@ -1544,8 +1544,8 @@ static inline void uclamp_rq_inc_id(struct rq *rq, struct task_struct *p,
+@@ -1543,8 +1543,8 @@ static inline void uclamp_rq_inc_id(struct rq *rq, struct task_struct *p,
  	if (bucket->tasks == 1 || uc_se->value > bucket->value)
  		bucket->value = uc_se->value;
  
@@ -358,7 +360,7 @@ index 02dc1b8e3cb6b..1fec52e2b26be 100644
  }
  
  /*
-@@ -1611,7 +1611,7 @@ static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
+@@ -1610,7 +1610,7 @@ static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
  	if (likely(bucket->tasks))
  		return;
  
@@ -367,7 +369,7 @@ index 02dc1b8e3cb6b..1fec52e2b26be 100644
  	/*
  	 * Defensive programming: this should never happen. If it happens,
  	 * e.g. due to future modification, warn and fixup the expected value.
-@@ -1619,7 +1619,7 @@ static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
+@@ -1618,7 +1618,7 @@ static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
  	SCHED_WARN_ON(bucket->value > rq_clamp);
  	if (bucket->value >= rq_clamp) {
  		bkt_clamp = uclamp_rq_max_value(rq, clamp_id, uc_se->value);
@@ -377,10 +379,10 @@ index 02dc1b8e3cb6b..1fec52e2b26be 100644
  }
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 30e3524a806ba..630f17eb5cff0 100644
+index db6174b989ed0..c8eb5ff810844 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7000,6 +7000,8 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7169,6 +7169,8 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  {
  	struct cpumask *cpus = this_cpu_cpumask_var_ptr(select_rq_mask);
  	unsigned long prev_delta = ULONG_MAX, best_delta = ULONG_MAX;
@@ -389,7 +391,7 @@ index 30e3524a806ba..630f17eb5cff0 100644
  	struct root_domain *rd = this_rq()->rd;
  	int cpu, best_energy_cpu, target = -1;
  	struct sched_domain *sd;
-@@ -7032,6 +7034,8 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7201,6 +7203,8 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  	for (; pd; pd = pd->next) {
  		unsigned long cpu_cap, cpu_thermal_cap, util;
  		unsigned long cur_delta, max_spare_cap = 0;
@@ -398,7 +400,7 @@ index 30e3524a806ba..630f17eb5cff0 100644
  		bool compute_prev_delta = false;
  		int max_spare_cap_cpu = -1;
  		unsigned long base_energy;
-@@ -7068,8 +7072,26 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7237,8 +7241,26 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  			 * much capacity we can get out of the CPU; this is
  			 * aligned with sched_cpu_util().
  			 */
@@ -428,10 +430,10 @@ index 30e3524a806ba..630f17eb5cff0 100644
  
  			lsub_positive(&cpu_cap, util);
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 7174c5a8a7a86..bf430aad7e9a6 100644
+index 0ab091b9d91be..d6d488e8eb554 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -2972,6 +2972,23 @@ static inline unsigned long cpu_util_rt(struct rq *rq)
+@@ -2979,6 +2979,23 @@ static inline unsigned long cpu_util_rt(struct rq *rq)
  #ifdef CONFIG_UCLAMP_TASK
  unsigned long uclamp_eff_value(struct task_struct *p, enum uclamp_id clamp_id);
  
@@ -455,7 +457,7 @@ index 7174c5a8a7a86..bf430aad7e9a6 100644
  /**
   * uclamp_rq_util_with - clamp @util with @rq and @p effective uclamp values.
   * @rq:		The rq to clamp against. Must not be NULL.
-@@ -3007,12 +3024,12 @@ unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
+@@ -3014,12 +3031,12 @@ unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
  		 * Ignore last runnable task's max clamp, as this task will
  		 * reset it. Similarly, no need to read the rq's min clamp.
  		 */
@@ -471,7 +473,7 @@ index 7174c5a8a7a86..bf430aad7e9a6 100644
  out:
  	/*
  	 * Since CPU's {min,max}_util clamps are MAX aggregated considering
-@@ -3075,6 +3092,25 @@ static inline bool uclamp_is_used(void)
+@@ -3082,6 +3099,25 @@ static inline bool uclamp_is_used(void)
  {
  	return false;
  }
@@ -500,7 +502,8 @@ index 7174c5a8a7a86..bf430aad7e9a6 100644
 -- 
 cgit 
 
-From 97b164911d00b1850b011c37270aabae8b476417 Mon Sep 17 00:00:00 2001
+
+From b759caa1d9f667b94727b2ad12589cbc4ce13a82 Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:04 +0100
 Subject: sched/uclamp: Make select_idle_capacity() use util_fits_cpu()
@@ -519,10 +522,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-5-qais.yousef@arm.com
  1 file changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 630f17eb5cff0..2d71d18a04af8 100644
+index c8eb5ff810844..c877bbfe5deb0 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -6610,21 +6610,23 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool
+@@ -6779,21 +6779,23 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool
  static int
  select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
  {
@@ -552,7 +555,8 @@ index 630f17eb5cff0..2d71d18a04af8 100644
 -- 
 cgit 
 
-From 9e9ad7fce3dbfe5658e7ee17cf842718fdc87352 Mon Sep 17 00:00:00 2001
+
+From a2e7f03ed28fce26c78b985f87913b6ce3accf9d Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:05 +0100
 Subject: sched/uclamp: Make asym_fits_capacity() use util_fits_cpu()
@@ -573,10 +577,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-6-qais.yousef@arm.com
  1 file changed, 13 insertions(+), 8 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 2d71d18a04af8..8435a0065f415 100644
+index c877bbfe5deb0..cabbdac97eaac 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -6796,10 +6932,13 @@ select_idle_capacity(struct task_struct
+@@ -6807,10 +6807,13 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
  	return best_cpu;
  }
  
@@ -592,7 +596,7 @@ index 2d71d18a04af8..8435a0065f415 100644
  
  	return true;
  }
-@@ -6653,7 +6656,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+@@ -6822,7 +6825,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
  {
  	bool has_idle_core = false;
  	struct sched_domain *sd;
@@ -601,7 +605,7 @@ index 2d71d18a04af8..8435a0065f415 100644
  	int i, recent_used_cpu;
  
  	/*
-@@ -6662,7 +6665,9 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+@@ -6831,7 +6834,9 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
  	 */
  	if (sched_asym_cpucap_active()) {
  		sync_entity_load_avg(&p->se);
@@ -612,7 +616,7 @@ index 2d71d18a04af8..8435a0065f415 100644
  	}
  
  	/*
-@@ -6671,7 +6676,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+@@ -6840,7 +6845,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
  	lockdep_assert_irqs_disabled();
  
  	if ((available_idle_cpu(target) || sched_idle_cpu(target)) &&
@@ -621,7 +625,7 @@ index 2d71d18a04af8..8435a0065f415 100644
  		return target;
  
  	/*
-@@ -6679,7 +6684,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+@@ -6848,7 +6853,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
  	 */
  	if (prev != target && cpus_share_cache(prev, target) &&
  	    (available_idle_cpu(prev) || sched_idle_cpu(prev)) &&
@@ -630,7 +634,7 @@ index 2d71d18a04af8..8435a0065f415 100644
  		return prev;
  
  	/*
-@@ -6694,7 +6699,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+@@ -6863,7 +6868,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
  	    in_task() &&
  	    prev == smp_processor_id() &&
  	    this_rq()->nr_running <= 1 &&
@@ -639,7 +643,7 @@ index 2d71d18a04af8..8435a0065f415 100644
  		return prev;
  	}
  
-@@ -6706,7 +6711,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+@@ -6875,7 +6880,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
  	    cpus_share_cache(recent_used_cpu, target) &&
  	    (available_idle_cpu(recent_used_cpu) || sched_idle_cpu(recent_used_cpu)) &&
  	    cpumask_test_cpu(p->recent_used_cpu, p->cpus_ptr) &&
@@ -651,7 +655,8 @@ index 2d71d18a04af8..8435a0065f415 100644
 -- 
 cgit 
 
-From a60aaaff66fb56333a3f45387146ba90523a0894 Mon Sep 17 00:00:00 2001
+
+From c56ab1b3506ba0e7a872509964b100912bde165d Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:06 +0100
 Subject: sched/uclamp: Make cpu_overutilized() use util_fits_cpu()
@@ -684,10 +689,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-7-qais.yousef@arm.com
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 8435a0065f415..3f87ac90b7a27 100644
+index cabbdac97eaac..a0ee3192e5a7e 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -5818,7 +5818,10 @@ static inline void hrtick_update(struct rq *rq)
+@@ -5987,7 +5987,10 @@ static inline void hrtick_update(struct rq *rq)
  #ifdef CONFIG_SMP
  static inline bool cpu_overutilized(int cpu)
  {
@@ -702,7 +707,8 @@ index 8435a0065f415..3f87ac90b7a27 100644
 -- 
 cgit 
 
-From 44bc36ccfd5a7eeccbde1ec03c94918624e5407e Mon Sep 17 00:00:00 2001
+
+From d81304bc6193554014d4372a01debdf65e1e9a4d Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:07 +0100
 Subject: sched/uclamp: Cater for uclamp in find_energy_efficient_cpu()'s early
@@ -727,10 +733,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-8-qais.yousef@arm.com
  1 file changed, 8 insertions(+), 6 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 3f87ac90b7a27..b786c431ac65d 100644
+index a0ee3192e5a7e..0f32acb05055f 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -4111,14 +4111,16 @@ static inline unsigned long task_util_est(struct task_struct *p)
+@@ -4280,14 +4280,16 @@ static inline unsigned long task_util_est(struct task_struct *p)
  }
  
  #ifdef CONFIG_UCLAMP_TASK
@@ -752,7 +758,7 @@ index 3f87ac90b7a27..b786c431ac65d 100644
  {
  	return task_util_est(p);
  }
-@@ -7036,7 +7038,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7205,7 +7207,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  	target = prev_cpu;
  
  	sync_entity_load_avg(&p->se);
@@ -764,7 +770,8 @@ index 3f87ac90b7a27..b786c431ac65d 100644
 -- 
 cgit 
 
-From b4b851d13703edd01061cd4bd99fdff97a7b6c20 Mon Sep 17 00:00:00 2001
+
+From 44c7b80bffc3a657a36857098d5d9c49d94e652b Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:08 +0100
 Subject: sched/fair: Detect capacity inversion
@@ -795,10 +802,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-9-qais.yousef@arm.com
  2 files changed, 79 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index b786c431ac65d..6357818996e45 100644
+index 0f32acb05055f..4c4ea474fdc21 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8655,16 +8655,73 @@ static unsigned long scale_rt_capacity(int cpu)
+@@ -8824,16 +8824,73 @@ static unsigned long scale_rt_capacity(int cpu)
  
  static void update_cpu_capacity(struct sched_domain *sd, int cpu)
  {
@@ -876,18 +883,18 @@ index b786c431ac65d..6357818996e45 100644
  	sdg->sgc->capacity = capacity;
  	sdg->sgc->min_capacity = capacity;
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index bf430aad7e9a6..035894cf977e9 100644
+index d6d488e8eb554..5f18460f62f0f 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -1035,6 +1035,7 @@ struct rq {
+@@ -1041,6 +1041,7 @@ struct rq {
  
  	unsigned long		cpu_capacity;
  	unsigned long		cpu_capacity_orig;
 +	unsigned long		cpu_capacity_inverted;
  
- 	struct callback_head	*balance_callback;
+ 	struct balance_callback *balance_callback;
  
-@@ -2871,6 +2872,24 @@ static inline unsigned long capacity_orig_of(int cpu)
+@@ -2878,6 +2879,24 @@ static inline unsigned long capacity_orig_of(int cpu)
  	return cpu_rq(cpu)->cpu_capacity_orig;
  }
  
@@ -915,7 +922,8 @@ index bf430aad7e9a6..035894cf977e9 100644
 -- 
 cgit 
 
-From 5f08175036d36da836c82df20033b4cac0afb3b5 Mon Sep 17 00:00:00 2001
+
+From aa69c36f31aadc1669bfa8a3de6a47b5e6c98ee8 Mon Sep 17 00:00:00 2001
 From: Qais Yousef <qais.yousef@arm.com>
 Date: Thu, 4 Aug 2022 15:36:09 +0100
 Subject: sched/fair: Consider capacity inversion in util_fits_cpu()
@@ -942,10 +950,10 @@ Link: https://lore.kernel.org/r/20220804143609.515789-10-qais.yousef@arm.com
  1 file changed, 9 insertions(+), 5 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 6357818996e45..b9bd1b1fb2935 100644
+index 4c4ea474fdc21..919d016c5d77d 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -4296,12 +4296,16 @@ static inline int util_fits_cpu(unsigned long util,
+@@ -4465,12 +4465,16 @@ static inline int util_fits_cpu(unsigned long util,
  	 * For uclamp_max, we can tolerate a drop in performance level as the
  	 * goal is to cap the task. So it's okay if it's getting less.
  	 *
@@ -970,7 +978,8 @@ index 6357818996e45..b9bd1b1fb2935 100644
 -- 
 cgit 
 
-From 329bc22460dda77548cfbbd1abad4535aa76c93a Mon Sep 17 00:00:00 2001
+
+From ad841e569f5c88e3332b32a000f251f33ff32187 Mon Sep 17 00:00:00 2001
 From: Pierre Gondois <pierre.gondois@arm.com>
 Date: Thu, 6 Oct 2022 10:10:52 +0200
 Subject: sched/fair: Check if prev_cpu has highest spare cap in feec()
@@ -1006,10 +1015,10 @@ Link: https://lore.kernel.org/r/20221006081052.3862167-2-pierre.gondois@arm.com
  1 file changed, 7 insertions(+), 6 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index b9bd1b1fb2935..ce5977a167a35 100644
+index 919d016c5d77d..4cc56c91e06e6 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -7052,7 +7052,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7221,7 +7221,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  		unsigned long cur_delta, max_spare_cap = 0;
  		unsigned long rq_util_min, rq_util_max;
  		unsigned long util_min, util_max;
@@ -1018,7 +1027,7 @@ index b9bd1b1fb2935..ce5977a167a35 100644
  		int max_spare_cap_cpu = -1;
  		unsigned long base_energy;
  
-@@ -7114,18 +7114,19 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7283,18 +7283,19 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  
  			if (cpu == prev_cpu) {
  				/* Always use prev_cpu as a candidate. */
@@ -1041,7 +1050,7 @@ index b9bd1b1fb2935..ce5977a167a35 100644
  			continue;
  
  		eenv_pd_busy_time(&eenv, cpus, p);
-@@ -7133,7 +7134,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7302,7 +7303,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  		base_energy = compute_energy(&eenv, pd, cpus, p, -1);
  
  		/* Evaluate the energy impact of using prev_cpu. */
@@ -1050,7 +1059,7 @@ index b9bd1b1fb2935..ce5977a167a35 100644
  			prev_delta = compute_energy(&eenv, pd, cpus, p,
  						    prev_cpu);
  			/* CPU utilization has changed */
-@@ -7144,7 +7145,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
+@@ -7313,7 +7314,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  		}
  
  		/* Evaluate the energy impact of using max_spare_cap_cpu. */
@@ -1063,3 +1072,890 @@ index b9bd1b1fb2935..ce5977a167a35 100644
 cgit 
 
 
+From 5584e8ac2c68280e5ac31d231c23cdb7dfa225db Mon Sep 17 00:00:00 2001
+From: Waiman Long <longman@redhat.com>
+Date: Thu, 22 Sep 2022 14:00:37 -0400
+Subject: sched: Add __releases annotations to affine_move_task()
+
+affine_move_task() assumes task_rq_lock() has been called and it does
+an implicit task_rq_unlock() before returning. Add the appropriate
+__releases annotations to make this clear.
+
+A typo error in comment is also fixed.
+
+Signed-off-by: Waiman Long <longman@redhat.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220922180041.1768141-2-longman@redhat.com
+---
+ kernel/sched/core.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 069da4a7ab727..f6f2807e17baa 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2690,6 +2690,8 @@ void release_user_cpus_ptr(struct task_struct *p)
+  */
+ static int affine_move_task(struct rq *rq, struct task_struct *p, struct rq_flags *rf,
+ 			    int dest_cpu, unsigned int flags)
++	__releases(rq->lock)
++	__releases(p->pi_lock)
+ {
+ 	struct set_affinity_pending my_pending = { }, *pending = NULL;
+ 	bool stop_pending, complete = false;
+@@ -2999,7 +3001,7 @@ err_unlock:
+ 
+ /*
+  * Restrict the CPU affinity of task @p so that it is a subset of
+- * task_cpu_possible_mask() and point @p->user_cpu_ptr to a copy of the
++ * task_cpu_possible_mask() and point @p->user_cpus_ptr to a copy of the
+  * old affinity mask. If the resulting mask is empty, we warn and walk
+  * up the cpuset hierarchy until we find a suitable mask.
+  */
+-- 
+cgit 
+
+
+From 713a2e21a5137e96d2594f53d19784ffde3ddbd0 Mon Sep 17 00:00:00 2001
+From: Waiman Long <longman@redhat.com>
+Date: Thu, 22 Sep 2022 14:00:40 -0400
+Subject: sched: Introduce affinity_context
+
+In order to prepare for passing through additional data through the
+affinity call-chains, convert the mask and flags argument into a
+structure.
+
+Suggested-by: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Waiman Long <longman@redhat.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220922180041.1768141-5-longman@redhat.com
+---
+ kernel/sched/core.c     | 114 +++++++++++++++++++++++++++++++-----------------
+ kernel/sched/deadline.c |   7 ++-
+ kernel/sched/sched.h    |  11 +++--
+ 3 files changed, 85 insertions(+), 47 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index f6f2807e17baa..5ad4e2e0e499b 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2189,14 +2189,18 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
+ #ifdef CONFIG_SMP
+ 
+ static void
+-__do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32 flags);
++__do_set_cpus_allowed(struct task_struct *p, struct affinity_context *ctx);
+ 
+ static int __set_cpus_allowed_ptr(struct task_struct *p,
+-				  const struct cpumask *new_mask,
+-				  u32 flags);
++				  struct affinity_context *ctx);
+ 
+ static void migrate_disable_switch(struct rq *rq, struct task_struct *p)
+ {
++	struct affinity_context ac = {
++		.new_mask  = cpumask_of(rq->cpu),
++		.flags     = SCA_MIGRATE_DISABLE,
++	};
++
+ 	if (likely(!p->migration_disabled))
+ 		return;
+ 
+@@ -2206,7 +2210,7 @@ static void migrate_disable_switch(struct rq *rq, struct task_struct *p)
+ 	/*
+ 	 * Violates locking rules! see comment in __do_set_cpus_allowed().
+ 	 */
+-	__do_set_cpus_allowed(p, cpumask_of(rq->cpu), SCA_MIGRATE_DISABLE);
++	__do_set_cpus_allowed(p, &ac);
+ }
+ 
+ void migrate_disable(void)
+@@ -2228,6 +2232,10 @@ EXPORT_SYMBOL_GPL(migrate_disable);
+ void migrate_enable(void)
+ {
+ 	struct task_struct *p = current;
++	struct affinity_context ac = {
++		.new_mask  = &p->cpus_mask,
++		.flags     = SCA_MIGRATE_ENABLE,
++	};
+ 
+ 	if (p->migration_disabled > 1) {
+ 		p->migration_disabled--;
+@@ -2243,7 +2251,7 @@ void migrate_enable(void)
+ 	 */
+ 	preempt_disable();
+ 	if (p->cpus_ptr != &p->cpus_mask)
+-		__set_cpus_allowed_ptr(p, &p->cpus_mask, SCA_MIGRATE_ENABLE);
++		__set_cpus_allowed_ptr(p, &ac);
+ 	/*
+ 	 * Mustn't clear migration_disabled() until cpus_ptr points back at the
+ 	 * regular cpus_mask, otherwise things that race (eg.
+@@ -2523,19 +2531,19 @@ out_unlock:
+  * sched_class::set_cpus_allowed must do the below, but is not required to
+  * actually call this function.
+  */
+-void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_mask, u32 flags)
++void set_cpus_allowed_common(struct task_struct *p, struct affinity_context *ctx)
+ {
+-	if (flags & (SCA_MIGRATE_ENABLE | SCA_MIGRATE_DISABLE)) {
+-		p->cpus_ptr = new_mask;
++	if (ctx->flags & (SCA_MIGRATE_ENABLE | SCA_MIGRATE_DISABLE)) {
++		p->cpus_ptr = ctx->new_mask;
+ 		return;
+ 	}
+ 
+-	cpumask_copy(&p->cpus_mask, new_mask);
+-	p->nr_cpus_allowed = cpumask_weight(new_mask);
++	cpumask_copy(&p->cpus_mask, ctx->new_mask);
++	p->nr_cpus_allowed = cpumask_weight(ctx->new_mask);
+ }
+ 
+ static void
+-__do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32 flags)
++__do_set_cpus_allowed(struct task_struct *p, struct affinity_context *ctx)
+ {
+ 	struct rq *rq = task_rq(p);
+ 	bool queued, running;
+@@ -2552,7 +2560,7 @@ __do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32
+ 	 *
+ 	 * XXX do further audits, this smells like something putrid.
+ 	 */
+-	if (flags & SCA_MIGRATE_DISABLE)
++	if (ctx->flags & SCA_MIGRATE_DISABLE)
+ 		SCHED_WARN_ON(!p->on_cpu);
+ 	else
+ 		lockdep_assert_held(&p->pi_lock);
+@@ -2571,7 +2579,7 @@ __do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32
+ 	if (running)
+ 		put_prev_task(rq, p);
+ 
+-	p->sched_class->set_cpus_allowed(p, new_mask, flags);
++	p->sched_class->set_cpus_allowed(p, ctx);
+ 
+ 	if (queued)
+ 		enqueue_task(rq, p, ENQUEUE_RESTORE | ENQUEUE_NOCLOCK);
+@@ -2581,7 +2589,12 @@ __do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32
+ 
+ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
+ {
+-	__do_set_cpus_allowed(p, new_mask, 0);
++	struct affinity_context ac = {
++		.new_mask  = new_mask,
++		.flags     = 0,
++	};
++
++	__do_set_cpus_allowed(p, &ac);
+ }
+ 
+ int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
+@@ -2834,8 +2847,7 @@ static int affine_move_task(struct rq *rq, struct task_struct *p, struct rq_flag
+  * Called with both p->pi_lock and rq->lock held; drops both before returning.
+  */
+ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
+-					 const struct cpumask *new_mask,
+-					 u32 flags,
++					 struct affinity_context *ctx,
+ 					 struct rq *rq,
+ 					 struct rq_flags *rf)
+ 	__releases(rq->lock)
+@@ -2864,7 +2876,7 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
+ 		cpu_valid_mask = cpu_online_mask;
+ 	}
+ 
+-	if (!kthread && !cpumask_subset(new_mask, cpu_allowed_mask)) {
++	if (!kthread && !cpumask_subset(ctx->new_mask, cpu_allowed_mask)) {
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+@@ -2873,18 +2885,18 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
+ 	 * Must re-check here, to close a race against __kthread_bind(),
+ 	 * sched_setaffinity() is not guaranteed to observe the flag.
+ 	 */
+-	if ((flags & SCA_CHECK) && (p->flags & PF_NO_SETAFFINITY)) {
++	if ((ctx->flags & SCA_CHECK) && (p->flags & PF_NO_SETAFFINITY)) {
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	if (!(flags & SCA_MIGRATE_ENABLE)) {
+-		if (cpumask_equal(&p->cpus_mask, new_mask))
++	if (!(ctx->flags & SCA_MIGRATE_ENABLE)) {
++		if (cpumask_equal(&p->cpus_mask, ctx->new_mask))
+ 			goto out;
+ 
+ 		if (WARN_ON_ONCE(p == current &&
+ 				 is_migration_disabled(p) &&
+-				 !cpumask_test_cpu(task_cpu(p), new_mask))) {
++				 !cpumask_test_cpu(task_cpu(p), ctx->new_mask))) {
+ 			ret = -EBUSY;
+ 			goto out;
+ 		}
+@@ -2895,18 +2907,18 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
+ 	 * for groups of tasks (ie. cpuset), so that load balancing is not
+ 	 * immediately required to distribute the tasks within their new mask.
+ 	 */
+-	dest_cpu = cpumask_any_and_distribute(cpu_valid_mask, new_mask);
++	dest_cpu = cpumask_any_and_distribute(cpu_valid_mask, ctx->new_mask);
+ 	if (dest_cpu >= nr_cpu_ids) {
+ 		ret = -EINVAL;
+ 		goto out;
+ 	}
+ 
+-	__do_set_cpus_allowed(p, new_mask, flags);
++	__do_set_cpus_allowed(p, ctx);
+ 
+-	if (flags & SCA_USER)
++	if (ctx->flags & SCA_USER)
+ 		user_mask = clear_user_cpus_ptr(p);
+ 
+-	ret = affine_move_task(rq, p, rf, dest_cpu, flags);
++	ret = affine_move_task(rq, p, rf, dest_cpu, ctx->flags);
+ 
+ 	kfree(user_mask);
+ 
+@@ -2928,18 +2940,23 @@ out:
+  * call is not atomic; no spinlocks may be held.
+  */
+ static int __set_cpus_allowed_ptr(struct task_struct *p,
+-				  const struct cpumask *new_mask, u32 flags)
++				  struct affinity_context *ctx)
+ {
+ 	struct rq_flags rf;
+ 	struct rq *rq;
+ 
+ 	rq = task_rq_lock(p, &rf);
+-	return __set_cpus_allowed_ptr_locked(p, new_mask, flags, rq, &rf);
++	return __set_cpus_allowed_ptr_locked(p, ctx, rq, &rf);
+ }
+ 
+ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
+ {
+-	return __set_cpus_allowed_ptr(p, new_mask, 0);
++	struct affinity_context ac = {
++		.new_mask  = new_mask,
++		.flags     = 0,
++	};
++
++	return __set_cpus_allowed_ptr(p, &ac);
+ }
+ EXPORT_SYMBOL_GPL(set_cpus_allowed_ptr);
+ 
+@@ -2955,6 +2972,7 @@ static int restrict_cpus_allowed_ptr(struct task_struct *p,
+ 				     const struct cpumask *subset_mask)
+ {
+ 	struct cpumask *user_mask = NULL;
++	struct affinity_context ac;
+ 	struct rq_flags rf;
+ 	struct rq *rq;
+ 	int err;
+@@ -2991,7 +3009,11 @@ static int restrict_cpus_allowed_ptr(struct task_struct *p,
+ 		p->user_cpus_ptr = user_mask;
+ 	}
+ 
+-	return __set_cpus_allowed_ptr_locked(p, new_mask, 0, rq, &rf);
++	ac = (struct affinity_context){
++		.new_mask = new_mask,
++	};
++
++	return __set_cpus_allowed_ptr_locked(p, &ac, rq, &rf);
+ 
+ err_unlock:
+ 	task_rq_unlock(rq, p, &rf);
+@@ -3045,7 +3067,7 @@ out_free_mask:
+ }
+ 
+ static int
+-__sched_setaffinity(struct task_struct *p, const struct cpumask *mask);
++__sched_setaffinity(struct task_struct *p, struct affinity_context *ctx);
+ 
+ /*
+  * Restore the affinity of a task @p which was previously restricted by a
+@@ -3058,6 +3080,9 @@ __sched_setaffinity(struct task_struct *p, const struct cpumask *mask);
+ void relax_compatible_cpus_allowed_ptr(struct task_struct *p)
+ {
+ 	struct cpumask *user_mask = p->user_cpus_ptr;
++	struct affinity_context ac = {
++		.new_mask  = user_mask,
++	};
+ 	unsigned long flags;
+ 
+ 	/*
+@@ -3065,7 +3090,7 @@ void relax_compatible_cpus_allowed_ptr(struct task_struct *p)
+ 	 * we free the mask explicitly to avoid it being inherited across
+ 	 * a subsequent fork().
+ 	 */
+-	if (!user_mask || !__sched_setaffinity(p, user_mask))
++	if (!user_mask || !__sched_setaffinity(p, &ac))
+ 		return;
+ 
+ 	raw_spin_lock_irqsave(&p->pi_lock, flags);
+@@ -3550,10 +3575,9 @@ void sched_set_stop_task(int cpu, struct task_struct *stop)
+ #else /* CONFIG_SMP */
+ 
+ static inline int __set_cpus_allowed_ptr(struct task_struct *p,
+-					 const struct cpumask *new_mask,
+-					 u32 flags)
++					 struct affinity_context *ctx)
+ {
+-	return set_cpus_allowed_ptr(p, new_mask);
++	return set_cpus_allowed_ptr(p, ctx->new_mask);
+ }
+ 
+ static inline void migrate_disable_switch(struct rq *rq, struct task_struct *p) { }
+@@ -8090,7 +8114,7 @@ int dl_task_check_affinity(struct task_struct *p, const struct cpumask *mask)
+ #endif
+ 
+ static int
+-__sched_setaffinity(struct task_struct *p, const struct cpumask *mask)
++__sched_setaffinity(struct task_struct *p, struct affinity_context *ctx)
+ {
+ 	int retval;
+ 	cpumask_var_t cpus_allowed, new_mask;
+@@ -8104,13 +8128,16 @@ __sched_setaffinity(struct task_struct *p, const struct cpumask *mask)
+ 	}
+ 
+ 	cpuset_cpus_allowed(p, cpus_allowed);
+-	cpumask_and(new_mask, mask, cpus_allowed);
++	cpumask_and(new_mask, ctx->new_mask, cpus_allowed);
++
++	ctx->new_mask = new_mask;
++	ctx->flags |= SCA_CHECK;
+ 
+ 	retval = dl_task_check_affinity(p, new_mask);
+ 	if (retval)
+ 		goto out_free_new_mask;
+ again:
+-	retval = __set_cpus_allowed_ptr(p, new_mask, SCA_CHECK | SCA_USER);
++	retval = __set_cpus_allowed_ptr(p, ctx);
+ 	if (retval)
+ 		goto out_free_new_mask;
+ 
+@@ -8133,6 +8160,9 @@ out_free_cpus_allowed:
+ 
+ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
+ {
++	struct affinity_context ac = {
++		.new_mask = in_mask,
++	};
+ 	struct task_struct *p;
+ 	int retval;
+ 
+@@ -8167,7 +8197,7 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
+ 	if (retval)
+ 		goto out_put_task;
+ 
+-	retval = __sched_setaffinity(p, in_mask);
++	retval = __sched_setaffinity(p, &ac);
+ out_put_task:
+ 	put_task_struct(p);
+ 	return retval;
+@@ -8948,6 +8978,12 @@ void show_state_filter(unsigned int state_filter)
+  */
+ void __init init_idle(struct task_struct *idle, int cpu)
+ {
++#ifdef CONFIG_SMP
++	struct affinity_context ac = (struct affinity_context) {
++		.new_mask  = cpumask_of(cpu),
++		.flags     = 0,
++	};
++#endif
+ 	struct rq *rq = cpu_rq(cpu);
+ 	unsigned long flags;
+ 
+@@ -8972,7 +9008,7 @@ void __init init_idle(struct task_struct *idle, int cpu)
+ 	 *
+ 	 * And since this is boot we can forgo the serialization.
+ 	 */
+-	set_cpus_allowed_common(idle, cpumask_of(cpu), 0);
++	set_cpus_allowed_common(idle, &ac);
+ #endif
+ 	/*
+ 	 * We're having a chicken and egg problem, even though we are
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 9ae8f41e3372f..0d97d54276cc8 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -2485,8 +2485,7 @@ static void task_woken_dl(struct rq *rq, struct task_struct *p)
+ }
+ 
+ static void set_cpus_allowed_dl(struct task_struct *p,
+-				const struct cpumask *new_mask,
+-				u32 flags)
++				struct affinity_context *ctx)
+ {
+ 	struct root_domain *src_rd;
+ 	struct rq *rq;
+@@ -2501,7 +2500,7 @@ static void set_cpus_allowed_dl(struct task_struct *p,
+ 	 * update. We already made space for us in the destination
+ 	 * domain (see cpuset_can_attach()).
+ 	 */
+-	if (!cpumask_intersects(src_rd->span, new_mask)) {
++	if (!cpumask_intersects(src_rd->span, ctx->new_mask)) {
+ 		struct dl_bw *src_dl_b;
+ 
+ 		src_dl_b = dl_bw_of(cpu_of(rq));
+@@ -2515,7 +2514,7 @@ static void set_cpus_allowed_dl(struct task_struct *p,
+ 		raw_spin_unlock(&src_dl_b->lock);
+ 	}
+ 
+-	set_cpus_allowed_common(p, new_mask, flags);
++	set_cpus_allowed_common(p, ctx);
+ }
+ 
+ /* Assumes rq->lock is held */
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 5f18460f62f0f..6c91fb78e04e1 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2145,6 +2145,11 @@ extern const u32		sched_prio_to_wmult[40];
+ 
+ #define RETRY_TASK		((void *)-1UL)
+ 
++struct affinity_context {
++	const struct cpumask *new_mask;
++	unsigned int flags;
++};
++
+ struct sched_class {
+ 
+ #ifdef CONFIG_UCLAMP_TASK
+@@ -2173,9 +2178,7 @@ struct sched_class {
+ 
+ 	void (*task_woken)(struct rq *this_rq, struct task_struct *task);
+ 
+-	void (*set_cpus_allowed)(struct task_struct *p,
+-				 const struct cpumask *newmask,
+-				 u32 flags);
++	void (*set_cpus_allowed)(struct task_struct *p, struct affinity_context *ctx);
+ 
+ 	void (*rq_online)(struct rq *rq);
+ 	void (*rq_offline)(struct rq *rq);
+@@ -2286,7 +2289,7 @@ extern void update_group_capacity(struct sched_domain *sd, int cpu);
+ 
+ extern void trigger_load_balance(struct rq *rq);
+ 
+-extern void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_mask, u32 flags);
++extern void set_cpus_allowed_common(struct task_struct *p, struct affinity_context *ctx);
+ 
+ static inline struct task_struct *get_push_task(struct rq *rq)
+ {
+-- 
+cgit 
+
+
+From 8f9ea86fdf99b81458cc21fc1c591fcd4a0fa1f4 Mon Sep 17 00:00:00 2001
+From: Waiman Long <longman@redhat.com>
+Date: Thu, 22 Sep 2022 14:00:38 -0400
+Subject: sched: Always preserve the user requested cpumask
+
+Unconditionally preserve the user requested cpumask on
+sched_setaffinity() calls. This allows using it outside of the fairly
+narrow restrict_cpus_allowed_ptr() use-case and fix some cpuset issues
+that currently suffer destruction of cpumasks.
+
+Signed-off-by: Waiman Long <longman@redhat.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220922180041.1768141-3-longman@redhat.com
+---
+ kernel/sched/core.c  | 119 +++++++++++++++++++++++++++------------------------
+ kernel/sched/sched.h |   8 ++++
+ 2 files changed, 72 insertions(+), 55 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 5ad4e2e0e499b..67fb0e486cf57 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2540,6 +2540,12 @@ void set_cpus_allowed_common(struct task_struct *p, struct affinity_context *ctx
+ 
+ 	cpumask_copy(&p->cpus_mask, ctx->new_mask);
+ 	p->nr_cpus_allowed = cpumask_weight(ctx->new_mask);
++
++	/*
++	 * Swap in a new user_cpus_ptr if SCA_USER flag set
++	 */
++	if (ctx->flags & SCA_USER)
++		swap(p->user_cpus_ptr, ctx->user_mask);
+ }
+ 
+ static void
+@@ -2600,6 +2606,8 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
+ int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
+ 		      int node)
+ {
++	unsigned long flags;
++
+ 	if (!src->user_cpus_ptr)
+ 		return 0;
+ 
+@@ -2607,7 +2615,10 @@ int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
+ 	if (!dst->user_cpus_ptr)
+ 		return -ENOMEM;
+ 
++	/* Use pi_lock to protect content of user_cpus_ptr */
++	raw_spin_lock_irqsave(&src->pi_lock, flags);
+ 	cpumask_copy(dst->user_cpus_ptr, src->user_cpus_ptr);
++	raw_spin_unlock_irqrestore(&src->pi_lock, flags);
+ 	return 0;
+ }
+ 
+@@ -2856,7 +2867,6 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
+ 	const struct cpumask *cpu_allowed_mask = task_cpu_possible_mask(p);
+ 	const struct cpumask *cpu_valid_mask = cpu_active_mask;
+ 	bool kthread = p->flags & PF_KTHREAD;
+-	struct cpumask *user_mask = NULL;
+ 	unsigned int dest_cpu;
+ 	int ret = 0;
+ 
+@@ -2915,14 +2925,7 @@ static int __set_cpus_allowed_ptr_locked(struct task_struct *p,
+ 
+ 	__do_set_cpus_allowed(p, ctx);
+ 
+-	if (ctx->flags & SCA_USER)
+-		user_mask = clear_user_cpus_ptr(p);
+-
+-	ret = affine_move_task(rq, p, rf, dest_cpu, ctx->flags);
+-
+-	kfree(user_mask);
+-
+-	return ret;
++	return affine_move_task(rq, p, rf, dest_cpu, ctx->flags);
+ 
+ out:
+ 	task_rq_unlock(rq, p, rf);
+@@ -2962,8 +2965,10 @@ EXPORT_SYMBOL_GPL(set_cpus_allowed_ptr);
+ 
+ /*
+  * Change a given task's CPU affinity to the intersection of its current
+- * affinity mask and @subset_mask, writing the resulting mask to @new_mask
+- * and pointing @p->user_cpus_ptr to a copy of the old mask.
++ * affinity mask and @subset_mask, writing the resulting mask to @new_mask.
++ * If user_cpus_ptr is defined, use it as the basis for restricting CPU
++ * affinity or use cpu_online_mask instead.
++ *
+  * If the resulting mask is empty, leave the affinity unchanged and return
+  * -EINVAL.
+  */
+@@ -2971,18 +2976,14 @@ static int restrict_cpus_allowed_ptr(struct task_struct *p,
+ 				     struct cpumask *new_mask,
+ 				     const struct cpumask *subset_mask)
+ {
+-	struct cpumask *user_mask = NULL;
+-	struct affinity_context ac;
++	struct affinity_context ac = {
++		.new_mask  = new_mask,
++		.flags     = 0,
++	};
+ 	struct rq_flags rf;
+ 	struct rq *rq;
+ 	int err;
+ 
+-	if (!p->user_cpus_ptr) {
+-		user_mask = kmalloc(cpumask_size(), GFP_KERNEL);
+-		if (!user_mask)
+-			return -ENOMEM;
+-	}
+-
+ 	rq = task_rq_lock(p, &rf);
+ 
+ 	/*
+@@ -2995,29 +2996,15 @@ static int restrict_cpus_allowed_ptr(struct task_struct *p,
+ 		goto err_unlock;
+ 	}
+ 
+-	if (!cpumask_and(new_mask, &p->cpus_mask, subset_mask)) {
++	if (!cpumask_and(new_mask, task_user_cpus(p), subset_mask)) {
+ 		err = -EINVAL;
+ 		goto err_unlock;
+ 	}
+ 
+-	/*
+-	 * We're about to butcher the task affinity, so keep track of what
+-	 * the user asked for in case we're able to restore it later on.
+-	 */
+-	if (user_mask) {
+-		cpumask_copy(user_mask, p->cpus_ptr);
+-		p->user_cpus_ptr = user_mask;
+-	}
+-
+-	ac = (struct affinity_context){
+-		.new_mask = new_mask,
+-	};
+-
+ 	return __set_cpus_allowed_ptr_locked(p, &ac, rq, &rf);
+ 
+ err_unlock:
+ 	task_rq_unlock(rq, p, &rf);
+-	kfree(user_mask);
+ 	return err;
+ }
+ 
+@@ -3071,33 +3058,25 @@ __sched_setaffinity(struct task_struct *p, struct affinity_context *ctx);
+ 
+ /*
+  * Restore the affinity of a task @p which was previously restricted by a
+- * call to force_compatible_cpus_allowed_ptr(). This will clear (and free)
+- * @p->user_cpus_ptr.
++ * call to force_compatible_cpus_allowed_ptr().
+  *
+  * It is the caller's responsibility to serialise this with any calls to
+  * force_compatible_cpus_allowed_ptr(@p).
+  */
+ void relax_compatible_cpus_allowed_ptr(struct task_struct *p)
+ {
+-	struct cpumask *user_mask = p->user_cpus_ptr;
+ 	struct affinity_context ac = {
+-		.new_mask  = user_mask,
++		.new_mask  = task_user_cpus(p),
++		.flags     = 0,
+ 	};
+-	unsigned long flags;
++	int ret;
+ 
+ 	/*
+-	 * Try to restore the old affinity mask. If this fails, then
+-	 * we free the mask explicitly to avoid it being inherited across
+-	 * a subsequent fork().
++	 * Try to restore the old affinity mask with __sched_setaffinity().
++	 * Cpuset masking will be done there too.
+ 	 */
+-	if (!user_mask || !__sched_setaffinity(p, &ac))
+-		return;
+-
+-	raw_spin_lock_irqsave(&p->pi_lock, flags);
+-	user_mask = clear_user_cpus_ptr(p);
+-	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
+-
+-	kfree(user_mask);
++	ret = __sched_setaffinity(p, &ac);
++	WARN_ON_ONCE(ret);
+ }
+ 
+ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
+@@ -8136,7 +8115,7 @@ __sched_setaffinity(struct task_struct *p, struct affinity_context *ctx)
+ 	retval = dl_task_check_affinity(p, new_mask);
+ 	if (retval)
+ 		goto out_free_new_mask;
+-again:
++
+ 	retval = __set_cpus_allowed_ptr(p, ctx);
+ 	if (retval)
+ 		goto out_free_new_mask;
+@@ -8148,7 +8127,24 @@ again:
+ 		 * Just reset the cpumask to the cpuset's cpus_allowed.
+ 		 */
+ 		cpumask_copy(new_mask, cpus_allowed);
+-		goto again;
++
++		/*
++		 * If SCA_USER is set, a 2nd call to __set_cpus_allowed_ptr()
++		 * will restore the previous user_cpus_ptr value.
++		 *
++		 * In the unlikely event a previous user_cpus_ptr exists,
++		 * we need to further restrict the mask to what is allowed
++		 * by that old user_cpus_ptr.
++		 */
++		if (unlikely((ctx->flags & SCA_USER) && ctx->user_mask)) {
++			bool empty = !cpumask_and(new_mask, new_mask,
++						  ctx->user_mask);
++
++			if (WARN_ON_ONCE(empty))
++				cpumask_copy(new_mask, cpus_allowed);
++		}
++		__set_cpus_allowed_ptr(p, ctx);
++		retval = -EINVAL;
+ 	}
+ 
+ out_free_new_mask:
+@@ -8160,9 +8156,8 @@ out_free_cpus_allowed:
+ 
+ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
+ {
+-	struct affinity_context ac = {
+-		.new_mask = in_mask,
+-	};
++	struct affinity_context ac;
++	struct cpumask *user_mask;
+ 	struct task_struct *p;
+ 	int retval;
+ 
+@@ -8197,7 +8192,21 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
+ 	if (retval)
+ 		goto out_put_task;
+ 
++	user_mask = kmalloc(cpumask_size(), GFP_KERNEL);
++	if (!user_mask) {
++		retval = -ENOMEM;
++		goto out_put_task;
++	}
++	cpumask_copy(user_mask, in_mask);
++	ac = (struct affinity_context){
++		.new_mask  = in_mask,
++		.user_mask = user_mask,
++		.flags     = SCA_USER,
++	};
++
+ 	retval = __sched_setaffinity(p, &ac);
++	kfree(ac.user_mask);
++
+ out_put_task:
+ 	put_task_struct(p);
+ 	return retval;
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 6c91fb78e04e1..04f571df385f6 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1878,6 +1878,13 @@ static inline void dirty_sched_domain_sysctl(int cpu)
+ #endif
+ 
+ extern int sched_update_scaling(void);
++
++static inline const struct cpumask *task_user_cpus(struct task_struct *p)
++{
++	if (!p->user_cpus_ptr)
++		return cpu_possible_mask; /* &init_task.cpus_mask */
++	return p->user_cpus_ptr;
++}
+ #endif /* CONFIG_SMP */
+ 
+ #include "stats.h"
+@@ -2147,6 +2154,7 @@ extern const u32		sched_prio_to_wmult[40];
+ 
+ struct affinity_context {
+ 	const struct cpumask *new_mask;
++	struct cpumask *user_mask;
+ 	unsigned int flags;
+ };
+ 
+-- 
+cgit 
+
+
+From da019032819a1f09943d3af676892ec8c627668e Mon Sep 17 00:00:00 2001
+From: Waiman Long <longman@redhat.com>
+Date: Thu, 22 Sep 2022 14:00:39 -0400
+Subject: sched: Enforce user requested affinity
+
+It was found that the user requested affinity via sched_setaffinity()
+can be easily overwritten by other kernel subsystems without an easy way
+to reset it back to what the user requested. For example, any change
+to the current cpuset hierarchy may reset the cpumask of the tasks in
+the affected cpusets to the default cpuset value even if those tasks
+have pre-existing user requested affinity. That is especially easy to
+trigger under a cgroup v2 environment where writing "+cpuset" to the
+root cgroup's cgroup.subtree_control file will reset the cpus affinity
+of all the processes in the system.
+
+That is problematic in a nohz_full environment where the tasks running
+in the nohz_full CPUs usually have their cpus affinity explicitly set
+and will behave incorrectly if cpus affinity changes.
+
+Fix this problem by looking at user_cpus_ptr in __set_cpus_allowed_ptr()
+and use it to restrcit the given cpumask unless there is no overlap. In
+that case, it will fallback to the given one. The SCA_USER flag is
+reused to indicate intent to set user_cpus_ptr and so user_cpus_ptr
+masking should be skipped. In addition, masking should also be skipped
+if any of the SCA_MIGRATE_* flag is set.
+
+All callers of set_cpus_allowed_ptr() will be affected by this change.
+A scratch cpumask is added to percpu runqueues structure for doing
+additional masking when user_cpus_ptr is set.
+
+Signed-off-by: Waiman Long <longman@redhat.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220922180041.1768141-4-longman@redhat.com
+---
+ kernel/sched/core.c  | 10 ++++++++++
+ kernel/sched/sched.h |  3 +++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 67fb0e486cf57..283bdbd8c3c1c 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2949,6 +2949,15 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
+ 	struct rq *rq;
+ 
+ 	rq = task_rq_lock(p, &rf);
++	/*
++	 * Masking should be skipped if SCA_USER or any of the SCA_MIGRATE_*
++	 * flags are set.
++	 */
++	if (p->user_cpus_ptr &&
++	    !(ctx->flags & (SCA_USER | SCA_MIGRATE_ENABLE | SCA_MIGRATE_DISABLE)) &&
++	    cpumask_and(rq->scratch_mask, ctx->new_mask, p->user_cpus_ptr))
++		ctx->new_mask = rq->scratch_mask;
++
+ 	return __set_cpus_allowed_ptr_locked(p, ctx, rq, &rf);
+ }
+ 
+@@ -9804,6 +9813,7 @@ void __init sched_init(void)
+ 
+ 		rq->core_cookie = 0UL;
+ #endif
++		zalloc_cpumask_var_node(&rq->scratch_mask, GFP_KERNEL, cpu_to_node(i));
+ 	}
+ 
+ 	set_load_weight(&init_task, false);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 04f571df385f6..771f8ddb70533 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1151,6 +1151,9 @@ struct rq {
+ 	unsigned int		core_forceidle_occupation;
+ 	u64			core_forceidle_start;
+ #endif
++
++	/* Scratch cpumask to be temporarily used under rq_lock */
++	cpumask_var_t		scratch_mask;
+ };
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+-- 
+cgit 
+
+
+From 851a723e45d1c4c8f6f7b0d2cfbc5f53690bb4e9 Mon Sep 17 00:00:00 2001
+From: Waiman Long <longman@redhat.com>
+Date: Thu, 22 Sep 2022 14:00:41 -0400
+Subject: sched: Always clear user_cpus_ptr in do_set_cpus_allowed()
+
+The do_set_cpus_allowed() function is used by either kthread_bind() or
+select_fallback_rq(). In both cases the user affinity (if any) should be
+destroyed too.
+
+Suggested-by: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Waiman Long <longman@redhat.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220922180041.1768141-6-longman@redhat.com
+---
+ kernel/sched/core.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 283bdbd8c3c1c..87c9cdf37a269 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2593,14 +2593,20 @@ __do_set_cpus_allowed(struct task_struct *p, struct affinity_context *ctx)
+ 		set_next_task(rq, p);
+ }
+ 
++/*
++ * Used for kthread_bind() and select_fallback_rq(), in both cases the user
++ * affinity (if any) should be destroyed too.
++ */
+ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
+ {
+ 	struct affinity_context ac = {
+ 		.new_mask  = new_mask,
+-		.flags     = 0,
++		.user_mask = NULL,
++		.flags     = SCA_USER,	/* clear the user requested mask */
+ 	};
+ 
+ 	__do_set_cpus_allowed(p, &ac);
++	kfree(ac.user_mask);
+ }
+ 
+ int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
+-- 
+cgit 
