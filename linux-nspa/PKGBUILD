@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=15
+pkgrel=16
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -116,9 +116,8 @@ source=(
   "0023-locking-semaphore-Use_wake_q_to_wake_up_processes_outside_lock_cs.patch"
   "0026-sbitmap-fix_lockup_while_swapping.patch"
   "0027-hid-wacom-Silence_log_spam.patch"
-  "0028-sched-fair-feec-scale_rt_capacity-improvements.patch"
+  "0028-TIP-sched-core-affinity_uclamp_etc_oct31.patch"
   "0030-platform-x86-AMD-pmf-CnQf.patch"
-  "0031-sched-core-affinity_patchwork.patch"
   "0032-Implement-AMD-Pstate-EPP-Driver.patch"
   "0033-ALSA-dmaengine-increment_buffer_pointer_atomically.patch"
   "0034-HID-multitouch-Add_memory_barriers.patch"
@@ -129,6 +128,8 @@ source=(
   "0040-sched-Fix_race_in_task_call_func.patch"
   "0041-sched-fair-Introduce-priority-load-balance-for-CFS.patch"
   "0042-v2_sched-sched_fork-optimizations.patch"
+  "0043-Kernel_tuning-CONFIG_NSPA.patch"
+  "0044-amdpgu_misc_fixes_oct21.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -474,7 +475,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
-            '860c1555f540ce9278b067f1acb588617d8c1c45faae53401f2200af07b2a6a6'
+            'c304eae7fcc3f6419b568a749057167631bab67ec263f282012a085c4ac118d4'
             '9abdc6c5f40b81c044f5549e8f29d474dc51e2765ee2b5e9a5fba9e62499dd9e'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
@@ -507,9 +508,8 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '5595da97f297de0dc832d1f12254cb5d05c555ef6e2a113e38821dea8b37acca'
             '153935699c4f15434c06582a64054660f55eaee9d5c70b277442b5156ccdfb15'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
-            'ee5649eb39573a396376fb2b2caffbf49fd230666189a005ce17228532399658'
+            '6fa1259ab23acb564c03bb62c85e93785e441259f7bd718003eb25babeee4676'
             'ea7d35280b3a02acbc79a92fa5ddce678d5fdfaecb65ee35ef13a076a0a8eb55'
-            'fb31aa7f60f970d5161cdd06386a96c9fda0504bde27fd5b61fa66c74e84fbb5'
             'c0db4d0fdec2f74b05bfd59a4517c0738ab15afc3dd4c66eaa8e6999c284dddf'
             '86030c72531b045bc9fc27329334f7c6a506fb789d0b81e08ff192b43491ae9b'
             'ccc57033c40817060be1399e4be9e1db585c695967a74c0f3b94bc342c242bea'
@@ -519,5 +519,7 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '65f27712e555a70ec358bbb75db50ef922ab6000b62c752f6388e5d5963ae370'
             '6dfe8e2900e7528f3d546231b09dd40813202056b293183fd62da0d2c2b44d41'
             '5bd4a1e9c0a7f86531b98f0d9252e89da6cb375f0fde2ece9cf5fb82568c3a03'
-            '6763b3ce2e74b474445f455fd45cf82554e61d53a56ec50a73592710031b9383')
+            '6763b3ce2e74b474445f455fd45cf82554e61d53a56ec50a73592710031b9383'
+            'c97dbb598c77553f6312bd3572cc055e44f271ca399173732ead77b88e484c90'
+            '7deab169ff35045afdbe13ff225e6f4dfebbfa1c84d97da6697c7931ecc17ed8')
 
