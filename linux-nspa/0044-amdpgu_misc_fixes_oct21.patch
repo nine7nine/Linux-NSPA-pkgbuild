@@ -1065,3 +1065,55 @@ index 794062ab57fca4..9e6c23266a1a0f 100644
  		if (end != cursor.start)
  			return false;
 
+From patchwork Wed Nov  2 14:58:11 2022
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Subject: drm/amdgpu: workaround for TLB seq race
+From: "=?UTF-8?q?Christian=20K=C3=B6nig?=" <ckoenig.leichtzumerken@gmail.com>
+X-Patchwork-Id: 509532
+Message-Id: <20221102145811.17968-1-christian.koenig@amd.com>
+To: amd-gfx@lists.freedesktop.org
+Cc: =?UTF-8?q?Christian=20K=C3=B6nig?= <christian.koenig@amd.com>
+Date: Wed,  2 Nov 2022 15:58:11 +0100
+
+It can happen that we query the sequence value before the callback
+had a chance to run.
+
+Work around that by grabbing the fence lock and releasing it again.
+Should be replaced by hw handling soon.
+
+Signed-off-by: Christian König <christian.koenig@amd.com>
+Acked-by: Alex Deucher <alexander.deucher@amd.com>
+Fixes: 5255e146c99a6 ("drm/amdgpu: rework TLB flushing")
+Acked-by: Philip Yang <Philip.Yang@amd.com>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h b/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h
+index 9ecb7f663e19..e51a46c9582b 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h
+@@ -485,6 +485,21 @@ void amdgpu_debugfs_vm_bo_info(struct amdgpu_vm *vm, struct seq_file *m);
+  */
+ static inline uint64_t amdgpu_vm_tlb_seq(struct amdgpu_vm *vm)
+ {
++	unsigned long flags;
++	spinlock_t *lock;
++
++	/*
++	 * Work around to stop racing between the fence signaling and handling
++	 * the cb. The lock is static after initially setting it up, just make
++	 * sure that the dma_fence structure isn't freed up.
++	 */
++	rcu_read_lock();
++	lock = vm->last_tlb_flush->lock;
++	rcu_read_unlock();
++
++	spin_lock_irqsave(lock, flags);
++	spin_unlock_irqrestore(lock, flags);
++
+ 	return atomic64_read(&vm->tlb_seq);
+ }
+ 
