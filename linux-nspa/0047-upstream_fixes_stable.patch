@@ -1347,3 +1347,864 @@ index 76dc9da88f6c21..3d31c0517a1297 100644
  EXPORT_SYMBOL(rtw_core_init);
  
 
+From f0861f49bd946ff94fce4f82509c45e167f63690 Mon Sep 17 00:00:00 2001
+From: Borys Popławski <borysp@invisiblethingslab.com>
+Date: Wed, 5 Oct 2022 00:59:03 +0200
+Subject: x86/sgx: Add overflow check in sgx_validate_offset_length()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+sgx_validate_offset_length() function verifies "offset" and "length"
+arguments provided by userspace, but was missing an overflow check on
+their addition. Add it.
+
+Fixes: c6d26d370767 ("x86/sgx: Add SGX_IOC_ENCLAVE_ADD_PAGES")
+Signed-off-by: Borys Popławski <borysp@invisiblethingslab.com>
+Signed-off-by: Borislav Petkov <bp@suse.de>
+Reviewed-by: Jarkko Sakkinen <jarkko@kernel.org>
+Cc: stable@vger.kernel.org # v5.11+
+Link: https://lore.kernel.org/r/0d91ac79-6d84-abed-5821-4dbe59fa1a38@invisiblethingslab.com
+---
+ arch/x86/kernel/cpu/sgx/ioctl.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/arch/x86/kernel/cpu/sgx/ioctl.c b/arch/x86/kernel/cpu/sgx/ioctl.c
+index ebe79d60619f2..da8b8ea6b063d 100644
+--- a/arch/x86/kernel/cpu/sgx/ioctl.c
++++ b/arch/x86/kernel/cpu/sgx/ioctl.c
+@@ -356,6 +356,9 @@ static int sgx_validate_offset_length(struct sgx_encl *encl,
+ 	if (!length || !IS_ALIGNED(length, PAGE_SIZE))
+ 		return -EINVAL;
+ 
++	if (offset + length < offset)
++		return -EINVAL;
++
+ 	if (offset + length - PAGE_SIZE >= encl->size)
+ 		return -EINVAL;
+ 
+-- 
+cgit 
+
+
+From 36b038791e1e2baea892e9276588815fd14894b4 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@techsingularity.net>
+Date: Thu, 10 Nov 2022 12:44:00 +0000
+Subject: x86/fpu: Drop fpregs lock before inheriting FPU permissions
+
+Mike Galbraith reported the following against an old fork of preempt-rt
+but the same issue also applies to the current preempt-rt tree.
+
+   BUG: sleeping function called from invalid context at kernel/locking/spinlock_rt.c:46
+   in_atomic(): 1, irqs_disabled(): 0, non_block: 0, pid: 1, name: systemd
+   preempt_count: 1, expected: 0
+   RCU nest depth: 0, expected: 0
+   Preemption disabled at:
+   fpu_clone
+   CPU: 6 PID: 1 Comm: systemd Tainted: G            E       (unreleased)
+   Call Trace:
+    <TASK>
+    dump_stack_lvl
+    ? fpu_clone
+    __might_resched
+    rt_spin_lock
+    fpu_clone
+    ? copy_thread
+    ? copy_process
+    ? shmem_alloc_inode
+    ? kmem_cache_alloc
+    ? kernel_clone
+    ? __do_sys_clone
+    ? do_syscall_64
+    ? __x64_sys_rt_sigprocmask
+    ? syscall_exit_to_user_mode
+    ? do_syscall_64
+    ? syscall_exit_to_user_mode
+    ? do_syscall_64
+    ? syscall_exit_to_user_mode
+    ? do_syscall_64
+    ? exc_page_fault
+    ? entry_SYSCALL_64_after_hwframe
+    </TASK>
+
+Mike says:
+
+  The splat comes from fpu_inherit_perms() being called under fpregs_lock(),
+  and us reaching the spin_lock_irq() therein due to fpu_state_size_dynamic()
+  returning true despite static key __fpu_state_size_dynamic having never
+  been enabled.
+
+Mike's assessment looks correct. fpregs_lock on a PREEMPT_RT kernel disables
+preemption so calling spin_lock_irq() in fpu_inherit_perms() is unsafe. This
+problem exists since commit
+
+  9e798e9aa14c ("x86/fpu: Prepare fpu_clone() for dynamically enabled features").
+
+Even though the original bug report should not have enabled the paths at
+all, the bug still exists.
+
+fpregs_lock is necessary when editing the FPU registers or a task's FP
+state but it is not necessary for fpu_inherit_perms(). The only write
+of any FP state in fpu_inherit_perms() is for the new child which is
+not running yet and cannot context switch or be borrowed by a kernel
+thread yet. Hence, fpregs_lock is not protecting anything in the new
+child until clone() completes and can be dropped earlier. The siglock
+still needs to be acquired by fpu_inherit_perms() as the read of the
+parent's permissions has to be serialised.
+
+  [ bp: Cleanup splat. ]
+
+Fixes: 9e798e9aa14c ("x86/fpu: Prepare fpu_clone() for dynamically enabled features")
+Reported-by: Mike Galbraith <efault@gmx.de>
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+Signed-off-by: Borislav Petkov <bp@suse.de>
+Reviewed-by: Thomas Gleixner <tglx@linutronix.de>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/20221110124400.zgymc2lnwqjukgfh@techsingularity.net
+---
+ arch/x86/kernel/fpu/core.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/x86/kernel/fpu/core.c b/arch/x86/kernel/fpu/core.c
+index 3b28c5b25e12c..d00db56a88682 100644
+--- a/arch/x86/kernel/fpu/core.c
++++ b/arch/x86/kernel/fpu/core.c
+@@ -605,9 +605,9 @@ int fpu_clone(struct task_struct *dst, unsigned long clone_flags, bool minimal)
+ 	if (test_thread_flag(TIF_NEED_FPU_LOAD))
+ 		fpregs_restore_userregs();
+ 	save_fpregs_to_fpstate(dst_fpu);
++	fpregs_unlock();
+ 	if (!(clone_flags & CLONE_THREAD))
+ 		fpu_inherit_perms(dst_fpu);
+-	fpregs_unlock();
+ 
+ 	/*
+ 	 * Children never inherit PASID state.
+-- 
+cgit 
+
+From 54de93cd8740d52a83728802b4270f953d1a636f Mon Sep 17 00:00:00 2001
+From: Petr Vorel <pvorel@suse.cz>
+Date: Thu, 20 Oct 2022 17:06:45 +0200
+Subject: kernel/utsname_sysctl.c: Add missing enum uts_proc value
+
+bfca3dd3d068 added new struct ctl_table uts_kern_table[], but not new
+enum uts_proc value. It broke the notification mechanism between the
+sethostname syscall and the pollers of /proc/sys/kernel/hostname.
+
+The table uts_kern_table is addressed within uts_proc_notify by the enum
+value, that's why new enum value is needed.
+
+Fixes: bfca3dd3d068 ("kernel/utsname_sysctl.c: print kernel arch")
+Reported-by: Torsten Hilbrich <torsten.hilbrich@secunet.com>
+Signed-off-by: Petr Vorel <pvorel@suse.cz>
+Link: https://lore.kernel.org/r/20221020150645.11719-1-pvorel@suse.cz
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ include/linux/utsname.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/linux/utsname.h b/include/linux/utsname.h
+index 2b1737c9b244d..bf7613ba412bf 100644
+--- a/include/linux/utsname.h
++++ b/include/linux/utsname.h
+@@ -10,6 +10,7 @@
+ #include <uapi/linux/utsname.h>
+ 
+ enum uts_proc {
++	UTS_PROC_ARCH,
+ 	UTS_PROC_OSTYPE,
+ 	UTS_PROC_OSRELEASE,
+ 	UTS_PROC_VERSION,
+-- 
+cgit 
+
+From a5b5fb0fc47ddc7d1ed6a0365197639a01bc1f3a Mon Sep 17 00:00:00 2001
+From: Mario Limonciello <mario.limonciello@amd.com>
+Date: Mon, 7 Nov 2022 20:33:23 -0600
+Subject: platform/x86/amd: pmc: Remove more CONFIG_DEBUG_FS checks
+
+commit b37fe34c8309 ("platform/x86/amd: pmc: remove CONFIG_DEBUG_FS
+checks") removed most CONFIG_DEBUG_FS checks, but there were some
+left that were reported to cause compile test failures.
+
+Remove the remaining checks, and also the unnecessary CONFIG_SUSPEND
+used in the same place.
+
+Reported-by: liyupeng@zbhlos.com
+Fixes: b37fe34c8309 ("platform/x86/amd: pmc: remove CONFIG_DEBUG_FS checks")
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216679
+Link: https://lore.kernel.org/r/20221108023323.19304-1-mario.limonciello@amd.com
+Cc: stable@vger.kernel.org
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/amd/pmc.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/drivers/platform/x86/amd/pmc.c b/drivers/platform/x86/amd/pmc.c
+index 96e790e639a21..3b44f2fff5be2 100644
+--- a/drivers/platform/x86/amd/pmc.c
++++ b/drivers/platform/x86/amd/pmc.c
+@@ -276,7 +276,6 @@ static const struct file_operations amd_pmc_stb_debugfs_fops_v2 = {
+ 	.release = amd_pmc_stb_debugfs_release_v2,
+ };
+ 
+-#if defined(CONFIG_SUSPEND) || defined(CONFIG_DEBUG_FS)
+ static int amd_pmc_setup_smu_logging(struct amd_pmc_dev *dev)
+ {
+ 	if (dev->cpu_id == AMD_CPU_ID_PCO) {
+@@ -351,7 +350,6 @@ static int get_metrics_table(struct amd_pmc_dev *pdev, struct smu_metrics *table
+ 	memcpy_fromio(table, pdev->smu_virt_addr, sizeof(struct smu_metrics));
+ 	return 0;
+ }
+-#endif /* CONFIG_SUSPEND || CONFIG_DEBUG_FS */
+ 
+ #ifdef CONFIG_SUSPEND
+ static void amd_pmc_validate_deepest(struct amd_pmc_dev *pdev)
+-- 
+cgit 
+
+
+From 6412518f5cb953cbd84b6746db9741bfc92be40a Mon Sep 17 00:00:00 2001
+From: Shyam Sundar S K <Shyam-sundar.S-k@amd.com>
+Date: Wed, 9 Nov 2022 14:03:46 +0530
+Subject: platform/x86/amd: pmc: Add new ACPI ID AMDI0009
+
+Add new a new ACPI ID AMDI0009 used by upcoming AMD platform to the pmc
+supported list of devices.
+
+Cc: stable@vger.kernel.org # 6.0
+Signed-off-by: Shyam Sundar S K <Shyam-sundar.S-k@amd.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+Link: https://lore.kernel.org/r/20221109083346.361603-1-Shyam-sundar.S-k@amd.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/amd/pmc.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/platform/x86/amd/pmc.c b/drivers/platform/x86/amd/pmc.c
+index 3b44f2fff5be2..ef4ae977b8e0d 100644
+--- a/drivers/platform/x86/amd/pmc.c
++++ b/drivers/platform/x86/amd/pmc.c
+@@ -962,6 +962,7 @@ static const struct acpi_device_id amd_pmc_acpi_ids[] = {
+ 	{"AMDI0006", 0},
+ 	{"AMDI0007", 0},
+ 	{"AMDI0008", 0},
++	{"AMDI0009", 0},
+ 	{"AMD0004", 0},
+ 	{"AMD0005", 0},
+ 	{ }
+-- 
+cgit 
+
+
+From 53e16a6e3e69425081f8352e13e9fd23bf1abfca Mon Sep 17 00:00:00 2001
+From: Lennard Gäher <gaeher@mpi-sws.org>
+Date: Tue, 8 Nov 2022 08:20:23 +0100
+Subject: platform/x86: thinkpad_acpi: Enable s2idle quirk for 21A1 machine
+ type
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Previously, the s2idle quirk was only active for the 21A0 machine type
+of the P14s Gen2a product. This also enables it for the second 21A1 type,
+thus reducing wake-up times from s2idle.
+
+Signed-off-by: Lennard Gäher <gaeher@mpi-sws.org>
+Suggested-by: Mario Limonciello <mario.limonciello@amd.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+Link: https://gitlab.freedesktop.org/drm/amd/-/issues/2181
+Link: https://lore.kernel.org/r/20221108072023.17069-1-gaeher@mpi-sws.org
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/thinkpad_acpi.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/platform/x86/thinkpad_acpi.c b/drivers/platform/x86/thinkpad_acpi.c
+index 20e5c043a8e87..8476dfef4e626 100644
+--- a/drivers/platform/x86/thinkpad_acpi.c
++++ b/drivers/platform/x86/thinkpad_acpi.c
+@@ -4497,6 +4497,14 @@ static const struct dmi_system_id fwbug_list[] __initconst = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "21A0"),
+ 		}
+ 	},
++	{
++		.ident = "P14s Gen2 AMD",
++		.driver_data = &quirk_s2idle_bug,
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "LENOVO"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "21A1"),
++		}
++	},
+ 	{}
+ };
+ 
+-- 
+cgit 
+
+
+From 2dbfb3f33350e1e868d3d7ed4c176d8777150878 Mon Sep 17 00:00:00 2001
+From: Roger Pau Monné <roger.pau@citrix.com>
+Date: Thu, 10 Nov 2022 17:31:44 +0100
+Subject: platform/x86/intel: pmc: Don't unconditionally attach Intel PMC when
+ virtualized
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The current logic in the Intel PMC driver will forcefully attach it
+when detecting any CPU on the intel_pmc_core_platform_ids array,
+even if the matching ACPI device is not present.
+
+There's no checking in pmc_core_probe() to assert that the PMC device
+is present, and hence on virtualized environments the PMC device
+probes successfully, even if the underlying registers are not present.
+Before commit 21ae43570940 ("platform/x86: intel_pmc_core: Substitute PCI
+with CPUID enumeration") the driver would check for the presence of a
+specific PCI device, and that prevented the driver from attaching when
+running virtualized.
+
+Fix by only forcefully attaching the PMC device when not running
+virtualized.  Note that virtualized platforms can still get the device
+to load if the appropriate ACPI device is present on the tables
+provided to the VM.
+
+Make an exception for the Xen initial domain, which does have full
+hardware access, and hence can attach to the PMC if present.
+
+Fixes: 21ae43570940 ("platform/x86: intel_pmc_core: Substitute PCI with CPUID enumeration")
+Signed-off-by: Roger Pau Monné <roger.pau@citrix.com>
+Acked-by: David E. Box <david.e.box@linux.intel.com>
+Reviewed-by: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+Link: https://lore.kernel.org/r/20221110163145.80374-1-roger.pau@citrix.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/intel/pmc/pltdrv.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/platform/x86/intel/pmc/pltdrv.c b/drivers/platform/x86/intel/pmc/pltdrv.c
+index 15ca8afdd973d..ddfba38c21044 100644
+--- a/drivers/platform/x86/intel/pmc/pltdrv.c
++++ b/drivers/platform/x86/intel/pmc/pltdrv.c
+@@ -18,6 +18,8 @@
+ #include <asm/cpu_device_id.h>
+ #include <asm/intel-family.h>
+ 
++#include <xen/xen.h>
++
+ static void intel_pmc_core_release(struct device *dev)
+ {
+ 	kfree(dev);
+@@ -53,6 +55,13 @@ static int __init pmc_core_platform_init(void)
+ 	if (acpi_dev_present("INT33A1", NULL, -1))
+ 		return -ENODEV;
+ 
++	/*
++	 * Skip forcefully attaching the device for VMs. Make an exception for
++	 * Xen dom0, which does have full hardware access.
++	 */
++	if (cpu_feature_enabled(X86_FEATURE_HYPERVISOR) && !xen_initial_domain())
++		return -ENODEV;
++
+ 	if (!x86_match_cpu(intel_pmc_core_platform_ids))
+ 		return -ENODEV;
+ 
+-- 
+cgit 
+
+
+From d0cdd85046b15089df71a50548617ac1025300d0 Mon Sep 17 00:00:00 2001
+From: Xiongfeng Wang <wangxiongfeng2@huawei.com>
+Date: Fri, 11 Nov 2022 18:07:52 +0800
+Subject: platform/x86: asus-wmi: add missing pci_dev_put() in
+ asus_wmi_set_xusb2pr()
+
+pci_get_device() will increase the reference count for the returned
+pci_dev. We need to use pci_dev_put() to decrease the reference count
+before asus_wmi_set_xusb2pr() returns.
+
+Signed-off-by: Xiongfeng Wang <wangxiongfeng2@huawei.com>
+Link: https://lore.kernel.org/r/20221111100752.134311-1-wangxiongfeng2@huawei.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/asus-wmi.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/platform/x86/asus-wmi.c b/drivers/platform/x86/asus-wmi.c
+index 6e8e093f96b3a..872efc1d5b36b 100644
+--- a/drivers/platform/x86/asus-wmi.c
++++ b/drivers/platform/x86/asus-wmi.c
+@@ -1738,6 +1738,8 @@ static void asus_wmi_set_xusb2pr(struct asus_wmi *asus)
+ 	pci_write_config_dword(xhci_pdev, USB_INTEL_XUSB2PR,
+ 				cpu_to_le32(ports_available));
+ 
++	pci_dev_put(xhci_pdev);
++
+ 	pr_info("set USB_INTEL_XUSB2PR old: 0x%04x, new: 0x%04x\n",
+ 			orig_ports_available, ports_available);
+ }
+-- 
+cgit 
+
+
+From 1e817b889c7d8c14e7005258e15fec62edafe03c Mon Sep 17 00:00:00 2001
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Fri, 11 Nov 2022 12:16:39 +0100
+Subject: platform/x86: acer-wmi: Enable SW_TABLET_MODE on Switch V 10
+ (SW5-017)
+
+Like the Acer Switch 10 (SW5-012) and Acer Switch 10 (S1003) models
+the Acer Switch V 10 (SW5-017) supports reporting SW_TABLET_MODE
+through acer-wmi.
+
+Add a DMI quirk for the SW5-017 setting force_caps to ACER_CAP_KBD_DOCK
+(these devices have no other acer-wmi based functionality).
+
+Cc: Rudolf Polzer <rpolzer@google.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+Link: https://lore.kernel.org/r/20221111111639.35730-1-hdegoede@redhat.com
+---
+ drivers/platform/x86/acer-wmi.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/platform/x86/acer-wmi.c b/drivers/platform/x86/acer-wmi.c
+index 18224f9a5bc07..ee67efdd54995 100644
+--- a/drivers/platform/x86/acer-wmi.c
++++ b/drivers/platform/x86/acer-wmi.c
+@@ -564,6 +564,15 @@ static const struct dmi_system_id acer_quirks[] __initconst = {
+ 		},
+ 		.driver_data = (void *)ACER_CAP_KBD_DOCK,
+ 	},
++	{
++		.callback = set_force_caps,
++		.ident = "Acer Aspire Switch V 10 SW5-017",
++		.matches = {
++			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Acer"),
++			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "SW5-017"),
++		},
++		.driver_data = (void *)ACER_CAP_KBD_DOCK,
++	},
+ 	{
+ 		.callback = set_force_caps,
+ 		.ident = "Acer One 10 (S1003)",
+-- 
+cgit 
+
+
+From d9a477f643eb3de71fbea5ae6103b800ceb8f547 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sun, 13 Nov 2022 19:59:50 +0100
+Subject: platform/surface: aggregator: Do not check for repeated unsequenced
+ packets
+
+Currently, we check any received packet whether we have already seen it
+previously, regardless of the packet type (sequenced / unsequenced). We
+do this by checking the sequence number. This assumes that sequence
+numbers are valid for both sequenced and unsequenced packets. However,
+this assumption appears to be incorrect.
+
+On some devices, the sequence number field of unsequenced packets (in
+particular HID input events on the Surface Pro 9) is always zero. As a
+result, the current retransmission check kicks in and discards all but
+the first unsequenced packet, breaking (among other things) keyboard and
+touchpad input.
+
+Note that we have, so far, only seen packets being retransmitted in
+sequenced communication. In particular, this happens when there is an
+ACK timeout, causing the EC (or us) to re-send the packet waiting for an
+ACK. Arguably, retransmission / duplication of unsequenced packets
+should not be an issue as there is no logical condition (such as an ACK
+timeout) to determine when a packet should be sent again.
+
+Therefore, remove the retransmission check for unsequenced packets
+entirely to resolve the issue.
+
+Fixes: c167b9c7e3d6 ("platform/surface: Add Surface Aggregator subsystem")
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Link: https://lore.kernel.org/r/20221113185951.224759-1-luzmaximilian@gmail.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ .../platform/surface/aggregator/ssh_packet_layer.c | 24 ++++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/platform/surface/aggregator/ssh_packet_layer.c b/drivers/platform/surface/aggregator/ssh_packet_layer.c
+index 6748fe4ac5d5f..def8d7ac541f7 100644
+--- a/drivers/platform/surface/aggregator/ssh_packet_layer.c
++++ b/drivers/platform/surface/aggregator/ssh_packet_layer.c
+@@ -1596,16 +1596,32 @@ static void ssh_ptl_timeout_reap(struct work_struct *work)
+ 		ssh_ptl_tx_wakeup_packet(ptl);
+ }
+ 
+-static bool ssh_ptl_rx_retransmit_check(struct ssh_ptl *ptl, u8 seq)
++static bool ssh_ptl_rx_retransmit_check(struct ssh_ptl *ptl, const struct ssh_frame *frame)
+ {
+ 	int i;
+ 
++	/*
++	 * Ignore unsequenced packets. On some devices (notably Surface Pro 9),
++	 * unsequenced events will always be sent with SEQ=0x00. Attempting to
++	 * detect retransmission would thus just block all events.
++	 *
++	 * While sequence numbers would also allow detection of retransmitted
++	 * packets in unsequenced communication, they have only ever been used
++	 * to cover edge-cases in sequenced transmission. In particular, the
++	 * only instance of packets being retransmitted (that we are aware of)
++	 * is due to an ACK timeout. As this does not happen in unsequenced
++	 * communication, skip the retransmission check for those packets
++	 * entirely.
++	 */
++	if (frame->type == SSH_FRAME_TYPE_DATA_NSQ)
++		return false;
++
+ 	/*
+ 	 * Check if SEQ has been seen recently (i.e. packet was
+ 	 * re-transmitted and we should ignore it).
+ 	 */
+ 	for (i = 0; i < ARRAY_SIZE(ptl->rx.blocked.seqs); i++) {
+-		if (likely(ptl->rx.blocked.seqs[i] != seq))
++		if (likely(ptl->rx.blocked.seqs[i] != frame->seq))
+ 			continue;
+ 
+ 		ptl_dbg(ptl, "ptl: ignoring repeated data packet\n");
+@@ -1613,7 +1629,7 @@ static bool ssh_ptl_rx_retransmit_check(struct ssh_ptl *ptl, u8 seq)
+ 	}
+ 
+ 	/* Update list of blocked sequence IDs. */
+-	ptl->rx.blocked.seqs[ptl->rx.blocked.offset] = seq;
++	ptl->rx.blocked.seqs[ptl->rx.blocked.offset] = frame->seq;
+ 	ptl->rx.blocked.offset = (ptl->rx.blocked.offset + 1)
+ 				  % ARRAY_SIZE(ptl->rx.blocked.seqs);
+ 
+@@ -1624,7 +1640,7 @@ static void ssh_ptl_rx_dataframe(struct ssh_ptl *ptl,
+ 				 const struct ssh_frame *frame,
+ 				 const struct ssam_span *payload)
+ {
+-	if (ssh_ptl_rx_retransmit_check(ptl, frame->seq))
++	if (ssh_ptl_rx_retransmit_check(ptl, frame))
+ 		return;
+ 
+ 	ptl->ops.data_received(ptl, payload);
+-- 
+cgit 
+
+
+From d076f30957b1d026e9f6340691624926db0d369d Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sun, 13 Nov 2022 19:59:51 +0100
+Subject: platform/surface: aggregator_registry: Add support for Surface Pro 9
+
+Add device nodes to enable support for battery and charger status, the
+ACPI platform profile, as well as internal and type-cover HID devices
+(including sensors, touchpad, keyboard, and other miscellaneous devices)
+on the Surface Pro 9.
+
+This does not include support for a tablet-mode switch yet, as that is
+now handled via the POS subsystem (unlike the Surface Pro 8, where it is
+handled via the KIP subsystem) and therefore needs further changes.
+
+While we're at it, also add the missing comment for the Surface Pro 8.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Link: https://lore.kernel.org/r/20221113185951.224759-2-luzmaximilian@gmail.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ .../platform/surface/surface_aggregator_registry.c  | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/drivers/platform/surface/surface_aggregator_registry.c b/drivers/platform/surface/surface_aggregator_registry.c
+index 585911020cea0..db82c2a7c5676 100644
+--- a/drivers/platform/surface/surface_aggregator_registry.c
++++ b/drivers/platform/surface/surface_aggregator_registry.c
+@@ -268,6 +268,7 @@ static const struct software_node *ssam_node_group_sp7[] = {
+ 	NULL,
+ };
+ 
++/* Devices for Surface Pro 8 */
+ static const struct software_node *ssam_node_group_sp8[] = {
+ 	&ssam_node_root,
+ 	&ssam_node_hub_kip,
+@@ -284,6 +285,23 @@ static const struct software_node *ssam_node_group_sp8[] = {
+ 	NULL,
+ };
+ 
++/* Devices for Surface Pro 9 */
++static const struct software_node *ssam_node_group_sp9[] = {
++	&ssam_node_root,
++	&ssam_node_hub_kip,
++	&ssam_node_bat_ac,
++	&ssam_node_bat_main,
++	&ssam_node_tmp_pprof,
++	/* TODO: Tablet mode switch (via POS subsystem) */
++	&ssam_node_hid_kip_keyboard,
++	&ssam_node_hid_kip_penstash,
++	&ssam_node_hid_kip_touchpad,
++	&ssam_node_hid_kip_fwupd,
++	&ssam_node_hid_sam_sensors,
++	&ssam_node_hid_sam_ucm_ucsi,
++	NULL,
++};
++
+ 
+ /* -- SSAM platform/meta-hub driver. ---------------------------------------- */
+ 
+@@ -303,6 +321,9 @@ static const struct acpi_device_id ssam_platform_hub_match[] = {
+ 	/* Surface Pro 8 */
+ 	{ "MSHW0263", (unsigned long)ssam_node_group_sp8 },
+ 
++	/* Surface Pro 9 */
++	{ "MSHW0343", (unsigned long)ssam_node_group_sp9 },
++
+ 	/* Surface Book 2 */
+ 	{ "MSHW0107", (unsigned long)ssam_node_group_gen5 },
+ 
+-- 
+cgit 
+
+
+From 4a567d164d0e0c57e7b694b988db86361f130cb7 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Wed, 16 Nov 2022 00:14:40 +0100
+Subject: platform/surface: aggregator_registry: Add support for Surface Laptop
+ 5
+
+Add device nodes to enable support for battery and charger status, the
+ACPI platform profile, as well as internal HID devices (including
+touchpad and keyboard) on the Surface Laptop 5.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Link: https://lore.kernel.org/r/20221115231440.1338142-1-luzmaximilian@gmail.com
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/surface/surface_aggregator_registry.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/drivers/platform/surface/surface_aggregator_registry.c b/drivers/platform/surface/surface_aggregator_registry.c
+index db82c2a7c5676..023f126121d7d 100644
+--- a/drivers/platform/surface/surface_aggregator_registry.c
++++ b/drivers/platform/surface/surface_aggregator_registry.c
+@@ -234,6 +234,19 @@ static const struct software_node *ssam_node_group_sl3[] = {
+ 	NULL,
+ };
+ 
++/* Devices for Surface Laptop 5. */
++static const struct software_node *ssam_node_group_sl5[] = {
++	&ssam_node_root,
++	&ssam_node_bat_ac,
++	&ssam_node_bat_main,
++	&ssam_node_tmp_pprof,
++	&ssam_node_hid_main_keyboard,
++	&ssam_node_hid_main_touchpad,
++	&ssam_node_hid_main_iid5,
++	&ssam_node_hid_sam_ucm_ucsi,
++	NULL,
++};
++
+ /* Devices for Surface Laptop Studio. */
+ static const struct software_node *ssam_node_group_sls[] = {
+ 	&ssam_node_root,
+@@ -345,6 +358,9 @@ static const struct acpi_device_id ssam_platform_hub_match[] = {
+ 	/* Surface Laptop 4 (13", Intel) */
+ 	{ "MSHW0250", (unsigned long)ssam_node_group_sl3 },
+ 
++	/* Surface Laptop 5 */
++	{ "MSHW0350", (unsigned long)ssam_node_group_sl5 },
++
+ 	/* Surface Laptop Go 1 */
+ 	{ "MSHW0118", (unsigned long)ssam_node_group_slg1 },
+ 
+-- 
+cgit 
+
+
+From 8b9b6a044b408283b086702b1d9e3cf4ba45b426 Mon Sep 17 00:00:00 2001
+From: Kai-Heng Feng <kai.heng.feng@canonical.com>
+Date: Mon, 14 Nov 2022 15:38:41 +0800
+Subject: platform/x86: hp-wmi: Ignore Smart Experience App event
+
+Sometimes hp-wmi driver complains on system resume:
+[ 483.116451] hp_wmi: Unknown event_id - 33 - 0x0
+
+According to HP it's a feature called "HP Smart Experience App" and it's
+safe to be ignored.
+
+Signed-off-by: Kai-Heng Feng <kai.heng.feng@canonical.com>
+Link: https://lore.kernel.org/r/20221114073842.205392-1-kai.heng.feng@canonical.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/hp-wmi.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/platform/x86/hp-wmi.c b/drivers/platform/x86/hp-wmi.c
+index 12449038bed12..0a99058be8130 100644
+--- a/drivers/platform/x86/hp-wmi.c
++++ b/drivers/platform/x86/hp-wmi.c
+@@ -90,6 +90,7 @@ enum hp_wmi_event_ids {
+ 	HPWMI_PEAKSHIFT_PERIOD		= 0x0F,
+ 	HPWMI_BATTERY_CHARGE_PERIOD	= 0x10,
+ 	HPWMI_SANITIZATION_MODE		= 0x17,
++	HPWMI_SMART_EXPERIENCE_APP	= 0x21,
+ };
+ 
+ /*
+@@ -859,6 +860,8 @@ static void hp_wmi_notify(u32 value, void *context)
+ 		break;
+ 	case HPWMI_SANITIZATION_MODE:
+ 		break;
++	case HPWMI_SMART_EXPERIENCE_APP:
++		break;
+ 	default:
+ 		pr_info("Unknown event_id - %d - 0x%x\n", event_id, event_data);
+ 		break;
+-- 
+cgit 
+
+
+From 81a5603a0f50fd7cf17ff21d106052215eaf2028 Mon Sep 17 00:00:00 2001
+From: Arnav Rawat <arnavr3@illinois.edu>
+Date: Fri, 11 Nov 2022 14:32:09 +0000
+Subject: platform/x86: ideapad-laptop: Fix interrupt storm on fn-lock toggle
+ on some Yoga laptops
+
+Commit 3ae86d2d4704 ("platform/x86: ideapad-laptop: Fix Legion 5 Fn lock
+LED") uses the WMI event-id for the fn-lock event on some Legion 5 laptops
+to manually toggle the fn-lock LED because the EC does not do it itself.
+However, the same WMI ID is also sent on some Yoga laptops. Here, setting
+the fn-lock state is not valid behavior, and causes the EC to spam
+interrupts until the laptop is rebooted.
+
+Add a set_fn_lock_led_list[] DMI-id list and only enable the workaround to
+manually set the LED on models on this list.
+
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=212671
+Cc: Meng Dong <whenov@gmail.com>
+Signed-off-by: Arnav Rawat <arnavr3@illinois.edu>
+Link: https://lore.kernel.org/r/12093851.O9o76ZdvQC@fedora
+[hdegoede@redhat.com: Check DMI-id list only once and store the result]
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/ideapad-laptop.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/platform/x86/ideapad-laptop.c b/drivers/platform/x86/ideapad-laptop.c
+index 33b3dfdd1b08f..6c460cdc05bb9 100644
+--- a/drivers/platform/x86/ideapad-laptop.c
++++ b/drivers/platform/x86/ideapad-laptop.c
+@@ -136,6 +136,7 @@ struct ideapad_private {
+ 		bool dytc                 : 1;
+ 		bool fan_mode             : 1;
+ 		bool fn_lock              : 1;
++		bool set_fn_lock_led      : 1;
+ 		bool hw_rfkill_switch     : 1;
+ 		bool kbd_bl               : 1;
+ 		bool touchpad_ctrl_via_ec : 1;
+@@ -1501,6 +1502,9 @@ static void ideapad_wmi_notify(u32 value, void *context)
+ 		ideapad_input_report(priv, value);
+ 		break;
+ 	case 208:
++		if (!priv->features.set_fn_lock_led)
++			break;
++
+ 		if (!eval_hals(priv->adev->handle, &result)) {
+ 			bool state = test_bit(HALS_FNLOCK_STATE_BIT, &result);
+ 
+@@ -1514,6 +1518,18 @@ static void ideapad_wmi_notify(u32 value, void *context)
+ }
+ #endif
+ 
++/* On some models we need to call exec_sals(SALS_FNLOCK_ON/OFF) to set the LED */
++static const struct dmi_system_id set_fn_lock_led_list[] = {
++	{
++		/* https://bugzilla.kernel.org/show_bug.cgi?id=212671 */
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
++			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo Legion R7000P2020H"),
++		}
++	},
++	{}
++};
++
+ /*
+  * Some ideapads have a hardware rfkill switch, but most do not have one.
+  * Reading VPCCMD_R_RF always results in 0 on models without a hardware rfkill,
+@@ -1556,6 +1572,7 @@ static void ideapad_check_features(struct ideapad_private *priv)
+ 	acpi_handle handle = priv->adev->handle;
+ 	unsigned long val;
+ 
++	priv->features.set_fn_lock_led = dmi_check_system(set_fn_lock_led_list);
+ 	priv->features.hw_rfkill_switch = dmi_check_system(hw_rfkill_list);
+ 
+ 	/* Most ideapads with ELAN0634 touchpad don't use EC touchpad switch */
+-- 
+cgit 
+
+
+From b44fd994e45112b58b6c1dec4451d9a925784589 Mon Sep 17 00:00:00 2001
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Tue, 15 Nov 2022 20:34:00 +0100
+Subject: platform/x86: ideapad-laptop: Add module parameters to match DMI
+ quirk tables
+
+Add module parameters to allow setting the hw_rfkill_switch and
+set_fn_lock_led feature flags for testing these on laptops which are not
+on the DMI-id based allow lists for these 2 flags.
+
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+Link: https://lore.kernel.org/r/20221115193400.376159-1-hdegoede@redhat.com
+---
+ drivers/platform/x86/ideapad-laptop.c | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/platform/x86/ideapad-laptop.c b/drivers/platform/x86/ideapad-laptop.c
+index 6c460cdc05bb9..3ea8fc6a9ca36 100644
+--- a/drivers/platform/x86/ideapad-laptop.c
++++ b/drivers/platform/x86/ideapad-laptop.c
+@@ -155,7 +155,21 @@ MODULE_PARM_DESC(no_bt_rfkill, "No rfkill for bluetooth.");
+ 
+ static bool allow_v4_dytc;
+ module_param(allow_v4_dytc, bool, 0444);
+-MODULE_PARM_DESC(allow_v4_dytc, "Enable DYTC version 4 platform-profile support.");
++MODULE_PARM_DESC(allow_v4_dytc,
++	"Enable DYTC version 4 platform-profile support. "
++	"If you need this please report this to: platform-driver-x86@vger.kernel.org");
++
++static bool hw_rfkill_switch;
++module_param(hw_rfkill_switch, bool, 0444);
++MODULE_PARM_DESC(hw_rfkill_switch,
++	"Enable rfkill support for laptops with a hw on/off wifi switch/slider. "
++	"If you need this please report this to: platform-driver-x86@vger.kernel.org");
++
++static bool set_fn_lock_led;
++module_param(set_fn_lock_led, bool, 0444);
++MODULE_PARM_DESC(set_fn_lock_led,
++	"Enable driver based updates of the fn-lock LED on fn-lock changes. "
++	"If you need this please report this to: platform-driver-x86@vger.kernel.org");
+ 
+ /*
+  * ACPI Helpers
+@@ -1572,8 +1586,10 @@ static void ideapad_check_features(struct ideapad_private *priv)
+ 	acpi_handle handle = priv->adev->handle;
+ 	unsigned long val;
+ 
+-	priv->features.set_fn_lock_led = dmi_check_system(set_fn_lock_led_list);
+-	priv->features.hw_rfkill_switch = dmi_check_system(hw_rfkill_list);
++	priv->features.set_fn_lock_led =
++		set_fn_lock_led || dmi_check_system(set_fn_lock_led_list);
++	priv->features.hw_rfkill_switch =
++		hw_rfkill_switch || dmi_check_system(hw_rfkill_list);
+ 
+ 	/* Most ideapads with ELAN0634 touchpad don't use EC touchpad switch */
+ 	if (acpi_dev_present("ELAN0634", NULL, -1))
+-- 
+cgit 
+
+

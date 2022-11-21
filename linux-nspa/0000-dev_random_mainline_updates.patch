@@ -1,0 +1,858 @@
+From cd4f24ae9404fd31fc461066e57889be3b68641b Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Thu, 8 Sep 2022 16:14:00 +0200
+Subject: [PATCH] random: restore O_NONBLOCK support
+
+Prior to 5.6, when /dev/random was opened with O_NONBLOCK, it would
+return -EAGAIN if there was no entropy. When the pools were unified in
+5.6, this was lost. The post 5.6 behavior of blocking until the pool is
+initialized, and ignoring O_NONBLOCK in the process, went unnoticed,
+with no reports about the regression received for two and a half years.
+However, eventually this indeed did break somebody's userspace.
+
+So we restore the old behavior, by returning -EAGAIN if the pool is not
+initialized. Unlike the old /dev/random, this can only occur during
+early boot, after which it never blocks again.
+
+In order to make this O_NONBLOCK behavior consistent with other
+expectations, also respect users reading with preadv2(RWF_NOWAIT) and
+similar.
+
+Fixes: 30c08efec888 ("random: make /dev/random be almost like /dev/urandom")
+Reported-by: Guozihua <guozihua@huawei.com>
+Reported-by: Zhongguohua <zhongguohua1@huawei.com>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Theodore Ts'o <tytso@mit.edu>
+Cc: Andrew Lutomirski <luto@kernel.org>
+Cc: stable@vger.kernel.org
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/mem.c    | 4 ++--
+ drivers/char/random.c | 5 +++++
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/char/mem.c b/drivers/char/mem.c
+index 32a932a065a6a9..5611d127363e47 100644
+--- a/drivers/char/mem.c
++++ b/drivers/char/mem.c
+@@ -712,8 +712,8 @@ static const struct memdev {
+ #endif
+ 	 [5] = { "zero", 0666, &zero_fops, FMODE_NOWAIT },
+ 	 [7] = { "full", 0666, &full_fops, 0 },
+-	 [8] = { "random", 0666, &random_fops, 0 },
+-	 [9] = { "urandom", 0666, &urandom_fops, 0 },
++	 [8] = { "random", 0666, &random_fops, FMODE_NOWAIT },
++	 [9] = { "urandom", 0666, &urandom_fops, FMODE_NOWAIT },
+ #ifdef CONFIG_PRINTK
+ 	[11] = { "kmsg", 0644, &kmsg_fops, 0 },
+ #endif
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 79d7d4e4e5828e..c8cc235155685e 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -1347,6 +1347,11 @@ static ssize_t random_read_iter(struct kiocb *kiocb, struct iov_iter *iter)
+ {
+ 	int ret;
+ 
++	if (!crng_ready() &&
++	    ((kiocb->ki_flags & (IOCB_NOWAIT | IOCB_NOIO)) ||
++	     (kiocb->ki_filp->f_flags & O_NONBLOCK)))
++		return -EAGAIN;
++
+ 	ret = wait_for_random_bytes();
+ 	if (ret != 0)
+ 		return ret;
+From 745558f9588551b1fef9609d165e239bce30d3e8 Mon Sep 17 00:00:00 2001
+From: Dominik Brodowski <linux@dominikbrodowski.net>
+Date: Sun, 4 Sep 2022 12:17:53 +0200
+Subject: [PATCH] random: use hwgenerator randomness more frequently at early
+ boot
+
+Mix in randomness from hw-rng sources more frequently during early
+boot, approximately once for every rng reseed.
+
+Signed-off-by: Dominik Brodowski <linux@dominikbrodowski.net>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 22 ++++++++++------------
+ 1 file changed, 10 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index c8cc235155685e..16e0c5f6cf2fa4 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -260,25 +260,23 @@ static void crng_fast_key_erasure(u8 key[CHACHA_KEY_SIZE],
+ }
+ 
+ /*
+- * Return whether the crng seed is considered to be sufficiently old
+- * that a reseeding is needed. This happens if the last reseeding
+- * was CRNG_RESEED_INTERVAL ago, or during early boot, at an interval
++ * Return the interval until the next reseeding, which is normally
++ * CRNG_RESEED_INTERVAL, but during early boot, it is at an interval
+  * proportional to the uptime.
+  */
+-static bool crng_has_old_seed(void)
++static unsigned int crng_reseed_interval(void)
+ {
+ 	static bool early_boot = true;
+-	unsigned long interval = CRNG_RESEED_INTERVAL;
+ 
+ 	if (unlikely(READ_ONCE(early_boot))) {
+ 		time64_t uptime = ktime_get_seconds();
+ 		if (uptime >= CRNG_RESEED_INTERVAL / HZ * 2)
+ 			WRITE_ONCE(early_boot, false);
+ 		else
+-			interval = max_t(unsigned int, CRNG_RESEED_START_INTERVAL,
+-					 (unsigned int)uptime / 2 * HZ);
++			return max_t(unsigned int, CRNG_RESEED_START_INTERVAL,
++				     (unsigned int)uptime / 2 * HZ);
+ 	}
+-	return time_is_before_jiffies(READ_ONCE(base_crng.birth) + interval);
++	return CRNG_RESEED_INTERVAL;
+ }
+ 
+ /*
+@@ -320,7 +318,7 @@ static void crng_make_state(u32 chacha_state[CHACHA_STATE_WORDS],
+ 	 * If the base_crng is old enough, we reseed, which in turn bumps the
+ 	 * generation counter that we check below.
+ 	 */
+-	if (unlikely(crng_has_old_seed()))
++	if (unlikely(time_is_before_jiffies(READ_ONCE(base_crng.birth) + crng_reseed_interval())))
+ 		crng_reseed();
+ 
+ 	local_lock_irqsave(&crngs.lock, flags);
+@@ -866,11 +864,11 @@ void add_hwgenerator_randomness(const void *buf, size_t len, size_t entropy)
+ 	credit_init_bits(entropy);
+ 
+ 	/*
+-	 * Throttle writing to once every CRNG_RESEED_INTERVAL, unless
+-	 * we're not yet initialized.
++	 * Throttle writing to once every reseed interval, unless we're not yet
++	 * initialized.
+ 	 */
+ 	if (!kthread_should_stop() && crng_ready())
+-		schedule_timeout_interruptible(CRNG_RESEED_INTERVAL);
++		schedule_timeout_interruptible(crng_reseed_interval());
+ }
+ EXPORT_SYMBOL_GPL(add_hwgenerator_randomness);
+ 
+From d775335e350fc07e1322960ee291dc9079ab938e Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Tue, 20 Sep 2022 16:12:00 +0200
+Subject: [PATCH] random: throttle hwrng writes if no entropy is credited
+
+If a hwrng source does not provide an entropy estimate, it currently
+does not contribute at all to the CRNG. In order to help fix this, in
+case add_hwgenerator_randomness() is called with the entropy parameter
+set to zero, go to sleep until one reseed interval has passed.
+
+While the hwrng thread currently only runs under conditions where this
+is non-zero, this change is not harmful and prepares for future updates
+to the hwrng core.
+
+Cc: Herbert Xu <herbert@gondor.apana.org.au>
+Reviewed-by: Dominik Brodowski <linux@dominikbrodowski.net>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 16e0c5f6cf2fa4..520a385c7dab8d 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -865,9 +865,9 @@ void add_hwgenerator_randomness(const void *buf, size_t len, size_t entropy)
+ 
+ 	/*
+ 	 * Throttle writing to once every reseed interval, unless we're not yet
+-	 * initialized.
++	 * initialized or no entropy is credited.
+ 	 */
+-	if (!kthread_should_stop() && crng_ready())
++	if (!kthread_should_stop() && (crng_ready() || !entropy))
+ 		schedule_timeout_interruptible(crng_reseed_interval());
+ }
+ EXPORT_SYMBOL_GPL(add_hwgenerator_randomness);
+From e78a802a7b4febf53f2a92842f494b01062d85a8 Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Fri, 23 Sep 2022 02:42:51 +0200
+Subject: [PATCH] random: clamp credited irq bits to maximum mixed
+
+Since the most that's mixed into the pool is sizeof(long)*2, don't
+credit more than that many bytes of entropy.
+
+Fixes: e3e33fc2ea7f ("random: do not use input pool from hard IRQs")
+Cc: stable@vger.kernel.org
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 520a385c7dab8d..2f370aa248b22a 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -1004,7 +1004,7 @@ static void mix_interrupt_randomness(struct work_struct *work)
+ 	local_irq_enable();
+ 
+ 	mix_pool_bytes(pool, sizeof(pool));
+-	credit_init_bits(max(1u, (count & U16_MAX) / 64));
++	credit_init_bits(clamp_t(unsigned int, (count & U16_MAX) / 64, 1, sizeof(pool) * 8));
+ 
+ 	memzero_explicit(pool, sizeof(pool));
+ }
+From 9ee0507e896b45af6d65408c77815800bce30008 Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Thu, 22 Sep 2022 18:46:04 +0200
+Subject: [PATCH] random: avoid reading two cache lines on irq randomness
+
+In order to avoid reading and dirtying two cache lines on every IRQ,
+move the work_struct to the bottom of the fast_pool struct. add_
+interrupt_randomness() always touches .pool and .count, which are
+currently split, because .mix pushes everything down. Instead, move .mix
+to the bottom, so that .pool and .count are always in the first cache
+line, since .mix is only accessed when the pool is full.
+
+Fixes: 58340f8e952b ("random: defer fast pool mixing to worker")
+Reviewed-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 2f370aa248b22a..a90d96f4b3bb4d 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -918,10 +918,10 @@ EXPORT_SYMBOL_GPL(unregister_random_vmfork_notifier);
+ #endif
+ 
+ struct fast_pool {
+-	struct work_struct mix;
+ 	unsigned long pool[4];
+ 	unsigned long last;
+ 	unsigned int count;
++	struct work_struct mix;
+ };
+ 
+ static DEFINE_PER_CPU(struct fast_pool, irq_randomness) = {
+From 748bc4dd9e663f23448d8ad7e58c011a67ea1eca Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Thu, 22 Sep 2022 18:46:04 +0200
+Subject: [PATCH] random: use expired timer rather than wq for mixing fast pool
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Previously, the fast pool was dumped into the main pool periodically in
+the fast pool's hard IRQ handler. This worked fine and there weren't
+problems with it, until RT came around. Since RT converts spinlocks into
+sleeping locks, problems cropped up. Rather than switching to raw
+spinlocks, the RT developers preferred we make the transformation from
+originally doing:
+
+    do_some_stuff()
+    spin_lock()
+    do_some_other_stuff()
+    spin_unlock()
+
+to doing:
+
+    do_some_stuff()
+    queue_work_on(some_other_stuff_worker)
+
+This is an ordinary pattern done all over the kernel. However, Sherry
+noticed a 10% performance regression in qperf TCP over a 40gbps
+InfiniBand card. Quoting her message:
+
+> MT27500 Family [ConnectX-3] cards:
+> Infiniband device 'mlx4_0' port 1 status:
+> default gid: fe80:0000:0000:0000:0010:e000:0178:9eb1
+> base lid: 0x6
+> sm lid: 0x1
+> state: 4: ACTIVE
+> phys state: 5: LinkUp
+> rate: 40 Gb/sec (4X QDR)
+> link_layer: InfiniBand
+>
+> Cards are configured with IP addresses on private subnet for IPoIB
+> performance testing.
+> Regression identified in this bug is in TCP latency in this stack as reported
+> by qperf tcp_lat metric:
+>
+> We have one system listen as a qperf server:
+> [root@yourQperfServer ~]# qperf
+>
+> Have the other system connect to qperf server as a client (in this
+> case, it’s X7 server with Mellanox card):
+> [root@yourQperfClient ~]# numactl -m0 -N0 qperf 20.20.20.101 -v -uu -ub --time 60 --wait_server 20 -oo msg_size:4K:1024K:*2 tcp_lat
+
+Rather than incur the scheduling latency from queue_work_on, we can
+instead switch to running on the next timer tick, on the same core. This
+also batches things a bit more -- once per jiffy -- which is okay now
+that mix_interrupt_randomness() can credit multiple bits at once.
+
+Reported-by: Sherry Yang <sherry.yang@oracle.com>
+Tested-by: Paul Webb <paul.x.webb@oracle.com>
+Cc: Sherry Yang <sherry.yang@oracle.com>
+Cc: Phillip Goerl <phillip.goerl@oracle.com>
+Cc: Jack Vogel <jack.vogel@oracle.com>
+Cc: Nicky Veitch <nicky.veitch@oracle.com>
+Cc: Colm Harrington <colm.harrington@oracle.com>
+Cc: Ramanan Govindarajan <ramanan.govindarajan@oracle.com>
+Cc: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Cc: Dominik Brodowski <linux@dominikbrodowski.net>
+Cc: Tejun Heo <tj@kernel.org>
+Cc: Sultan Alsawaf <sultan@kerneltoast.com>
+Cc: stable@vger.kernel.org
+Fixes: 58340f8e952b ("random: defer fast pool mixing to worker")
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index a90d96f4b3bb4d..e591c6aadca4d0 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -921,17 +921,20 @@ struct fast_pool {
+ 	unsigned long pool[4];
+ 	unsigned long last;
+ 	unsigned int count;
+-	struct work_struct mix;
++	struct timer_list mix;
+ };
+ 
++static void mix_interrupt_randomness(struct timer_list *work);
++
+ static DEFINE_PER_CPU(struct fast_pool, irq_randomness) = {
+ #ifdef CONFIG_64BIT
+ #define FASTMIX_PERM SIPHASH_PERMUTATION
+-	.pool = { SIPHASH_CONST_0, SIPHASH_CONST_1, SIPHASH_CONST_2, SIPHASH_CONST_3 }
++	.pool = { SIPHASH_CONST_0, SIPHASH_CONST_1, SIPHASH_CONST_2, SIPHASH_CONST_3 },
+ #else
+ #define FASTMIX_PERM HSIPHASH_PERMUTATION
+-	.pool = { HSIPHASH_CONST_0, HSIPHASH_CONST_1, HSIPHASH_CONST_2, HSIPHASH_CONST_3 }
++	.pool = { HSIPHASH_CONST_0, HSIPHASH_CONST_1, HSIPHASH_CONST_2, HSIPHASH_CONST_3 },
+ #endif
++	.mix = __TIMER_INITIALIZER(mix_interrupt_randomness, 0)
+ };
+ 
+ /*
+@@ -973,7 +976,7 @@ int __cold random_online_cpu(unsigned int cpu)
+ }
+ #endif
+ 
+-static void mix_interrupt_randomness(struct work_struct *work)
++static void mix_interrupt_randomness(struct timer_list *work)
+ {
+ 	struct fast_pool *fast_pool = container_of(work, struct fast_pool, mix);
+ 	/*
+@@ -1027,10 +1030,11 @@ void add_interrupt_randomness(int irq)
+ 	if (new_count < 1024 && !time_is_before_jiffies(fast_pool->last + HZ))
+ 		return;
+ 
+-	if (unlikely(!fast_pool->mix.func))
+-		INIT_WORK(&fast_pool->mix, mix_interrupt_randomness);
+ 	fast_pool->count |= MIX_INFLIGHT;
+-	queue_work_on(raw_smp_processor_id(), system_highpri_wq, &fast_pool->mix);
++	if (!timer_pending(&fast_pool->mix)) {
++		fast_pool->mix.expires = jiffies;
++		add_timer_on(&fast_pool->mix, raw_smp_processor_id());
++	}
+ }
+ EXPORT_SYMBOL_GPL(add_interrupt_randomness);
+ 
+From f62384995e4cb7703e5295779c44135c5311770d Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Mon, 26 Sep 2022 17:43:14 +0200
+Subject: [PATCH] random: split initialization into early step and later step
+
+The full RNG initialization relies on some timestamps, made possible
+with initialization functions like time_init() and timekeeping_init().
+However, these are only available rather late in initialization.
+Meanwhile, other things, such as memory allocator functions, make use of
+the RNG much earlier.
+
+So split RNG initialization into two phases. We can provide arch
+randomness very early on, and then later, after timekeeping and such are
+available, initialize the rest.
+
+This ensures that, for example, slabs are properly randomized if RDRAND
+is available. Without this, CONFIG_SLAB_FREELIST_RANDOM=y loses a degree
+of its security, because its random seed is potentially deterministic,
+since it hasn't yet incorporated RDRAND. It also makes it possible to
+use a better seed in kfence, which currently relies on only the cycle
+counter.
+
+Another positive consequence is that on systems with RDRAND, running
+with CONFIG_WARN_ALL_UNSEEDED_RANDOM=y results in no warnings at all.
+
+One subtle side effect of this change is that on systems with no RDRAND,
+RDTSC is now only queried by random_init() once, committing the moment
+of the function call, instead of multiple times as before. This is
+intentional, as the multiple RDTSCs in a loop before weren't
+accomplishing very much, with jitter being better provided by
+try_to_generate_entropy(). Plus, filling blocks with RDTSC is still
+being done in extract_entropy(), which is necessarily called before
+random bytes are served anyway.
+
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Reviewed-by: Kees Cook <keescook@chromium.org>
+Reviewed-by: Dominik Brodowski <linux@dominikbrodowski.net>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c  | 50 +++++++++++++++++++++++++-----------------
+ include/linux/random.h |  3 ++-
+ init/main.c            | 17 +++++++-------
+ 3 files changed, 40 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index e591c6aadca4d0..1427f66252c687 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -772,18 +772,13 @@ static int random_pm_notification(struct notifier_block *nb, unsigned long actio
+ static struct notifier_block pm_notifier = { .notifier_call = random_pm_notification };
+ 
+ /*
+- * The first collection of entropy occurs at system boot while interrupts
+- * are still turned off. Here we push in latent entropy, RDSEED, a timestamp,
+- * utsname(), and the command line. Depending on the above configuration knob,
+- * RDSEED may be considered sufficient for initialization. Note that much
+- * earlier setup may already have pushed entropy into the input pool by the
+- * time we get here.
++ * This is called extremely early, before time keeping functionality is
++ * available, but arch randomness is. Interrupts are not yet enabled.
+  */
+-int __init random_init(const char *command_line)
++void __init random_init_early(const char *command_line)
+ {
+-	ktime_t now = ktime_get_real();
+-	size_t i, longs, arch_bits;
+ 	unsigned long entropy[BLAKE2S_BLOCK_SIZE / sizeof(long)];
++	size_t i, longs, arch_bits;
+ 
+ #if defined(LATENT_ENTROPY_PLUGIN)
+ 	static const u8 compiletime_seed[BLAKE2S_BLOCK_SIZE] __initconst __latent_entropy;
+@@ -803,34 +798,49 @@ int __init random_init(const char *command_line)
+ 			i += longs;
+ 			continue;
+ 		}
+-		entropy[0] = random_get_entropy();
+-		_mix_pool_bytes(entropy, sizeof(*entropy));
+ 		arch_bits -= sizeof(*entropy) * 8;
+ 		++i;
+ 	}
+-	_mix_pool_bytes(&now, sizeof(now));
+-	_mix_pool_bytes(utsname(), sizeof(*(utsname())));
++
+ 	_mix_pool_bytes(command_line, strlen(command_line));
++
++	/* Reseed if already seeded by earlier phases. */
++	if (crng_ready())
++		crng_reseed();
++	else if (trust_cpu)
++		_credit_init_bits(arch_bits);
++}
++
++/*
++ * This is called a little bit after the prior function, and now there is
++ * access to timestamps counters. Interrupts are not yet enabled.
++ */
++void __init random_init(void)
++{
++	unsigned long entropy = random_get_entropy();
++	ktime_t now = ktime_get_real();
++
++	_mix_pool_bytes(utsname(), sizeof(*(utsname())));
++	_mix_pool_bytes(&now, sizeof(now));
++	_mix_pool_bytes(&entropy, sizeof(entropy));
+ 	add_latent_entropy();
+ 
+ 	/*
+-	 * If we were initialized by the bootloader before jump labels are
+-	 * initialized, then we should enable the static branch here, where
++	 * If we were initialized by the cpu or bootloader before jump labels
++	 * are initialized, then we should enable the static branch here, where
+ 	 * it's guaranteed that jump labels have been initialized.
+ 	 */
+ 	if (!static_branch_likely(&crng_is_ready) && crng_init >= CRNG_READY)
+ 		crng_set_ready(NULL);
+ 
++	/* Reseed if already seeded by earlier phases. */
+ 	if (crng_ready())
+ 		crng_reseed();
+-	else if (trust_cpu)
+-		_credit_init_bits(arch_bits);
+ 
+ 	WARN_ON(register_pm_notifier(&pm_notifier));
+ 
+-	WARN(!random_get_entropy(), "Missing cycle counter and fallback timer; RNG "
+-				    "entropy collection will consequently suffer.");
+-	return 0;
++	WARN(!entropy, "Missing cycle counter and fallback timer; RNG "
++		       "entropy collection will consequently suffer.");
+ }
+ 
+ /*
+diff --git a/include/linux/random.h b/include/linux/random.h
+index 3fec206487f666..a9e6e16f977419 100644
+--- a/include/linux/random.h
++++ b/include/linux/random.h
+@@ -72,7 +72,8 @@ static inline unsigned long get_random_canary(void)
+ 	return get_random_long() & CANARY_MASK;
+ }
+ 
+-int __init random_init(const char *command_line);
++void __init random_init_early(const char *command_line);
++void __init random_init(void);
+ bool rng_is_initialized(void);
+ int wait_for_random_bytes(void);
+ 
+diff --git a/init/main.c b/init/main.c
+index 1fe7942f5d4a87..0866e5d0d467b8 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -976,6 +976,9 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
+ 		parse_args("Setting extra init args", extra_init_args,
+ 			   NULL, 0, -1, -1, NULL, set_init_arg);
+ 
++	/* Architectural and non-timekeeping rng init, before allocator init */
++	random_init_early(command_line);
++
+ 	/*
+ 	 * These use large bootmem allocations and must precede
+ 	 * kmem_cache_init()
+@@ -1035,17 +1038,13 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
+ 	hrtimers_init();
+ 	softirq_init();
+ 	timekeeping_init();
+-	kfence_init();
+ 	time_init();
+ 
+-	/*
+-	 * For best initial stack canary entropy, prepare it after:
+-	 * - setup_arch() for any UEFI RNG entropy and boot cmdline access
+-	 * - timekeeping_init() for ktime entropy used in random_init()
+-	 * - time_init() for making random_get_entropy() work on some platforms
+-	 * - random_init() to initialize the RNG from from early entropy sources
+-	 */
+-	random_init(command_line);
++	/* This must be after timekeeping is initialized */
++	random_init();
++
++	/* These make use of the fully initialized rng */
++	kfence_init();
+ 	boot_init_stack_canary();
+ 
+ 	perf_event_init();
+From dd54fd7dfa4574fe350b75a90693dc6552c535e3 Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Tue, 27 Sep 2022 11:26:44 +0200
+Subject: [PATCH] random: use init_utsname() instead of utsname()
+
+Rather than going through the current-> indirection for utsname, at this
+point in boot, init_utsname()==utsname(), so just use it directly that
+way. Additionally, init_utsname() appears to be available nearly always,
+so move it into random_init_early().
+
+Suggested-by: Kees Cook <keescook@chromium.org>
+Reviewed-by: Kees Cook <keescook@chromium.org>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 1427f66252c687..f2aa3ab1b458a9 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -802,6 +802,7 @@ void __init random_init_early(const char *command_line)
+ 		++i;
+ 	}
+ 
++	_mix_pool_bytes(init_utsname(), sizeof(*(init_utsname())));
+ 	_mix_pool_bytes(command_line, strlen(command_line));
+ 
+ 	/* Reseed if already seeded by earlier phases. */
+@@ -820,7 +821,6 @@ void __init random_init(void)
+ 	unsigned long entropy = random_get_entropy();
+ 	ktime_t now = ktime_get_real();
+ 
+-	_mix_pool_bytes(utsname(), sizeof(*(utsname())));
+ 	_mix_pool_bytes(&now, sizeof(now));
+ 	_mix_pool_bytes(&entropy, sizeof(entropy));
+ 	add_latent_entropy();
+From 585cd5fe9f7378601b1d4915ad6e9088333b5e5e Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Wed, 28 Sep 2022 18:47:30 +0200
+Subject: [PATCH] random: add 8-bit and 16-bit batches
+
+There are numerous places in the kernel that would be sped up by having
+smaller batches. Currently those callsites do `get_random_u32() & 0xff`
+or similar. Since these are pretty spread out, and will require patches
+to multiple different trees, let's get ahead of the curve and lay the
+foundation for `get_random_u8()` and `get_random_u16()`, so that it's
+then possible to start submitting conversion patches leisurely.
+
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c  | 2 ++
+ include/linux/random.h | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index f2aa3ab1b458a9..64ee16ffb8b76b 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -506,6 +506,8 @@ EXPORT_SYMBOL(get_random_ ##type);
+ 
+ DEFINE_BATCHED_ENTROPY(u64)
+ DEFINE_BATCHED_ENTROPY(u32)
++DEFINE_BATCHED_ENTROPY(u16)
++DEFINE_BATCHED_ENTROPY(u8)
+ 
+ #ifdef CONFIG_SMP
+ /*
+diff --git a/include/linux/random.h b/include/linux/random.h
+index a9e6e16f977419..2c130f8f18e538 100644
+--- a/include/linux/random.h
++++ b/include/linux/random.h
+@@ -38,6 +38,8 @@ static inline int unregister_random_vmfork_notifier(struct notifier_block *nb) {
+ #endif
+ 
+ void get_random_bytes(void *buf, size_t len);
++u8 get_random_u8(void);
++u16 get_random_u16(void);
+ u32 get_random_u32(void);
+ u64 get_random_u64(void);
+ static inline unsigned int get_random_int(void)
+From 122733471384be8c23f019fbbd46bdf7be561dcd Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Sat, 1 Oct 2022 00:31:00 +0200
+Subject: [PATCH] random: schedule jitter credit for next jiffy, not in two
+ jiffies
+
+Counterintuitively, mod_timer(..., jiffies + 1) will cause the timer to
+fire not in the next jiffy, but in two jiffies. The way to cause
+the timer to fire in the next jiffy is with mod_timer(..., jiffies).
+Doing so then lets us bump the upper bound back up again.
+
+Fixes: 50ee7529ec45 ("random: try to actively add entropy rather than passively wait for it")
+Fixes: 829d680e82a9 ("random: cap jitter samples per bit to factor of HZ")
+Cc: Dominik Brodowski <linux@dominikbrodowski.net>
+Cc: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Cc: Sultan Alsawaf <sultan@kerneltoast.com>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 64ee16ffb8b76b..fdf15f5c87dd07 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -1205,7 +1205,7 @@ static void __cold entropy_timer(struct timer_list *timer)
+  */
+ static void __cold try_to_generate_entropy(void)
+ {
+-	enum { NUM_TRIAL_SAMPLES = 8192, MAX_SAMPLES_PER_BIT = HZ / 30 };
++	enum { NUM_TRIAL_SAMPLES = 8192, MAX_SAMPLES_PER_BIT = HZ / 15 };
+ 	struct entropy_timer_state stack;
+ 	unsigned int i, num_different = 0;
+ 	unsigned long last = random_get_entropy();
+@@ -1224,7 +1224,7 @@ static void __cold try_to_generate_entropy(void)
+ 	timer_setup_on_stack(&stack.timer, entropy_timer, 0);
+ 	while (!crng_ready() && !signal_pending(current)) {
+ 		if (!timer_pending(&stack.timer))
+-			mod_timer(&stack.timer, jiffies + 1);
++			mod_timer(&stack.timer, jiffies);
+ 		mix_pool_bytes(&stack.entropy, sizeof(stack.entropy));
+ 		schedule();
+ 		stack.entropy = random_get_entropy();
+From d687772e6d2cbffd91fdda64812f79192c1e7ca0 Mon Sep 17 00:00:00 2001
+From: William Zijl <postmaster@gusted.xyz>
+Date: Sat, 1 Oct 2022 17:36:21 +0200
+Subject: [PATCH] random: fix typos in get_random_bytes() comment
+
+Remove extra whitespace and add a missing word to a sentence describing
+get_random_bytes().
+
+Signed-off-by: William Zijl <postmaster@gusted.xyz>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index fdf15f5c87dd07..a007e3dad80f01 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -382,11 +382,11 @@ static void _get_random_bytes(void *buf, size_t len)
+ }
+ 
+ /*
+- * This function is the exported kernel interface.  It returns some
+- * number of good random numbers, suitable for key generation, seeding
+- * TCP sequence numbers, etc. In order to ensure that the randomness
+- * by this function is okay, the function wait_for_random_bytes()
+- * should be called and return 0 at least once at any point prior.
++ * This function is the exported kernel interface. It returns some number of
++ * good random numbers, suitable for key generation, seeding TCP sequence
++ * numbers, etc. In order to ensure that the randomness returned by this
++ * function is okay, the function wait_for_random_bytes() should be called and
++ * return 0 at least once at any point prior.
+  */
+ void get_random_bytes(void *buf, size_t len)
+ {
+From a890d1c657ecba73a7b28591c92587aef1be1888 Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Wed, 5 Oct 2022 12:54:38 +0200
+Subject: [PATCH] random: clear new batches when bringing new CPUs online
+
+The commit that added the new get_random_{u8,u16}() functions neglected
+to update the code that clears the batches when bringing up a new CPU.
+It also forgot a few comments and helper defines, so add those in too.
+
+Fixes: 585cd5fe9f73 ("random: add 8-bit and 16-bit batches")
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c  | 28 ++++++++++++++++------------
+ include/linux/random.h |  2 ++
+ 2 files changed, 18 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index a007e3dad80f01..01acf235f26357 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -96,8 +96,8 @@ MODULE_PARM_DESC(ratelimit_disable, "Disable random ratelimit suppression");
+ /*
+  * Returns whether or not the input pool has been seeded and thus guaranteed
+  * to supply cryptographically secure random numbers. This applies to: the
+- * /dev/urandom device, the get_random_bytes function, and the get_random_{u32,
+- * ,u64,int,long} family of functions.
++ * /dev/urandom device, the get_random_bytes function, and the get_random_{u8,
++ * u16,u32,u64,int,long} family of functions.
+  *
+  * Returns: true if the input pool has been seeded.
+  *          false if the input pool has not been seeded.
+@@ -119,9 +119,9 @@ static void try_to_generate_entropy(void);
+ /*
+  * Wait for the input pool to be seeded and thus guaranteed to supply
+  * cryptographically secure random numbers. This applies to: the /dev/urandom
+- * device, the get_random_bytes function, and the get_random_{u32,u64,int,long}
+- * family of functions. Using any of these functions without first calling
+- * this function forfeits the guarantee of security.
++ * device, the get_random_bytes function, and the get_random_{u8,u16,u32,u64,
++ * int,long} family of functions. Using any of these functions without first
++ * calling this function forfeits the guarantee of security.
+  *
+  * Returns: 0 if the input pool has been seeded.
+  *          -ERESTARTSYS if the function was interrupted by a signal.
+@@ -157,6 +157,8 @@ EXPORT_SYMBOL(wait_for_random_bytes);
+  * There are a few exported interfaces for use by other drivers:
+  *
+  *	void get_random_bytes(void *buf, size_t len)
++ *	u8 get_random_u8()
++ *	u16 get_random_u16()
+  *	u32 get_random_u32()
+  *	u64 get_random_u64()
+  *	unsigned int get_random_int()
+@@ -164,10 +166,10 @@ EXPORT_SYMBOL(wait_for_random_bytes);
+  *
+  * These interfaces will return the requested number of random bytes
+  * into the given buffer or as a return value. This is equivalent to
+- * a read from /dev/urandom. The u32, u64, int, and long family of
+- * functions may be higher performance for one-off random integers,
+- * because they do a bit of buffering and do not invoke reseeding
+- * until the buffer is emptied.
++ * a read from /dev/urandom. The u8, u16, u32, u64, int, and long
++ * family of functions may be higher performance for one-off random
++ * integers, because they do a bit of buffering and do not invoke
++ * reseeding until the buffer is emptied.
+  *
+  *********************************************************************/
+ 
+@@ -504,10 +506,10 @@ type get_random_ ##type(void)							\
+ }										\
+ EXPORT_SYMBOL(get_random_ ##type);
+ 
+-DEFINE_BATCHED_ENTROPY(u64)
+-DEFINE_BATCHED_ENTROPY(u32)
+-DEFINE_BATCHED_ENTROPY(u16)
+ DEFINE_BATCHED_ENTROPY(u8)
++DEFINE_BATCHED_ENTROPY(u16)
++DEFINE_BATCHED_ENTROPY(u32)
++DEFINE_BATCHED_ENTROPY(u64)
+ 
+ #ifdef CONFIG_SMP
+ /*
+@@ -522,6 +524,8 @@ int __cold random_prepare_cpu(unsigned int cpu)
+ 	 * randomness.
+ 	 */
+ 	per_cpu_ptr(&crngs, cpu)->generation = ULONG_MAX;
++	per_cpu_ptr(&batched_entropy_u8, cpu)->position = UINT_MAX;
++	per_cpu_ptr(&batched_entropy_u16, cpu)->position = UINT_MAX;
+ 	per_cpu_ptr(&batched_entropy_u32, cpu)->position = UINT_MAX;
+ 	per_cpu_ptr(&batched_entropy_u64, cpu)->position = UINT_MAX;
+ 	return 0;
+diff --git a/include/linux/random.h b/include/linux/random.h
+index 2c130f8f18e538..08322f700cdcc7 100644
+--- a/include/linux/random.h
++++ b/include/linux/random.h
+@@ -96,6 +96,8 @@ static inline int get_random_bytes_wait(void *buf, size_t nbytes)
+ 		*out = get_random_ ## name(); \
+ 		return 0; \
+ 	}
++declare_get_random_var_wait(u8, u8)
++declare_get_random_var_wait(u16, u16)
+ declare_get_random_var_wait(u32, u32)
+ declare_get_random_var_wait(u64, u32)
+ declare_get_random_var_wait(int, unsigned int)
+
+From f5e4ec155d145002fd9840868453d785fab86d42 Mon Sep 17 00:00:00 2001
+From: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Date: Fri, 28 Oct 2022 17:00:42 +0100
+Subject: [PATCH] random: use arch_get_random*_early() in random_init()
+
+While reworking the archrandom handling, commit d349ab99eec7 ("random:
+handle archrandom with multiple longs") switched to the non-early
+archrandom helpers in random_init(), which broke initialization of the
+entropy pool from the arm64 random generator.
+
+Indeed at that point the arm64 CPU features, which verify that all CPUs
+have compatible capabilities, are not finalized so arch_get_random_seed_longs()
+is unsuccessful. Instead random_init() should use the _early functions,
+which check only the boot CPU on arm64. On other architectures the
+_early functions directly call the normal ones.
+
+Fixes: d349ab99eec7 ("random: handle archrandom with multiple longs")
+Cc: stable@vger.kernel.org
+Signed-off-by: Jean-Philippe Brucker <jean-philippe@linaro.org>
+Signed-off-by: Jason A. Donenfeld <Jason@zx2c4.com>
+---
+ drivers/char/random.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/char/random.c b/drivers/char/random.c
+index 2fe28eeb2f3874..69754155300ea7 100644
+--- a/drivers/char/random.c
++++ b/drivers/char/random.c
+@@ -791,13 +791,13 @@ void __init random_init_early(const char *command_line)
+ #endif
+ 
+ 	for (i = 0, arch_bits = sizeof(entropy) * 8; i < ARRAY_SIZE(entropy);) {
+-		longs = arch_get_random_seed_longs(entropy, ARRAY_SIZE(entropy) - i);
++		longs = arch_get_random_seed_longs_early(entropy, ARRAY_SIZE(entropy) - i);
+ 		if (longs) {
+ 			_mix_pool_bytes(entropy, sizeof(*entropy) * longs);
+ 			i += longs;
+ 			continue;
+ 		}
+-		longs = arch_get_random_longs(entropy, ARRAY_SIZE(entropy) - i);
++		longs = arch_get_random_longs_early(entropy, ARRAY_SIZE(entropy) - i);
+ 		if (longs) {
+ 			_mix_pool_bytes(entropy, sizeof(*entropy) * longs);
+ 			i += longs;
+
