@@ -1,0 +1,2210 @@
+From af1b57cc39beca203559576b3046094fc9e5eb32 Mon Sep 17 00:00:00 2001
+From: "Christian A. Ehrhardt" <lk@c--e.de>
+Date: Tue, 13 Sep 2022 14:17:23 +0200
+Subject: [PATCH] kernfs: fix use-after-free in __kernfs_remove
+
+commit 4abc99652812a2ddf932f137515d5c5a04723538 upstream.
+
+Syzkaller managed to trigger concurrent calls to
+kernfs_remove_by_name_ns() for the same file resulting in
+a KASAN detected use-after-free. The race occurs when the root
+node is freed during kernfs_drain().
+
+To prevent this acquire an additional reference for the root
+of the tree that is removed before calling __kernfs_remove().
+
+Found by syzkaller with the following reproducer (slab_nomerge is
+required):
+
+syz_mount_image$ext4(0x0, &(0x7f0000000100)='./file0\x00', 0x100000, 0x0, 0x0, 0x0, 0x0)
+r0 = openat(0xffffffffffffff9c, &(0x7f0000000080)='/proc/self/exe\x00', 0x0, 0x0)
+close(r0)
+pipe2(&(0x7f0000000140)={0xffffffffffffffff, <r1=>0xffffffffffffffff}, 0x800)
+mount$9p_fd(0x0, &(0x7f0000000040)='./file0\x00', &(0x7f00000000c0), 0x408, &(0x7f0000000280)={'trans=fd,', {'rfdno', 0x3d, r0}, 0x2c, {'wfdno', 0x3d, r1}, 0x2c, {[{@cache_loose}, {@mmap}, {@loose}, {@loose}, {@mmap}], [{@mask={'mask', 0x3d, '^MAY_EXEC'}}, {@fsmagic={'fsmagic', 0x3d, 0x10001}}, {@dont_hash}]}})
+
+Sample report:
+
+==================================================================
+BUG: KASAN: use-after-free in kernfs_type include/linux/kernfs.h:335 [inline]
+BUG: KASAN: use-after-free in kernfs_leftmost_descendant fs/kernfs/dir.c:1261 [inline]
+BUG: KASAN: use-after-free in __kernfs_remove.part.0+0x843/0x960 fs/kernfs/dir.c:1369
+Read of size 2 at addr ffff8880088807f0 by task syz-executor.2/857
+
+CPU: 0 PID: 857 Comm: syz-executor.2 Not tainted 6.0.0-rc3-00363-g7726d4c3e60b #5
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+Call Trace:
+ <TASK>
+ __dump_stack lib/dump_stack.c:88 [inline]
+ dump_stack_lvl+0x6e/0x91 lib/dump_stack.c:106
+ print_address_description mm/kasan/report.c:317 [inline]
+ print_report.cold+0x5e/0x5e5 mm/kasan/report.c:433
+ kasan_report+0xa3/0x130 mm/kasan/report.c:495
+ kernfs_type include/linux/kernfs.h:335 [inline]
+ kernfs_leftmost_descendant fs/kernfs/dir.c:1261 [inline]
+ __kernfs_remove.part.0+0x843/0x960 fs/kernfs/dir.c:1369
+ __kernfs_remove fs/kernfs/dir.c:1356 [inline]
+ kernfs_remove_by_name_ns+0x108/0x190 fs/kernfs/dir.c:1589
+ sysfs_slab_add+0x133/0x1e0 mm/slub.c:5943
+ __kmem_cache_create+0x3e0/0x550 mm/slub.c:4899
+ create_cache mm/slab_common.c:229 [inline]
+ kmem_cache_create_usercopy+0x167/0x2a0 mm/slab_common.c:335
+ p9_client_create+0xd4d/0x1190 net/9p/client.c:993
+ v9fs_session_init+0x1e6/0x13c0 fs/9p/v9fs.c:408
+ v9fs_mount+0xb9/0xbd0 fs/9p/vfs_super.c:126
+ legacy_get_tree+0xf1/0x200 fs/fs_context.c:610
+ vfs_get_tree+0x85/0x2e0 fs/super.c:1530
+ do_new_mount fs/namespace.c:3040 [inline]
+ path_mount+0x675/0x1d00 fs/namespace.c:3370
+ do_mount fs/namespace.c:3383 [inline]
+ __do_sys_mount fs/namespace.c:3591 [inline]
+ __se_sys_mount fs/namespace.c:3568 [inline]
+ __x64_sys_mount+0x282/0x300 fs/namespace.c:3568
+ do_syscall_x64 arch/x86/entry/common.c:50 [inline]
+ do_syscall_64+0x38/0x90 arch/x86/entry/common.c:80
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+RIP: 0033:0x7f725f983aed
+Code: 02 b8 ff ff ff ff c3 66 0f 1f 44 00 00 f3 0f 1e fa 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b0 ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007f725f0f7028 EFLAGS: 00000246 ORIG_RAX: 00000000000000a5
+RAX: ffffffffffffffda RBX: 00007f725faa3f80 RCX: 00007f725f983aed
+RDX: 00000000200000c0 RSI: 0000000020000040 RDI: 0000000000000000
+RBP: 00007f725f9f419c R08: 0000000020000280 R09: 0000000000000000
+R10: 0000000000000408 R11: 0000000000000246 R12: 0000000000000000
+R13: 0000000000000006 R14: 00007f725faa3f80 R15: 00007f725f0d7000
+ </TASK>
+
+Allocated by task 855:
+ kasan_save_stack+0x1e/0x40 mm/kasan/common.c:38
+ kasan_set_track mm/kasan/common.c:45 [inline]
+ set_alloc_info mm/kasan/common.c:437 [inline]
+ __kasan_slab_alloc+0x66/0x80 mm/kasan/common.c:470
+ kasan_slab_alloc include/linux/kasan.h:224 [inline]
+ slab_post_alloc_hook mm/slab.h:727 [inline]
+ slab_alloc_node mm/slub.c:3243 [inline]
+ slab_alloc mm/slub.c:3251 [inline]
+ __kmem_cache_alloc_lru mm/slub.c:3258 [inline]
+ kmem_cache_alloc+0xbf/0x200 mm/slub.c:3268
+ kmem_cache_zalloc include/linux/slab.h:723 [inline]
+ __kernfs_new_node+0xd4/0x680 fs/kernfs/dir.c:593
+ kernfs_new_node fs/kernfs/dir.c:655 [inline]
+ kernfs_create_dir_ns+0x9c/0x220 fs/kernfs/dir.c:1010
+ sysfs_create_dir_ns+0x127/0x290 fs/sysfs/dir.c:59
+ create_dir lib/kobject.c:63 [inline]
+ kobject_add_internal+0x24a/0x8d0 lib/kobject.c:223
+ kobject_add_varg lib/kobject.c:358 [inline]
+ kobject_init_and_add+0x101/0x160 lib/kobject.c:441
+ sysfs_slab_add+0x156/0x1e0 mm/slub.c:5954
+ __kmem_cache_create+0x3e0/0x550 mm/slub.c:4899
+ create_cache mm/slab_common.c:229 [inline]
+ kmem_cache_create_usercopy+0x167/0x2a0 mm/slab_common.c:335
+ p9_client_create+0xd4d/0x1190 net/9p/client.c:993
+ v9fs_session_init+0x1e6/0x13c0 fs/9p/v9fs.c:408
+ v9fs_mount+0xb9/0xbd0 fs/9p/vfs_super.c:126
+ legacy_get_tree+0xf1/0x200 fs/fs_context.c:610
+ vfs_get_tree+0x85/0x2e0 fs/super.c:1530
+ do_new_mount fs/namespace.c:3040 [inline]
+ path_mount+0x675/0x1d00 fs/namespace.c:3370
+ do_mount fs/namespace.c:3383 [inline]
+ __do_sys_mount fs/namespace.c:3591 [inline]
+ __se_sys_mount fs/namespace.c:3568 [inline]
+ __x64_sys_mount+0x282/0x300 fs/namespace.c:3568
+ do_syscall_x64 arch/x86/entry/common.c:50 [inline]
+ do_syscall_64+0x38/0x90 arch/x86/entry/common.c:80
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+
+Freed by task 857:
+ kasan_save_stack+0x1e/0x40 mm/kasan/common.c:38
+ kasan_set_track+0x21/0x30 mm/kasan/common.c:45
+ kasan_set_free_info+0x20/0x40 mm/kasan/generic.c:370
+ ____kasan_slab_free mm/kasan/common.c:367 [inline]
+ ____kasan_slab_free mm/kasan/common.c:329 [inline]
+ __kasan_slab_free+0x108/0x190 mm/kasan/common.c:375
+ kasan_slab_free include/linux/kasan.h:200 [inline]
+ slab_free_hook mm/slub.c:1754 [inline]
+ slab_free_freelist_hook mm/slub.c:1780 [inline]
+ slab_free mm/slub.c:3534 [inline]
+ kmem_cache_free+0x9c/0x340 mm/slub.c:3551
+ kernfs_put.part.0+0x2b2/0x520 fs/kernfs/dir.c:547
+ kernfs_put+0x42/0x50 fs/kernfs/dir.c:521
+ __kernfs_remove.part.0+0x72d/0x960 fs/kernfs/dir.c:1407
+ __kernfs_remove fs/kernfs/dir.c:1356 [inline]
+ kernfs_remove_by_name_ns+0x108/0x190 fs/kernfs/dir.c:1589
+ sysfs_slab_add+0x133/0x1e0 mm/slub.c:5943
+ __kmem_cache_create+0x3e0/0x550 mm/slub.c:4899
+ create_cache mm/slab_common.c:229 [inline]
+ kmem_cache_create_usercopy+0x167/0x2a0 mm/slab_common.c:335
+ p9_client_create+0xd4d/0x1190 net/9p/client.c:993
+ v9fs_session_init+0x1e6/0x13c0 fs/9p/v9fs.c:408
+ v9fs_mount+0xb9/0xbd0 fs/9p/vfs_super.c:126
+ legacy_get_tree+0xf1/0x200 fs/fs_context.c:610
+ vfs_get_tree+0x85/0x2e0 fs/super.c:1530
+ do_new_mount fs/namespace.c:3040 [inline]
+ path_mount+0x675/0x1d00 fs/namespace.c:3370
+ do_mount fs/namespace.c:3383 [inline]
+ __do_sys_mount fs/namespace.c:3591 [inline]
+ __se_sys_mount fs/namespace.c:3568 [inline]
+ __x64_sys_mount+0x282/0x300 fs/namespace.c:3568
+ do_syscall_x64 arch/x86/entry/common.c:50 [inline]
+ do_syscall_64+0x38/0x90 arch/x86/entry/common.c:80
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+
+The buggy address belongs to the object at ffff888008880780
+ which belongs to the cache kernfs_node_cache of size 128
+The buggy address is located 112 bytes inside of
+ 128-byte region [ffff888008880780, ffff888008880800)
+
+The buggy address belongs to the physical page:
+page:00000000732833f8 refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x8880
+flags: 0x100000000000200(slab|node=0|zone=1)
+raw: 0100000000000200 0000000000000000 dead000000000122 ffff888001147280
+raw: 0000000000000000 0000000000150015 00000001ffffffff 0000000000000000
+page dumped because: kasan: bad access detected
+
+Memory state around the buggy address:
+ ffff888008880680: fc fc fc fc fc fc fc fc fa fb fb fb fb fb fb fb
+ ffff888008880700: fb fb fb fb fb fb fb fb fc fc fc fc fc fc fc fc
+>ffff888008880780: fa fb fb fb fb fb fb fb fb fb fb fb fb fb fb fb
+                                                             ^
+ ffff888008880800: fc fc fc fc fc fc fc fc fa fb fb fb fb fb fb fb
+ ffff888008880880: fb fb fb fb fb fb fb fb fc fc fc fc fc fc fc fc
+==================================================================
+
+Acked-by: Tejun Heo <tj@kernel.org>
+Cc: stable <stable@kernel.org> # -rc3
+Signed-off-by: Christian A. Ehrhardt <lk@c--e.de>
+Link: https://lore.kernel.org/r/20220913121723.691454-1-lk@c--e.de
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ fs/kernfs/dir.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/fs/kernfs/dir.c b/fs/kernfs/dir.c
+index 1cc88ba6de9077..2e9313988871bc 100644
+--- a/fs/kernfs/dir.c
++++ b/fs/kernfs/dir.c
+@@ -1585,8 +1585,11 @@ int kernfs_remove_by_name_ns(struct kernfs_node *parent, const char *name,
+ 	down_write(&root->kernfs_rwsem);
+ 
+ 	kn = kernfs_find_ns(parent, name, ns);
+-	if (kn)
++	if (kn) {
++		kernfs_get(kn);
+ 		__kernfs_remove(kn);
++		kernfs_put(kn);
++	}
+ 
+ 	up_write(&root->kernfs_rwsem);
+ 
+From 6607901fce79959130db485e7549dacaaeef034e Mon Sep 17 00:00:00 2001
+From: Chengming Gui <Jack.Gui@amd.com>
+Date: Tue, 18 Oct 2022 17:31:38 +0800
+Subject: [PATCH] drm/amdgpu: fix pstate setting issue
+
+commit 79610d3041338dc1ef554d6fd8b3b3e23be527f5 upstream.
+
+[WHY]
+0, original pstate X
+1, ctx_A_create -> ctx_A->stable_pstate = X
+2, ctx_A_set_pstate (Y) -> current pstate is Y (PEAK or STANDARD)
+3, ctx_B_create -> ctx_B->stable_pstate =  Y
+4, ctx_A_destroy -> restore pstate to X
+5, ctx_B_destroy -> restore pstate to Y
+Above sequence will cause final pstate is wrong (Y), should be original X.
+
+[HOW]
+When ctx_B create,
+if  ctx_A touched pstate setting
+(not auto, stable_pstate_ctx != NULL),
+set ctx_B->stable_pstate the same value as ctx_A saved,
+if stable_pstate_ctx == NULL,
+fetch current pstate to fill
+ctx_B->stable_pstate.
+
+Signed-off-by: Chengming Gui <Jack.Gui@amd.com>
+Reviewed-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c
+index 8ee4e8491f3917..4048ba1b661e38 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ctx.c
+@@ -327,7 +327,10 @@ static int amdgpu_ctx_init(struct amdgpu_ctx_mgr *mgr, int32_t priority,
+ 	if (r)
+ 		return r;
+ 
+-	ctx->stable_pstate = current_stable_pstate;
++	if (mgr->adev->pm.stable_pstate_ctx)
++		ctx->stable_pstate = mgr->adev->pm.stable_pstate_ctx->stable_pstate;
++	else
++		ctx->stable_pstate = current_stable_pstate;
+ 
+ 	return 0;
+ }
+From e8581095dd284a11c0f1c437862dfc716399c2f0 Mon Sep 17 00:00:00 2001
+From: Takashi Iwai <tiwai@suse.de>
+Date: Fri, 21 Oct 2022 14:27:22 +0200
+Subject: [PATCH] ALSA: usb-audio: Add quirks for M-Audio Fast Track C400/600
+
+commit 794814529384721ce8f4d34228dc599cc010353d upstream.
+
+M-Audio Fast Track C400 and C600 devices (0763:2030 and 0763:2031,
+respectively) seem requiring the explicit setup for the implicit
+feedback mode.  This patch adds the quirk entries for those.
+
+BugLink: https://bugzilla.kernel.org/show_bug.cgi?id=214817
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/20221021122722.24784-1-tiwai@suse.de
+Signed-off-by: Takashi Iwai <tiwai@suse.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ sound/usb/implicit.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/sound/usb/implicit.c b/sound/usb/implicit.c
+index e1bf1b5da423c5..f3e8484b3d9cb7 100644
+--- a/sound/usb/implicit.c
++++ b/sound/usb/implicit.c
+@@ -47,6 +47,8 @@ struct snd_usb_implicit_fb_match {
+ static const struct snd_usb_implicit_fb_match playback_implicit_fb_quirks[] = {
+ 	/* Fixed EP */
+ 	/* FIXME: check the availability of generic matching */
++	IMPLICIT_FB_FIXED_DEV(0x0763, 0x2030, 0x81, 3), /* M-Audio Fast Track C400 */
++	IMPLICIT_FB_FIXED_DEV(0x0763, 0x2031, 0x81, 3), /* M-Audio Fast Track C600 */
+ 	IMPLICIT_FB_FIXED_DEV(0x0763, 0x2080, 0x81, 2), /* M-Audio FastTrack Ultra */
+ 	IMPLICIT_FB_FIXED_DEV(0x0763, 0x2081, 0x81, 2), /* M-Audio FastTrack Ultra */
+ 	IMPLICIT_FB_FIXED_DEV(0x2466, 0x8010, 0x81, 2), /* Fractal Audio Axe-Fx III */
+From 3e2c60da6284dd1a2f173ad8d62b8d72c8ba2bfc Mon Sep 17 00:00:00 2001
+From: Alex Deucher <alexander.deucher@amd.com>
+Date: Wed, 19 Oct 2022 16:57:42 -0400
+Subject: [PATCH] drm/amdgpu: fix sdma doorbell init ordering on APUs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+commit 50b0e4d4da09fa501e722af886f97e60a4f820d6 upstream.
+
+Commit 8795e182b02d ("PCI/portdrv: Don't disable AER reporting in get_port_device_capability()")
+uncovered a bug in amdgpu that required a reordering of the driver
+init sequence to avoid accessing a special register on the GPU
+before it was properly set up leading to an PCI AER error.  This
+reordering uncovered a different hw programming ordering dependency
+in some APUs where the SDMA doorbells need to be programmed before
+the GFX doorbells. To fix this, move the SDMA doorbell programming
+back into the soc15 common code, but use the actual doorbell range
+values directly rather than the values stored in the ring structure
+since those will not be initialized at this point.
+
+This is a partial revert, but with the doorbell assignment
+fixed so the proper doorbell index is set before it's used.
+
+Fixes: e3163bc8ffdfdb ("drm/amdgpu: move nbio sdma_doorbell_range() into sdma code for vega")
+Acked-by: Christian König <christian.koenig@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: skhan@linuxfoundation.org
+Cc: stable@vger.kernel.org
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ drivers/gpu/drm/amd/amdgpu/sdma_v4_0.c |  5 -----
+ drivers/gpu/drm/amd/amdgpu/soc15.c     | 21 +++++++++++++++++++++
+ 2 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/sdma_v4_0.c b/drivers/gpu/drm/amd/amdgpu/sdma_v4_0.c
+index 56424f75dd2cc9..65181efba50ec7 100644
+--- a/drivers/gpu/drm/amd/amdgpu/sdma_v4_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/sdma_v4_0.c
+@@ -1504,11 +1504,6 @@ static int sdma_v4_0_start(struct amdgpu_device *adev)
+ 		WREG32_SDMA(i, mmSDMA0_CNTL, temp);
+ 
+ 		if (!amdgpu_sriov_vf(adev)) {
+-			ring = &adev->sdma.instance[i].ring;
+-			adev->nbio.funcs->sdma_doorbell_range(adev, i,
+-				ring->use_doorbell, ring->doorbell_index,
+-				adev->doorbell_index.sdma_doorbell_range);
+-
+ 			/* unhalt engine */
+ 			temp = RREG32_SDMA(i, mmSDMA0_F32_CNTL);
+ 			temp = REG_SET_FIELD(temp, SDMA0_F32_CNTL, HALT, 0);
+diff --git a/drivers/gpu/drm/amd/amdgpu/soc15.c b/drivers/gpu/drm/amd/amdgpu/soc15.c
+index 183024d7c184e3..e3b2b6b4f1a662 100644
+--- a/drivers/gpu/drm/amd/amdgpu/soc15.c
++++ b/drivers/gpu/drm/amd/amdgpu/soc15.c
+@@ -1211,6 +1211,20 @@ static int soc15_common_sw_fini(void *handle)
+ 	return 0;
+ }
+ 
++static void soc15_sdma_doorbell_range_init(struct amdgpu_device *adev)
++{
++	int i;
++
++	/* sdma doorbell range is programed by hypervisor */
++	if (!amdgpu_sriov_vf(adev)) {
++		for (i = 0; i < adev->sdma.num_instances; i++) {
++			adev->nbio.funcs->sdma_doorbell_range(adev, i,
++				true, adev->doorbell_index.sdma_engine[i] << 1,
++				adev->doorbell_index.sdma_doorbell_range);
++		}
++	}
++}
++
+ static int soc15_common_hw_init(void *handle)
+ {
+ 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+@@ -1230,6 +1244,13 @@ static int soc15_common_hw_init(void *handle)
+ 
+ 	/* enable the doorbell aperture */
+ 	soc15_enable_doorbell_aperture(adev, true);
++	/* HW doorbell routing policy: doorbell writing not
++	 * in SDMA/IH/MM/ACV range will be routed to CP. So
++	 * we need to init SDMA doorbell range prior
++	 * to CP ip block init and ring test.  IH already
++	 * happens before CP.
++	 */
++	soc15_sdma_doorbell_range_init(adev);
+ 
+ 	return 0;
+ }
+From 6d5e13098443196991e161e9d6c40c4d5e6aa79c Mon Sep 17 00:00:00 2001
+From: Evan Quan <evan.quan@amd.com>
+Date: Thu, 29 Sep 2022 10:30:01 +0800
+Subject: [PATCH] drm/amd/pm: fulfill SMU13.0.7 cstate control interface
+
+commit ba2f09960e75accf757ed12b4ef61409dcc97df8 upstream.
+
+Fulfill the functionality for cstate control.
+
+Signed-off-by: Evan Quan <evan.quan@amd.com>
+Reviewed-by: Hawking Zhang <Hawking.Zhang@amd.com>
+Reviewed-by: Lijo Lazar <lijo.lazar@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c
+index c422bf8a09b1d0..c4102cfb734c24 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c
+@@ -121,6 +121,7 @@ static struct cmn2asic_msg_mapping smu_v13_0_7_message_map[SMU_MSG_MAX_COUNT] =
+ 	MSG_MAP(Mode1Reset,             PPSMC_MSG_Mode1Reset,                  0),
+ 	MSG_MAP(PrepareMp1ForUnload,		PPSMC_MSG_PrepareMp1ForUnload,         0),
+ 	MSG_MAP(SetMGpuFanBoostLimitRpm,	PPSMC_MSG_SetMGpuFanBoostLimitRpm,     0),
++	MSG_MAP(DFCstateControl,		PPSMC_MSG_SetExternalClientDfCstateAllow, 0),
+ };
+ 
+ static struct cmn2asic_mapping smu_v13_0_7_clk_map[SMU_CLK_COUNT] = {
+@@ -1587,6 +1588,16 @@ static bool smu_v13_0_7_is_mode1_reset_supported(struct smu_context *smu)
+ 
+ 	return true;
+ }
++
++static int smu_v13_0_7_set_df_cstate(struct smu_context *smu,
++				     enum pp_df_cstate state)
++{
++	return smu_cmn_send_smc_msg_with_param(smu,
++					       SMU_MSG_DFCstateControl,
++					       state,
++					       NULL);
++}
++
+ static const struct pptable_funcs smu_v13_0_7_ppt_funcs = {
+ 	.get_allowed_feature_mask = smu_v13_0_7_get_allowed_feature_mask,
+ 	.set_default_dpm_table = smu_v13_0_7_set_default_dpm_table,
+@@ -1649,6 +1660,7 @@ static const struct pptable_funcs smu_v13_0_7_ppt_funcs = {
+ 	.mode1_reset_is_support = smu_v13_0_7_is_mode1_reset_supported,
+ 	.mode1_reset = smu_v13_0_mode1_reset,
+ 	.set_mp1_state = smu_v13_0_7_set_mp1_state,
++	.set_df_cstate = smu_v13_0_7_set_df_cstate,
+ };
+ 
+ void smu_v13_0_7_set_ppt_funcs(struct smu_context *smu)
+From 7391798e244c6fed273166fc8724098c12617b80 Mon Sep 17 00:00:00 2001
+From: Tim Huang <tim.huang@amd.com>
+Date: Thu, 29 Sep 2022 15:06:47 +0800
+Subject: [PATCH] drm/amd/pm: add SMU IP v13.0.4 IF version define to V7
+
+commit 31c261a7ffb8d5bba8144e2d43db304f2bc7e81a upstream.
+
+The pmfw has changed the driver interface version, so keep same with the
+fw.
+
+Signed-off-by: Tim Huang <tim.huang@amd.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h b/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h
+index f442bf085a3181..f75b9688f5129c 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h
++++ b/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h
+@@ -28,7 +28,7 @@
+ #define SMU13_DRIVER_IF_VERSION_INV 0xFFFFFFFF
+ #define SMU13_DRIVER_IF_VERSION_YELLOW_CARP 0x04
+ #define SMU13_DRIVER_IF_VERSION_ALDE 0x08
+-#define SMU13_DRIVER_IF_VERSION_SMU_V13_0_4 0x05
++#define SMU13_DRIVER_IF_VERSION_SMU_V13_0_4 0x07
+ #define SMU13_DRIVER_IF_VERSION_SMU_V13_0_5 0x04
+ #define SMU13_DRIVER_IF_VERSION_SMU_V13_0_0 0x30
+ #define SMU13_DRIVER_IF_VERSION_SMU_V13_0_7 0x2C
+From 0c858ae2f1d5a459f742677be76d40e7afa45fa7 Mon Sep 17 00:00:00 2001
+From: Evan Quan <evan.quan@amd.com>
+Date: Thu, 29 Sep 2022 10:50:44 +0800
+Subject: [PATCH] drm/amd/pm: disable cstate feature for gpu reset scenario
+
+commit 3059cd8c5f797ad83d2b194ae66339f5c007ca43 upstream.
+
+Suggested by PMFW team and same as what did for gfxoff feature.
+This can address some Mode1Reset failures observed on SMU13.0.0.
+
+Signed-off-by: Evan Quan <evan.quan@amd.com>
+Reviewed-by: Hawking Zhang <Hawking.Zhang@amd.com>
+Reviewed-by: Lijo Lazar <lijo.lazar@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_device.c         | 8 ++++++++
+ drivers/gpu/drm/amd/pm/swsmu/smu11/arcturus_ppt.c  | 8 ++++++++
+ drivers/gpu/drm/amd/pm/swsmu/smu13/aldebaran_ppt.c | 9 +++++++++
+ 3 files changed, 25 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c
+index 25e1f5ed7ead14..91665fe44e7ca2 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_device.c
+@@ -2926,6 +2926,14 @@ static int amdgpu_device_ip_suspend_phase1(struct amdgpu_device *adev)
+ 	amdgpu_device_set_pg_state(adev, AMD_PG_STATE_UNGATE);
+ 	amdgpu_device_set_cg_state(adev, AMD_CG_STATE_UNGATE);
+ 
++	/*
++	 * Per PMFW team's suggestion, driver needs to handle gfxoff
++	 * and df cstate features disablement for gpu reset(e.g. Mode1Reset)
++	 * scenario. Add the missing df cstate disablement here.
++	 */
++	if (amdgpu_dpm_set_df_cstate(adev, DF_CSTATE_DISALLOW))
++		dev_warn(adev->dev, "Failed to disallow df cstate");
++
+ 	for (i = adev->num_ip_blocks - 1; i >= 0; i--) {
+ 		if (!adev->ip_blocks[i].status.valid)
+ 			continue;
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu11/arcturus_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu11/arcturus_ppt.c
+index 445005571f76f0..9cd005131f5661 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/arcturus_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/arcturus_ppt.c
+@@ -2242,9 +2242,17 @@ static void arcturus_get_unique_id(struct smu_context *smu)
+ static int arcturus_set_df_cstate(struct smu_context *smu,
+ 				  enum pp_df_cstate state)
+ {
++	struct amdgpu_device *adev = smu->adev;
+ 	uint32_t smu_version;
+ 	int ret;
+ 
++	/*
++	 * Arcturus does not need the cstate disablement
++	 * prerequisite for gpu reset.
++	 */
++	if (amdgpu_in_reset(adev) || adev->in_suspend)
++		return 0;
++
+ 	ret = smu_cmn_get_smc_version(smu, NULL, &smu_version);
+ 	if (ret) {
+ 		dev_err(smu->adev->dev, "Failed to get smu version!\n");
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu13/aldebaran_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu13/aldebaran_ppt.c
+index 619aee51b12381..d30ec3005ea191 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu13/aldebaran_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu13/aldebaran_ppt.c
+@@ -1640,6 +1640,15 @@ static bool aldebaran_is_baco_supported(struct smu_context *smu)
+ static int aldebaran_set_df_cstate(struct smu_context *smu,
+ 				   enum pp_df_cstate state)
+ {
++	struct amdgpu_device *adev = smu->adev;
++
++	/*
++	 * Aldebaran does not need the cstate disablement
++	 * prerequisite for gpu reset.
++	 */
++	if (amdgpu_in_reset(adev) || adev->in_suspend)
++		return 0;
++
+ 	return smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_DFCstateControl, state, NULL);
+ }
+ 
+From d6a79ae75b891b755fba356f1c1621fadfe76727 Mon Sep 17 00:00:00 2001
+From: Evan Quan <evan.quan@amd.com>
+Date: Thu, 29 Sep 2022 10:24:51 +0800
+Subject: [PATCH] drm/amd/pm: fulfill SMU13.0.0 cstate control interface
+
+commit 528c0e66e0c01a8c078d2d94431db80f9c75d2a0 upstream.
+
+Fulfill the functionality for cstate control.
+
+Signed-off-by: Evan Quan <evan.quan@amd.com>
+Reviewed-by: Hawking Zhang <Hawking.Zhang@amd.com>
+Reviewed-by: Lijo Lazar <lijo.lazar@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c
+index 1d454485e0d91f..29529328152d01 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c
+@@ -119,6 +119,7 @@ static struct cmn2asic_msg_mapping smu_v13_0_0_message_map[SMU_MSG_MAX_COUNT] =
+ 	MSG_MAP(NotifyPowerSource,		PPSMC_MSG_NotifyPowerSource,           0),
+ 	MSG_MAP(Mode1Reset,			PPSMC_MSG_Mode1Reset,                  0),
+ 	MSG_MAP(PrepareMp1ForUnload,		PPSMC_MSG_PrepareMp1ForUnload,         0),
++	MSG_MAP(DFCstateControl,		PPSMC_MSG_SetExternalClientDfCstateAllow, 0),
+ };
+ 
+ static struct cmn2asic_mapping smu_v13_0_0_clk_map[SMU_CLK_COUNT] = {
+@@ -1753,6 +1754,15 @@ static int smu_v13_0_0_set_mp1_state(struct smu_context *smu,
+ 	return ret;
+ }
+ 
++static int smu_v13_0_0_set_df_cstate(struct smu_context *smu,
++				     enum pp_df_cstate state)
++{
++	return smu_cmn_send_smc_msg_with_param(smu,
++					       SMU_MSG_DFCstateControl,
++					       state,
++					       NULL);
++}
++
+ static const struct pptable_funcs smu_v13_0_0_ppt_funcs = {
+ 	.get_allowed_feature_mask = smu_v13_0_0_get_allowed_feature_mask,
+ 	.set_default_dpm_table = smu_v13_0_0_set_default_dpm_table,
+@@ -1822,6 +1832,7 @@ static const struct pptable_funcs smu_v13_0_0_ppt_funcs = {
+ 	.mode1_reset_is_support = smu_v13_0_0_is_mode1_reset_supported,
+ 	.mode1_reset = smu_v13_0_mode1_reset,
+ 	.set_mp1_state = smu_v13_0_0_set_mp1_state,
++	.set_df_cstate = smu_v13_0_0_set_df_cstate,
+ };
+ 
+ void smu_v13_0_0_set_ppt_funcs(struct smu_context *smu)
+From 0fe229d9eedb7fae9779bdb86d39c2c80310dba5 Mon Sep 17 00:00:00 2001
+From: Tim Huang <tim.huang@amd.com>
+Date: Thu, 29 Sep 2022 14:39:21 +0800
+Subject: [PATCH] drm/amd/pm: update SMU IP v13.0.4 driver interface version
+
+commit 853fdb49160e9c30674fd8e4a2eabc06bf70b13a upstream.
+
+Update the SMU driver interface version to V7.
+
+Signed-off-by: Tim Huang <tim.huang@amd.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ .../swsmu/inc/pmfw_if/smu13_driver_if_v13_0_4.h | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_4.h b/drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_4.h
+index ae2d337158f3b0..f77401709d83cc 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_4.h
++++ b/drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_4.h
+@@ -27,7 +27,7 @@
+ // *** IMPORTANT ***
+ // SMU TEAM: Always increment the interface version if
+ // any structure is changed in this file
+-#define PMFW_DRIVER_IF_VERSION 5
++#define PMFW_DRIVER_IF_VERSION 7
+ 
+ typedef struct {
+   int32_t value;
+@@ -163,8 +163,8 @@ typedef struct {
+   uint16_t DclkFrequency;               //[MHz]
+   uint16_t MemclkFrequency;             //[MHz]
+   uint16_t spare;                       //[centi]
+-  uint16_t UvdActivity;                 //[centi]
+   uint16_t GfxActivity;                 //[centi]
++  uint16_t UvdActivity;                 //[centi]
+ 
+   uint16_t Voltage[2];                  //[mV] indices: VDDCR_VDD, VDDCR_SOC
+   uint16_t Current[2];                  //[mA] indices: VDDCR_VDD, VDDCR_SOC
+@@ -199,6 +199,19 @@ typedef struct {
+   uint16_t DeviceState;
+   uint16_t CurTemp;                     //[centi-Celsius]
+   uint16_t spare2;
++
++  uint16_t AverageGfxclkFrequency;
++  uint16_t AverageFclkFrequency;
++  uint16_t AverageGfxActivity;
++  uint16_t AverageSocclkFrequency;
++  uint16_t AverageVclkFrequency;
++  uint16_t AverageVcnActivity;
++  uint16_t AverageDRAMReads;          //Filtered DF Bandwidth::DRAM Reads
++  uint16_t AverageDRAMWrites;         //Filtered DF Bandwidth::DRAM Writes
++  uint16_t AverageSocketPower;        //Filtered value of CurrentSocketPower
++  uint16_t AverageCorePower;          //Filtered of [sum of CorePower[8]])
++  uint16_t AverageCoreC0Residency[8]; //Filtered of [average C0 residency %  per core]
++  uint32_t MetricsCounter;            //Counts the # of metrics table parameter reads per update to the metrics table, i.e. if the metrics table update happens every 1 second, this value could be up to 1000 if the smu collected metrics data every cycle, or as low as 0 if the smu was asleep the whole time. Reset to 0 after writing.
+ } SmuMetrics_t;
+ 
+ typedef struct {
+From 1499f9c37a7e5dd894b93fb288365a945f10796b Mon Sep 17 00:00:00 2001
+From: Khaled Almahallawy <khaled.almahallawy@intel.com>
+Date: Thu, 15 Sep 2022 22:49:00 -0700
+Subject: [PATCH] drm/dp: Don't rewrite link config when setting phy test
+ pattern
+
+[ Upstream commit 7b4d8db657192066bc6f1f6635d348413dac1e18 ]
+
+The sequence for Source DP PHY CTS automation is [2][1]:
+1- Emulate successful Link Training(LT)
+2- Short HPD and change link rates and number of lanes by LT.
+(This is same flow for Link Layer CTS)
+3- Short HPD and change PHY test pattern and swing/pre-emphasis
+levels (This step should not trigger LT)
+
+The problem is with DP PHY compliance setup as follow:
+
+     [DPTX + on board LTTPR]------Main Link--->[Scope]
+     	     	        ^                         |
+			|                         |
+			|                         |
+			----------Aux Ch------>[Aux Emulator]
+
+At step 3, before writing TRAINING_LANEx_SET/LINK_QUAL_PATTERN_SET
+to declare the pattern/swing requested by scope, we write link
+config in LINK_BW_SET/LANE_COUNT_SET on a port that has LTTPR.
+As LTTPR snoops aux transaction, LINK_BW_SET/LANE_COUNT_SET writes
+indicate a LT will start [Check DP 2.0 E11 -Sec 3.6.8.2 & 3.6.8.6.3],
+and LTTPR will reset the link and stop sending DP signals to
+DPTX/Scope causing the measurements to fail. Note that step 3 will
+not trigger LT and DP link will never recovered by the
+Aux Emulator/Scope.
+
+The reset of link can be tested with a monitor connected to LTTPR
+port simply by writing to LINK_BW_SET or LANE_COUNT_SET as follow
+
+  igt/tools/dpcd_reg write --offset=0x100 --value 0x14 --device=2
+
+OR
+
+  printf '\x14' | sudo dd of=/dev/drm_dp_aux2 bs=1 count=1 conv=notrunc
+  seek=$((0x100))
+
+This single aux write causes the screen to blank, sending short HPD to
+DPTX, setting LINK_STATUS_UPDATE = 1 in DPCD 0x204, and triggering LT.
+
+As stated in [1]:
+"Before any TX electrical testing can be performed, the link between a
+DPTX and DPRX (in this case, a piece of test equipment), including all
+LTTPRs within the path, shall be trained as defined in this Standard."
+
+In addition, changing Phy pattern/Swing/Pre-emphasis (Step 3) uses the
+same link rate and lane count applied on step 2, so no need to redo LT.
+
+The fix is to not rewrite link config in step 3, and just writes
+TRAINING_LANEx_SET and LINK_QUAL_PATTERN_SET
+
+[1]: DP 2.0 E11 - 3.6.11.1 LTTPR DPTX_PHY Electrical Compliance
+
+[2]: Configuring UnigrafDPTC Controller - Automation Test Sequence
+https://www.keysight.com/us/en/assets/9922-01244/help-files/
+D9040DPPC-DisplayPort-Test-Software-Online-Help-latest.chm
+
+Cc: Imre Deak <imre.deak@intel.com>
+Cc: Jani Nikula <jani.nikula@intel.com>
+Cc: Or Cochvi <or.cochvi@intel.com>
+Signed-off-by: Khaled Almahallawy <khaled.almahallawy@intel.com>
+Signed-off-by: Jani Nikula <jani.nikula@intel.com>
+Link: https://patchwork.freedesktop.org/patch/msgid/20220916054900.415804-1-khaled.almahallawy@intel.com
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ drivers/gpu/drm/display/drm_dp_helper.c | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/drivers/gpu/drm/display/drm_dp_helper.c b/drivers/gpu/drm/display/drm_dp_helper.c
+index e5bab236b3ae5c..4c0c4e3d1e2060 100644
+--- a/drivers/gpu/drm/display/drm_dp_helper.c
++++ b/drivers/gpu/drm/display/drm_dp_helper.c
+@@ -2638,17 +2638,8 @@ int drm_dp_set_phy_test_pattern(struct drm_dp_aux *aux,
+ 				struct drm_dp_phy_test_params *data, u8 dp_rev)
+ {
+ 	int err, i;
+-	u8 link_config[2];
+ 	u8 test_pattern;
+ 
+-	link_config[0] = drm_dp_link_rate_to_bw_code(data->link_rate);
+-	link_config[1] = data->num_lanes;
+-	if (data->enhanced_frame_cap)
+-		link_config[1] |= DP_LANE_COUNT_ENHANCED_FRAME_EN;
+-	err = drm_dp_dpcd_write(aux, DP_LINK_BW_SET, link_config, 2);
+-	if (err < 0)
+-		return err;
+-
+ 	test_pattern = data->phy_pattern;
+ 	if (dp_rev < 0x12) {
+ 		test_pattern = (test_pattern << 2) &
+From 8d4a50273344e388746e90deb1d68623a3c5da11 Mon Sep 17 00:00:00 2001
+From: Aric Cyr <aric.cyr@amd.com>
+Date: Fri, 9 Sep 2022 18:07:59 -0400
+Subject: [PATCH] drm/amd/display: Remove interface for periodic interrupt 1
+
+[ Upstream commit 97d8d6f075bd8f988589be02b91f6fa644d0b0b8 ]
+
+[why]
+Only a single VLINE interrupt is available so interface should not
+expose the second one which is used by DMU firmware.
+
+[how]
+Remove references to periodic_interrupt1 and VLINE1 from DC interfaces.
+
+Reviewed-by: Jaehyun Chung <jaehyun.chung@amd.com>
+Acked-by: Jasdeep Dhillon <jdhillon@amd.com>
+Signed-off-by: Aric Cyr <aric.cyr@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ drivers/gpu/drm/amd/display/dc/core/dc.c      | 16 +++------
+ drivers/gpu/drm/amd/display/dc/dc_stream.h    |  6 ++--
+ .../amd/display/dc/dcn10/dcn10_hw_sequencer.c | 35 ++++++-------------
+ .../amd/display/dc/dcn10/dcn10_hw_sequencer.h |  3 +-
+ .../gpu/drm/amd/display/dc/inc/hw_sequencer.h |  8 +----
+ 5 files changed, 18 insertions(+), 50 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/core/dc.c b/drivers/gpu/drm/amd/display/dc/core/dc.c
+index fb22c3d70528e2..18d6ee666297b1 100644
+--- a/drivers/gpu/drm/amd/display/dc/core/dc.c
++++ b/drivers/gpu/drm/amd/display/dc/core/dc.c
+@@ -2753,11 +2753,8 @@ static void copy_stream_update_to_stream(struct dc *dc,
+ 	if (update->abm_level)
+ 		stream->abm_level = *update->abm_level;
+ 
+-	if (update->periodic_interrupt0)
+-		stream->periodic_interrupt0 = *update->periodic_interrupt0;
+-
+-	if (update->periodic_interrupt1)
+-		stream->periodic_interrupt1 = *update->periodic_interrupt1;
++	if (update->periodic_interrupt)
++		stream->periodic_interrupt = *update->periodic_interrupt;
+ 
+ 	if (update->gamut_remap)
+ 		stream->gamut_remap_matrix = *update->gamut_remap;
+@@ -2987,13 +2984,8 @@ static void commit_planes_do_stream_update(struct dc *dc,
+ 
+ 		if (!pipe_ctx->top_pipe &&  !pipe_ctx->prev_odm_pipe && pipe_ctx->stream == stream) {
+ 
+-			if (stream_update->periodic_interrupt0 &&
+-					dc->hwss.setup_periodic_interrupt)
+-				dc->hwss.setup_periodic_interrupt(dc, pipe_ctx, VLINE0);
+-
+-			if (stream_update->periodic_interrupt1 &&
+-					dc->hwss.setup_periodic_interrupt)
+-				dc->hwss.setup_periodic_interrupt(dc, pipe_ctx, VLINE1);
++			if (stream_update->periodic_interrupt && dc->hwss.setup_periodic_interrupt)
++				dc->hwss.setup_periodic_interrupt(dc, pipe_ctx);
+ 
+ 			if ((stream_update->hdr_static_metadata && !stream->use_dynamic_meta) ||
+ 					stream_update->vrr_infopacket ||
+diff --git a/drivers/gpu/drm/amd/display/dc/dc_stream.h b/drivers/gpu/drm/amd/display/dc/dc_stream.h
+index f87f852d48298a..ae0922e98ef770 100644
+--- a/drivers/gpu/drm/amd/display/dc/dc_stream.h
++++ b/drivers/gpu/drm/amd/display/dc/dc_stream.h
+@@ -212,8 +212,7 @@ struct dc_stream_state {
+ 	/* DMCU info */
+ 	unsigned int abm_level;
+ 
+-	struct periodic_interrupt_config periodic_interrupt0;
+-	struct periodic_interrupt_config periodic_interrupt1;
++	struct periodic_interrupt_config periodic_interrupt;
+ 
+ 	/* from core_stream struct */
+ 	struct dc_context *ctx;
+@@ -283,8 +282,7 @@ struct dc_stream_update {
+ 	struct dc_info_packet *hdr_static_metadata;
+ 	unsigned int *abm_level;
+ 
+-	struct periodic_interrupt_config *periodic_interrupt0;
+-	struct periodic_interrupt_config *periodic_interrupt1;
++	struct periodic_interrupt_config *periodic_interrupt;
+ 
+ 	struct dc_info_packet *vrr_infopacket;
+ 	struct dc_info_packet *vsc_infopacket;
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c
+index 5b5d952b2b8cd7..bc9b92838ea9f8 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c
+@@ -3768,7 +3768,7 @@ void dcn10_calc_vupdate_position(
+ {
+ 	const struct dc_crtc_timing *dc_crtc_timing = &pipe_ctx->stream->timing;
+ 	int vline_int_offset_from_vupdate =
+-			pipe_ctx->stream->periodic_interrupt0.lines_offset;
++			pipe_ctx->stream->periodic_interrupt.lines_offset;
+ 	int vupdate_offset_from_vsync = dc->hwss.get_vupdate_offset_from_vsync(pipe_ctx);
+ 	int start_position;
+ 
+@@ -3793,18 +3793,10 @@ void dcn10_calc_vupdate_position(
+ static void dcn10_cal_vline_position(
+ 		struct dc *dc,
+ 		struct pipe_ctx *pipe_ctx,
+-		enum vline_select vline,
+ 		uint32_t *start_line,
+ 		uint32_t *end_line)
+ {
+-	enum vertical_interrupt_ref_point ref_point = INVALID_POINT;
+-
+-	if (vline == VLINE0)
+-		ref_point = pipe_ctx->stream->periodic_interrupt0.ref_point;
+-	else if (vline == VLINE1)
+-		ref_point = pipe_ctx->stream->periodic_interrupt1.ref_point;
+-
+-	switch (ref_point) {
++	switch (pipe_ctx->stream->periodic_interrupt.ref_point) {
+ 	case START_V_UPDATE:
+ 		dcn10_calc_vupdate_position(
+ 				dc,
+@@ -3813,7 +3805,9 @@ static void dcn10_cal_vline_position(
+ 				end_line);
+ 		break;
+ 	case START_V_SYNC:
+-		// Suppose to do nothing because vsync is 0;
++		// vsync is line 0 so start_line is just the requested line offset
++		*start_line = pipe_ctx->stream->periodic_interrupt.lines_offset;
++		*end_line = *start_line + 2;
+ 		break;
+ 	default:
+ 		ASSERT(0);
+@@ -3823,24 +3817,15 @@ static void dcn10_cal_vline_position(
+ 
+ void dcn10_setup_periodic_interrupt(
+ 		struct dc *dc,
+-		struct pipe_ctx *pipe_ctx,
+-		enum vline_select vline)
++		struct pipe_ctx *pipe_ctx)
+ {
+ 	struct timing_generator *tg = pipe_ctx->stream_res.tg;
++	uint32_t start_line = 0;
++	uint32_t end_line = 0;
+ 
+-	if (vline == VLINE0) {
+-		uint32_t start_line = 0;
+-		uint32_t end_line = 0;
++	dcn10_cal_vline_position(dc, pipe_ctx, &start_line, &end_line);
+ 
+-		dcn10_cal_vline_position(dc, pipe_ctx, vline, &start_line, &end_line);
+-
+-		tg->funcs->setup_vertical_interrupt0(tg, start_line, end_line);
+-
+-	} else if (vline == VLINE1) {
+-		pipe_ctx->stream_res.tg->funcs->setup_vertical_interrupt1(
+-				tg,
+-				pipe_ctx->stream->periodic_interrupt1.lines_offset);
+-	}
++	tg->funcs->setup_vertical_interrupt0(tg, start_line, end_line);
+ }
+ 
+ void dcn10_setup_vupdate_interrupt(struct dc *dc, struct pipe_ctx *pipe_ctx)
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.h b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.h
+index 9ae07c77fdc01d..0ef7bf7ddb75e9 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.h
++++ b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.h
+@@ -175,8 +175,7 @@ void dcn10_set_cursor_attribute(struct pipe_ctx *pipe_ctx);
+ void dcn10_set_cursor_sdr_white_level(struct pipe_ctx *pipe_ctx);
+ void dcn10_setup_periodic_interrupt(
+ 		struct dc *dc,
+-		struct pipe_ctx *pipe_ctx,
+-		enum vline_select vline);
++		struct pipe_ctx *pipe_ctx);
+ enum dc_status dcn10_set_clock(struct dc *dc,
+ 		enum dc_clock_type clock_type,
+ 		uint32_t clk_khz,
+diff --git a/drivers/gpu/drm/amd/display/dc/inc/hw_sequencer.h b/drivers/gpu/drm/amd/display/dc/inc/hw_sequencer.h
+index ccb3c719fc4dee..ac94dba72c18b4 100644
+--- a/drivers/gpu/drm/amd/display/dc/inc/hw_sequencer.h
++++ b/drivers/gpu/drm/amd/display/dc/inc/hw_sequencer.h
+@@ -32,11 +32,6 @@
+ #include "inc/hw/link_encoder.h"
+ #include "core_status.h"
+ 
+-enum vline_select {
+-	VLINE0,
+-	VLINE1
+-};
+-
+ struct pipe_ctx;
+ struct dc_state;
+ struct dc_stream_status;
+@@ -116,8 +111,7 @@ struct hw_sequencer_funcs {
+ 			int group_index, int group_size,
+ 			struct pipe_ctx *grouped_pipes[]);
+ 	void (*setup_periodic_interrupt)(struct dc *dc,
+-			struct pipe_ctx *pipe_ctx,
+-			enum vline_select vline);
++			struct pipe_ctx *pipe_ctx);
+ 	void (*set_drr)(struct pipe_ctx **pipe_ctx, int num_pipes,
+ 			struct dc_crtc_timing_adjust adjust);
+ 	void (*set_static_screen_control)(struct pipe_ctx **pipe_ctx,
+From 273eaaea321bc8618f07ebbad5a1a50784a31262 Mon Sep 17 00:00:00 2001
+From: Wenjing Liu <wenjing.liu@amd.com>
+Date: Thu, 15 Sep 2022 15:23:38 -0400
+Subject: [PATCH] drm/amd/display: polling vid stream status in hpo dp blank
+
+[ Upstream commit e32df0c7ecead95d70ca89f39b1b2b02a59ff691 ]
+
+[why]
+vid stream control is double bufferred, if we don't wait for video
+stream enable set to 0, we may get temporary image corruption
+showing on the stream when setting PIXEL_TO_SYMBOL_FIFO_ENABLE to 0.
+
+Reviewed-by: Ariel Bernstein <Eric.Bernstein@amd.com>
+Acked-by: Jasdeep Dhillon <jdhillon@amd.com>
+Signed-off-by: Wenjing Liu <wenjing.liu@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ .../drm/amd/display/dc/dcn31/dcn31_hpo_dp_stream_encoder.c  | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hpo_dp_stream_encoder.c b/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hpo_dp_stream_encoder.c
+index 23621ff08c9053..52fb2bf3d57818 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hpo_dp_stream_encoder.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hpo_dp_stream_encoder.c
+@@ -150,9 +150,9 @@ static void dcn31_hpo_dp_stream_enc_dp_blank(
+ 	 * 10us*5000=50ms. This covers 41.7ms of minimum 24 Hz mode +
+ 	 * a little more because we may not trust delay accuracy.
+ 	 */
+-	//REG_WAIT(DP_SYM32_ENC_VID_STREAM_CONTROL,
+-	//		VID_STREAM_STATUS, 0,
+-	//		10, 5000);
++	REG_WAIT(DP_SYM32_ENC_VID_STREAM_CONTROL,
++			VID_STREAM_STATUS, 0,
++			10, 5000);
+ 
+ 	/* Disable SDP tranmission */
+ 	REG_UPDATE(DP_SYM32_ENC_SDP_CONTROL,
+From 447524eea46e8466228b33da144a405af2973274 Mon Sep 17 00:00:00 2001
+From: Felix Kuehling <Felix.Kuehling@amd.com>
+Date: Wed, 21 Sep 2022 17:45:59 -0400
+Subject: [PATCH] drm/amdkfd: Fix UBSAN shift-out-of-bounds warning
+
+[ Upstream commit b292cafe2dd02d96a07147e4b160927e8399d5cc ]
+
+This was fixed in initialize_cpsch before, but not in initialize_nocpsch.
+Factor sdma bitmap initialization into a helper function to apply the
+correct implementation in both cases without duplicating it.
+
+v2: Added a range check
+
+Reported-by: Ellis Michael <ellis@ellismichael.com>
+Signed-off-by: Felix Kuehling <Felix.Kuehling@amd.com>
+Reviewed-by: Graham Sider <Graham.Sider@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ .../drm/amd/amdkfd/kfd_device_queue_manager.c | 45 +++++++++----------
+ 1 file changed, 21 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c b/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
+index 007a3db69df13a..ecb4c3abc62973 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
+@@ -1242,6 +1242,24 @@ static void init_interrupts(struct device_queue_manager *dqm)
+ 			dqm->dev->kfd2kgd->init_interrupts(dqm->dev->adev, i);
+ }
+ 
++static void init_sdma_bitmaps(struct device_queue_manager *dqm)
++{
++	unsigned int num_sdma_queues =
++		min_t(unsigned int, sizeof(dqm->sdma_bitmap)*8,
++		      get_num_sdma_queues(dqm));
++	unsigned int num_xgmi_sdma_queues =
++		min_t(unsigned int, sizeof(dqm->xgmi_sdma_bitmap)*8,
++		      get_num_xgmi_sdma_queues(dqm));
++
++	if (num_sdma_queues)
++		dqm->sdma_bitmap = GENMASK_ULL(num_sdma_queues-1, 0);
++	if (num_xgmi_sdma_queues)
++		dqm->xgmi_sdma_bitmap = GENMASK_ULL(num_xgmi_sdma_queues-1, 0);
++
++	dqm->sdma_bitmap &= ~get_reserved_sdma_queues_bitmap(dqm);
++	pr_info("sdma_bitmap: %llx\n", dqm->sdma_bitmap);
++}
++
+ static int initialize_nocpsch(struct device_queue_manager *dqm)
+ {
+ 	int pipe, queue;
+@@ -1270,11 +1288,7 @@ static int initialize_nocpsch(struct device_queue_manager *dqm)
+ 
+ 	memset(dqm->vmid_pasid, 0, sizeof(dqm->vmid_pasid));
+ 
+-	dqm->sdma_bitmap = ~0ULL >> (64 - get_num_sdma_queues(dqm));
+-	dqm->sdma_bitmap &= ~(get_reserved_sdma_queues_bitmap(dqm));
+-	pr_info("sdma_bitmap: %llx\n", dqm->sdma_bitmap);
+-
+-	dqm->xgmi_sdma_bitmap = ~0ULL >> (64 - get_num_xgmi_sdma_queues(dqm));
++	init_sdma_bitmaps(dqm);
+ 
+ 	return 0;
+ }
+@@ -1452,9 +1466,6 @@ static int set_sched_resources(struct device_queue_manager *dqm)
+ 
+ static int initialize_cpsch(struct device_queue_manager *dqm)
+ {
+-	uint64_t num_sdma_queues;
+-	uint64_t num_xgmi_sdma_queues;
+-
+ 	pr_debug("num of pipes: %d\n", get_pipes_per_mec(dqm));
+ 
+ 	mutex_init(&dqm->lock_hidden);
+@@ -1463,24 +1474,10 @@ static int initialize_cpsch(struct device_queue_manager *dqm)
+ 	dqm->active_cp_queue_count = 0;
+ 	dqm->gws_queue_count = 0;
+ 	dqm->active_runlist = false;
+-
+-	num_sdma_queues = get_num_sdma_queues(dqm);
+-	if (num_sdma_queues >= BITS_PER_TYPE(dqm->sdma_bitmap))
+-		dqm->sdma_bitmap = ULLONG_MAX;
+-	else
+-		dqm->sdma_bitmap = (BIT_ULL(num_sdma_queues) - 1);
+-
+-	dqm->sdma_bitmap &= ~(get_reserved_sdma_queues_bitmap(dqm));
+-	pr_info("sdma_bitmap: %llx\n", dqm->sdma_bitmap);
+-
+-	num_xgmi_sdma_queues = get_num_xgmi_sdma_queues(dqm);
+-	if (num_xgmi_sdma_queues >= BITS_PER_TYPE(dqm->xgmi_sdma_bitmap))
+-		dqm->xgmi_sdma_bitmap = ULLONG_MAX;
+-	else
+-		dqm->xgmi_sdma_bitmap = (BIT_ULL(num_xgmi_sdma_queues) - 1);
+-
+ 	INIT_WORK(&dqm->hw_exception_work, kfd_process_hw_exception);
+ 
++	init_sdma_bitmaps(dqm);
++
+ 	return 0;
+ }
+ 
+From c5e839e1e8d8344ba34b95c4f99468c64f6863ed Mon Sep 17 00:00:00 2001
+From: Amir Goldstein <amir73il@gmail.com>
+Date: Tue, 16 Aug 2022 17:53:17 +0300
+Subject: [PATCH] locks: fix TOCTOU race when granting write lease
+
+[ Upstream commit d6da19c9cace63290ccfccb1fc35151ffefc0bec ]
+
+Thread A trying to acquire a write lease checks the value of i_readcount
+and i_writecount in check_conflicting_open() to verify that its own fd
+is the only fd referencing the file.
+
+Thread B trying to open the file for read will call break_lease() in
+do_dentry_open() before incrementing i_readcount, which leaves a small
+window where thread A can acquire the write lease and then thread B
+completes the open of the file for read without breaking the write lease
+that was acquired by thread A.
+
+Fix this race by incrementing i_readcount before checking for existing
+leases, same as the case with i_writecount.
+
+Use a helper put_file_access() to decrement i_readcount or i_writecount
+in do_dentry_open() and __fput().
+
+Fixes: 387e3746d01c ("locks: eliminate false positive conflicts for write lease")
+Reviewed-by: Jeff Layton <jlayton@kernel.org>
+Signed-off-by: Amir Goldstein <amir73il@gmail.com>
+Signed-off-by: Al Viro <viro@zeniv.linux.org.uk>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ fs/file_table.c |  7 +------
+ fs/internal.h   | 10 ++++++++++
+ fs/open.c       | 11 ++++-------
+ 3 files changed, 15 insertions(+), 13 deletions(-)
+
+diff --git a/fs/file_table.c b/fs/file_table.c
+index 99c6796c9f28a6..dd88701e54a93a 100644
+--- a/fs/file_table.c
++++ b/fs/file_table.c
+@@ -324,12 +324,7 @@ static void __fput(struct file *file)
+ 	}
+ 	fops_put(file->f_op);
+ 	put_pid(file->f_owner.pid);
+-	if ((mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
+-		i_readcount_dec(inode);
+-	if (mode & FMODE_WRITER) {
+-		put_write_access(inode);
+-		__mnt_drop_write(mnt);
+-	}
++	put_file_access(file);
+ 	dput(dentry);
+ 	if (unlikely(mode & FMODE_NEED_UNMOUNT))
+ 		dissolve_on_fput(mnt);
+diff --git a/fs/internal.h b/fs/internal.h
+index 3e206d3e317c40..4372d67a375331 100644
+--- a/fs/internal.h
++++ b/fs/internal.h
+@@ -102,6 +102,16 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
+ extern struct file *alloc_empty_file(int, const struct cred *);
+ extern struct file *alloc_empty_file_noaccount(int, const struct cred *);
+ 
++static inline void put_file_access(struct file *file)
++{
++	if ((file->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ) {
++		i_readcount_dec(file->f_inode);
++	} else if (file->f_mode & FMODE_WRITER) {
++		put_write_access(file->f_inode);
++		__mnt_drop_write(file->f_path.mnt);
++	}
++}
++
+ /*
+  * super.c
+  */
+diff --git a/fs/open.c b/fs/open.c
+index cf7e5c350a54be..a81319b6177f69 100644
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -842,7 +842,9 @@ static int do_dentry_open(struct file *f,
+ 		return 0;
+ 	}
+ 
+-	if (f->f_mode & FMODE_WRITE && !special_file(inode->i_mode)) {
++	if ((f->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ) {
++		i_readcount_inc(inode);
++	} else if (f->f_mode & FMODE_WRITE && !special_file(inode->i_mode)) {
+ 		error = get_write_access(inode);
+ 		if (unlikely(error))
+ 			goto cleanup_file;
+@@ -882,8 +884,6 @@ static int do_dentry_open(struct file *f,
+ 			goto cleanup_all;
+ 	}
+ 	f->f_mode |= FMODE_OPENED;
+-	if ((f->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
+-		i_readcount_inc(inode);
+ 	if ((f->f_mode & FMODE_READ) &&
+ 	     likely(f->f_op->read || f->f_op->read_iter))
+ 		f->f_mode |= FMODE_CAN_READ;
+@@ -937,10 +937,7 @@ static int do_dentry_open(struct file *f,
+ 	if (WARN_ON_ONCE(error > 0))
+ 		error = -EINVAL;
+ 	fops_put(f->f_op);
+-	if (f->f_mode & FMODE_WRITER) {
+-		put_write_access(inode);
+-		__mnt_drop_write(f->f_path.mnt);
+-	}
++	put_file_access(f);
+ cleanup_file:
+ 	path_put(&f->f_path);
+ 	f->f_path.mnt = NULL;
+From 362b624b42095684b90cd5a80387b956efece907 Mon Sep 17 00:00:00 2001
+From: Yang Yingliang <yangyingliang@huawei.com>
+Date: Fri, 26 Aug 2022 16:57:54 +0800
+Subject: [PATCH] drm/amdgpu: add missing pci_disable_device() in
+ amdgpu_pmops_runtime_resume()
+
+[ Upstream commit 6b11af6d1c8f5d4135332bb932baaa06e511173d ]
+
+Add missing pci_disable_device() if amdgpu_device_resume() fails.
+
+Fixes: 8e4d5d43cc6c ("drm/amdgpu: Handling of amdgpu_device_resume return value for graceful teardown")
+Signed-off-by: Yang Yingliang <yangyingliang@huawei.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+index 429fcdf28836ed..de7144b06e933e 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_drv.c
+@@ -2563,8 +2563,11 @@ static int amdgpu_pmops_runtime_resume(struct device *dev)
+ 		amdgpu_device_baco_exit(drm_dev);
+ 	}
+ 	ret = amdgpu_device_resume(drm_dev, false);
+-	if (ret)
++	if (ret) {
++		if (amdgpu_device_supports_px(drm_dev))
++			pci_disable_device(pdev);
+ 		return ret;
++	}
+ 
+ 	if (amdgpu_device_supports_px(drm_dev))
+ 		drm_dev->switch_power_state = DRM_SWITCH_POWER_ON;
+From ed250b2a519eee0edccccd0040e993d590e37608 Mon Sep 17 00:00:00 2001
+From: Dan Carpenter <dan.carpenter@oracle.com>
+Date: Fri, 19 Aug 2022 08:22:32 +0300
+Subject: [PATCH] wifi: rtl8xxxu: tighten bounds checking in
+ rtl8xxxu_read_efuse()
+
+[ Upstream commit 620d5eaeb9059636864bda83ca1c68c20ede34a5 ]
+
+There some bounds checking to ensure that "map_addr" is not out of
+bounds before the start of the loop.  But the checking needs to be
+done as we iterate through the loop because "map_addr" gets larger as
+we iterate.
+
+Fixes: 26f1fad29ad9 ("New driver: rtl8xxxu (mac80211)")
+Signed-off-by: Dan Carpenter <dan.carpenter@oracle.com>
+Acked-by: Jes Sorensen <Jes.Sorensen@gmail.com>
+Signed-off-by: Kalle Valo <kvalo@kernel.org>
+Link: https://lore.kernel.org/r/Yv8eGLdBslLAk3Ct@kili
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ .../net/wireless/realtek/rtl8xxxu/rtl8xxxu_core.c  | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/net/wireless/realtek/rtl8xxxu/rtl8xxxu_core.c b/drivers/net/wireless/realtek/rtl8xxxu/rtl8xxxu_core.c
+index c66f0726b2535c..f3a107f19cf594 100644
+--- a/drivers/net/wireless/realtek/rtl8xxxu/rtl8xxxu_core.c
++++ b/drivers/net/wireless/realtek/rtl8xxxu/rtl8xxxu_core.c
+@@ -1878,13 +1878,6 @@ static int rtl8xxxu_read_efuse(struct rtl8xxxu_priv *priv)
+ 
+ 		/* We have 8 bits to indicate validity */
+ 		map_addr = offset * 8;
+-		if (map_addr >= EFUSE_MAP_LEN) {
+-			dev_warn(dev, "%s: Illegal map_addr (%04x), "
+-				 "efuse corrupt!\n",
+-				 __func__, map_addr);
+-			ret = -EINVAL;
+-			goto exit;
+-		}
+ 		for (i = 0; i < EFUSE_MAX_WORD_UNIT; i++) {
+ 			/* Check word enable condition in the section */
+ 			if (word_mask & BIT(i)) {
+@@ -1895,6 +1888,13 @@ static int rtl8xxxu_read_efuse(struct rtl8xxxu_priv *priv)
+ 			ret = rtl8xxxu_read_efuse8(priv, efuse_addr++, &val8);
+ 			if (ret)
+ 				goto exit;
++			if (map_addr >= EFUSE_MAP_LEN - 1) {
++				dev_warn(dev, "%s: Illegal map_addr (%04x), "
++					 "efuse corrupt!\n",
++					 __func__, map_addr);
++				ret = -EINVAL;
++				goto exit;
++			}
+ 			priv->efuse_wifi.raw[map_addr++] = val8;
+ 
+ 			ret = rtl8xxxu_read_efuse8(priv, efuse_addr++, &val8);
+From dc31357d5ebb18a29554fd6fd73dcad7a63447f7 Mon Sep 17 00:00:00 2001
+From: Yang Yingliang <yangyingliang@huawei.com>
+Date: Fri, 26 Aug 2022 10:38:17 +0800
+Subject: [PATCH] wifi: rtw88: add missing destroy_workqueue() on error path in
+ rtw_core_init()
+
+[ Upstream commit b0ea758b30bbdf7c4323c78b7c50c05d2e1224d5 ]
+
+Add the missing destroy_workqueue() before return from rtw_core_init()
+in error path.
+
+Fixes: fe101716c7c9 ("rtw88: replace tx tasklet with work queue")
+Signed-off-by: Yang Yingliang <yangyingliang@huawei.com>
+Reviewed-by: Ping-Ke Shih <pkshih@realtek.com>
+Signed-off-by: Kalle Valo <kvalo@kernel.org>
+Link: https://lore.kernel.org/r/20220826023817.3908255-1-yangyingliang@huawei.com
+Signed-off-by: Sasha Levin <sashal@kernel.org>
+---
+ drivers/net/wireless/realtek/rtw88/main.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/realtek/rtw88/main.c b/drivers/net/wireless/realtek/rtw88/main.c
+index 76dc9da88f6c21..3d31c0517a1297 100644
+--- a/drivers/net/wireless/realtek/rtw88/main.c
++++ b/drivers/net/wireless/realtek/rtw88/main.c
+@@ -2045,7 +2045,7 @@ int rtw_core_init(struct rtw_dev *rtwdev)
+ 	ret = rtw_load_firmware(rtwdev, RTW_NORMAL_FW);
+ 	if (ret) {
+ 		rtw_warn(rtwdev, "no firmware loaded\n");
+-		return ret;
++		goto out;
+ 	}
+ 
+ 	if (chip->wow_fw_name) {
+@@ -2055,11 +2055,15 @@ int rtw_core_init(struct rtw_dev *rtwdev)
+ 			wait_for_completion(&rtwdev->fw.completion);
+ 			if (rtwdev->fw.firmware)
+ 				release_firmware(rtwdev->fw.firmware);
+-			return ret;
++			goto out;
+ 		}
+ 	}
+ 
+ 	return 0;
++
++out:
++	destroy_workqueue(rtwdev->tx_wq);
++	return ret;
+ }
+ EXPORT_SYMBOL(rtw_core_init);
+ 
+
+From f0861f49bd946ff94fce4f82509c45e167f63690 Mon Sep 17 00:00:00 2001
+From: Borys Popławski <borysp@invisiblethingslab.com>
+Date: Wed, 5 Oct 2022 00:59:03 +0200
+Subject: x86/sgx: Add overflow check in sgx_validate_offset_length()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+sgx_validate_offset_length() function verifies "offset" and "length"
+arguments provided by userspace, but was missing an overflow check on
+their addition. Add it.
+
+Fixes: c6d26d370767 ("x86/sgx: Add SGX_IOC_ENCLAVE_ADD_PAGES")
+Signed-off-by: Borys Popławski <borysp@invisiblethingslab.com>
+Signed-off-by: Borislav Petkov <bp@suse.de>
+Reviewed-by: Jarkko Sakkinen <jarkko@kernel.org>
+Cc: stable@vger.kernel.org # v5.11+
+Link: https://lore.kernel.org/r/0d91ac79-6d84-abed-5821-4dbe59fa1a38@invisiblethingslab.com
+---
+ arch/x86/kernel/cpu/sgx/ioctl.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/arch/x86/kernel/cpu/sgx/ioctl.c b/arch/x86/kernel/cpu/sgx/ioctl.c
+index ebe79d60619f2..da8b8ea6b063d 100644
+--- a/arch/x86/kernel/cpu/sgx/ioctl.c
++++ b/arch/x86/kernel/cpu/sgx/ioctl.c
+@@ -356,6 +356,9 @@ static int sgx_validate_offset_length(struct sgx_encl *encl,
+ 	if (!length || !IS_ALIGNED(length, PAGE_SIZE))
+ 		return -EINVAL;
+ 
++	if (offset + length < offset)
++		return -EINVAL;
++
+ 	if (offset + length - PAGE_SIZE >= encl->size)
+ 		return -EINVAL;
+ 
+-- 
+cgit 
+
+
+From 36b038791e1e2baea892e9276588815fd14894b4 Mon Sep 17 00:00:00 2001
+From: Mel Gorman <mgorman@techsingularity.net>
+Date: Thu, 10 Nov 2022 12:44:00 +0000
+Subject: x86/fpu: Drop fpregs lock before inheriting FPU permissions
+
+Mike Galbraith reported the following against an old fork of preempt-rt
+but the same issue also applies to the current preempt-rt tree.
+
+   BUG: sleeping function called from invalid context at kernel/locking/spinlock_rt.c:46
+   in_atomic(): 1, irqs_disabled(): 0, non_block: 0, pid: 1, name: systemd
+   preempt_count: 1, expected: 0
+   RCU nest depth: 0, expected: 0
+   Preemption disabled at:
+   fpu_clone
+   CPU: 6 PID: 1 Comm: systemd Tainted: G            E       (unreleased)
+   Call Trace:
+    <TASK>
+    dump_stack_lvl
+    ? fpu_clone
+    __might_resched
+    rt_spin_lock
+    fpu_clone
+    ? copy_thread
+    ? copy_process
+    ? shmem_alloc_inode
+    ? kmem_cache_alloc
+    ? kernel_clone
+    ? __do_sys_clone
+    ? do_syscall_64
+    ? __x64_sys_rt_sigprocmask
+    ? syscall_exit_to_user_mode
+    ? do_syscall_64
+    ? syscall_exit_to_user_mode
+    ? do_syscall_64
+    ? syscall_exit_to_user_mode
+    ? do_syscall_64
+    ? exc_page_fault
+    ? entry_SYSCALL_64_after_hwframe
+    </TASK>
+
+Mike says:
+
+  The splat comes from fpu_inherit_perms() being called under fpregs_lock(),
+  and us reaching the spin_lock_irq() therein due to fpu_state_size_dynamic()
+  returning true despite static key __fpu_state_size_dynamic having never
+  been enabled.
+
+Mike's assessment looks correct. fpregs_lock on a PREEMPT_RT kernel disables
+preemption so calling spin_lock_irq() in fpu_inherit_perms() is unsafe. This
+problem exists since commit
+
+  9e798e9aa14c ("x86/fpu: Prepare fpu_clone() for dynamically enabled features").
+
+Even though the original bug report should not have enabled the paths at
+all, the bug still exists.
+
+fpregs_lock is necessary when editing the FPU registers or a task's FP
+state but it is not necessary for fpu_inherit_perms(). The only write
+of any FP state in fpu_inherit_perms() is for the new child which is
+not running yet and cannot context switch or be borrowed by a kernel
+thread yet. Hence, fpregs_lock is not protecting anything in the new
+child until clone() completes and can be dropped earlier. The siglock
+still needs to be acquired by fpu_inherit_perms() as the read of the
+parent's permissions has to be serialised.
+
+  [ bp: Cleanup splat. ]
+
+Fixes: 9e798e9aa14c ("x86/fpu: Prepare fpu_clone() for dynamically enabled features")
+Reported-by: Mike Galbraith <efault@gmx.de>
+Signed-off-by: Mel Gorman <mgorman@techsingularity.net>
+Signed-off-by: Borislav Petkov <bp@suse.de>
+Reviewed-by: Thomas Gleixner <tglx@linutronix.de>
+Cc: <stable@vger.kernel.org>
+Link: https://lore.kernel.org/r/20221110124400.zgymc2lnwqjukgfh@techsingularity.net
+---
+ arch/x86/kernel/fpu/core.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/x86/kernel/fpu/core.c b/arch/x86/kernel/fpu/core.c
+index 3b28c5b25e12c..d00db56a88682 100644
+--- a/arch/x86/kernel/fpu/core.c
++++ b/arch/x86/kernel/fpu/core.c
+@@ -605,9 +605,9 @@ int fpu_clone(struct task_struct *dst, unsigned long clone_flags, bool minimal)
+ 	if (test_thread_flag(TIF_NEED_FPU_LOAD))
+ 		fpregs_restore_userregs();
+ 	save_fpregs_to_fpstate(dst_fpu);
++	fpregs_unlock();
+ 	if (!(clone_flags & CLONE_THREAD))
+ 		fpu_inherit_perms(dst_fpu);
+-	fpregs_unlock();
+ 
+ 	/*
+ 	 * Children never inherit PASID state.
+-- 
+cgit 
+
+From 54de93cd8740d52a83728802b4270f953d1a636f Mon Sep 17 00:00:00 2001
+From: Petr Vorel <pvorel@suse.cz>
+Date: Thu, 20 Oct 2022 17:06:45 +0200
+Subject: kernel/utsname_sysctl.c: Add missing enum uts_proc value
+
+bfca3dd3d068 added new struct ctl_table uts_kern_table[], but not new
+enum uts_proc value. It broke the notification mechanism between the
+sethostname syscall and the pollers of /proc/sys/kernel/hostname.
+
+The table uts_kern_table is addressed within uts_proc_notify by the enum
+value, that's why new enum value is needed.
+
+Fixes: bfca3dd3d068 ("kernel/utsname_sysctl.c: print kernel arch")
+Reported-by: Torsten Hilbrich <torsten.hilbrich@secunet.com>
+Signed-off-by: Petr Vorel <pvorel@suse.cz>
+Link: https://lore.kernel.org/r/20221020150645.11719-1-pvorel@suse.cz
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ include/linux/utsname.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/linux/utsname.h b/include/linux/utsname.h
+index 2b1737c9b244d..bf7613ba412bf 100644
+--- a/include/linux/utsname.h
++++ b/include/linux/utsname.h
+@@ -10,6 +10,7 @@
+ #include <uapi/linux/utsname.h>
+ 
+ enum uts_proc {
++	UTS_PROC_ARCH,
+ 	UTS_PROC_OSTYPE,
+ 	UTS_PROC_OSRELEASE,
+ 	UTS_PROC_VERSION,
+-- 
+cgit 
+
+From a5b5fb0fc47ddc7d1ed6a0365197639a01bc1f3a Mon Sep 17 00:00:00 2001
+From: Mario Limonciello <mario.limonciello@amd.com>
+Date: Mon, 7 Nov 2022 20:33:23 -0600
+Subject: platform/x86/amd: pmc: Remove more CONFIG_DEBUG_FS checks
+
+commit b37fe34c8309 ("platform/x86/amd: pmc: remove CONFIG_DEBUG_FS
+checks") removed most CONFIG_DEBUG_FS checks, but there were some
+left that were reported to cause compile test failures.
+
+Remove the remaining checks, and also the unnecessary CONFIG_SUSPEND
+used in the same place.
+
+Reported-by: liyupeng@zbhlos.com
+Fixes: b37fe34c8309 ("platform/x86/amd: pmc: remove CONFIG_DEBUG_FS checks")
+Signed-off-by: Mario Limonciello <mario.limonciello@amd.com>
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=216679
+Link: https://lore.kernel.org/r/20221108023323.19304-1-mario.limonciello@amd.com
+Cc: stable@vger.kernel.org
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/amd/pmc.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/drivers/platform/x86/amd/pmc.c b/drivers/platform/x86/amd/pmc.c
+index 96e790e639a21..3b44f2fff5be2 100644
+--- a/drivers/platform/x86/amd/pmc.c
++++ b/drivers/platform/x86/amd/pmc.c
+@@ -276,7 +276,6 @@ static const struct file_operations amd_pmc_stb_debugfs_fops_v2 = {
+ 	.release = amd_pmc_stb_debugfs_release_v2,
+ };
+ 
+-#if defined(CONFIG_SUSPEND) || defined(CONFIG_DEBUG_FS)
+ static int amd_pmc_setup_smu_logging(struct amd_pmc_dev *dev)
+ {
+ 	if (dev->cpu_id == AMD_CPU_ID_PCO) {
+@@ -351,7 +350,6 @@ static int get_metrics_table(struct amd_pmc_dev *pdev, struct smu_metrics *table
+ 	memcpy_fromio(table, pdev->smu_virt_addr, sizeof(struct smu_metrics));
+ 	return 0;
+ }
+-#endif /* CONFIG_SUSPEND || CONFIG_DEBUG_FS */
+ 
+ #ifdef CONFIG_SUSPEND
+ static void amd_pmc_validate_deepest(struct amd_pmc_dev *pdev)
+-- 
+cgit 
+
+
+From 6412518f5cb953cbd84b6746db9741bfc92be40a Mon Sep 17 00:00:00 2001
+From: Shyam Sundar S K <Shyam-sundar.S-k@amd.com>
+Date: Wed, 9 Nov 2022 14:03:46 +0530
+Subject: platform/x86/amd: pmc: Add new ACPI ID AMDI0009
+
+Add new a new ACPI ID AMDI0009 used by upcoming AMD platform to the pmc
+supported list of devices.
+
+Cc: stable@vger.kernel.org # 6.0
+Signed-off-by: Shyam Sundar S K <Shyam-sundar.S-k@amd.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+Link: https://lore.kernel.org/r/20221109083346.361603-1-Shyam-sundar.S-k@amd.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/amd/pmc.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/platform/x86/amd/pmc.c b/drivers/platform/x86/amd/pmc.c
+index 3b44f2fff5be2..ef4ae977b8e0d 100644
+--- a/drivers/platform/x86/amd/pmc.c
++++ b/drivers/platform/x86/amd/pmc.c
+@@ -962,6 +962,7 @@ static const struct acpi_device_id amd_pmc_acpi_ids[] = {
+ 	{"AMDI0006", 0},
+ 	{"AMDI0007", 0},
+ 	{"AMDI0008", 0},
++	{"AMDI0009", 0},
+ 	{"AMD0004", 0},
+ 	{"AMD0005", 0},
+ 	{ }
+-- 
+cgit 
+
+
+From 53e16a6e3e69425081f8352e13e9fd23bf1abfca Mon Sep 17 00:00:00 2001
+From: Lennard Gäher <gaeher@mpi-sws.org>
+Date: Tue, 8 Nov 2022 08:20:23 +0100
+Subject: platform/x86: thinkpad_acpi: Enable s2idle quirk for 21A1 machine
+ type
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Previously, the s2idle quirk was only active for the 21A0 machine type
+of the P14s Gen2a product. This also enables it for the second 21A1 type,
+thus reducing wake-up times from s2idle.
+
+Signed-off-by: Lennard Gäher <gaeher@mpi-sws.org>
+Suggested-by: Mario Limonciello <mario.limonciello@amd.com>
+Reviewed-by: Mario Limonciello <mario.limonciello@amd.com>
+Link: https://gitlab.freedesktop.org/drm/amd/-/issues/2181
+Link: https://lore.kernel.org/r/20221108072023.17069-1-gaeher@mpi-sws.org
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/thinkpad_acpi.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/platform/x86/thinkpad_acpi.c b/drivers/platform/x86/thinkpad_acpi.c
+index 20e5c043a8e87..8476dfef4e626 100644
+--- a/drivers/platform/x86/thinkpad_acpi.c
++++ b/drivers/platform/x86/thinkpad_acpi.c
+@@ -4497,6 +4497,14 @@ static const struct dmi_system_id fwbug_list[] __initconst = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "21A0"),
+ 		}
+ 	},
++	{
++		.ident = "P14s Gen2 AMD",
++		.driver_data = &quirk_s2idle_bug,
++		.matches = {
++			DMI_MATCH(DMI_BOARD_VENDOR, "LENOVO"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "21A1"),
++		}
++	},
+ 	{}
+ };
+ 
+-- 
+cgit 
+
+
+From 2dbfb3f33350e1e868d3d7ed4c176d8777150878 Mon Sep 17 00:00:00 2001
+From: Roger Pau Monné <roger.pau@citrix.com>
+Date: Thu, 10 Nov 2022 17:31:44 +0100
+Subject: platform/x86/intel: pmc: Don't unconditionally attach Intel PMC when
+ virtualized
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The current logic in the Intel PMC driver will forcefully attach it
+when detecting any CPU on the intel_pmc_core_platform_ids array,
+even if the matching ACPI device is not present.
+
+There's no checking in pmc_core_probe() to assert that the PMC device
+is present, and hence on virtualized environments the PMC device
+probes successfully, even if the underlying registers are not present.
+Before commit 21ae43570940 ("platform/x86: intel_pmc_core: Substitute PCI
+with CPUID enumeration") the driver would check for the presence of a
+specific PCI device, and that prevented the driver from attaching when
+running virtualized.
+
+Fix by only forcefully attaching the PMC device when not running
+virtualized.  Note that virtualized platforms can still get the device
+to load if the appropriate ACPI device is present on the tables
+provided to the VM.
+
+Make an exception for the Xen initial domain, which does have full
+hardware access, and hence can attach to the PMC if present.
+
+Fixes: 21ae43570940 ("platform/x86: intel_pmc_core: Substitute PCI with CPUID enumeration")
+Signed-off-by: Roger Pau Monné <roger.pau@citrix.com>
+Acked-by: David E. Box <david.e.box@linux.intel.com>
+Reviewed-by: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
+Link: https://lore.kernel.org/r/20221110163145.80374-1-roger.pau@citrix.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/intel/pmc/pltdrv.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/platform/x86/intel/pmc/pltdrv.c b/drivers/platform/x86/intel/pmc/pltdrv.c
+index 15ca8afdd973d..ddfba38c21044 100644
+--- a/drivers/platform/x86/intel/pmc/pltdrv.c
++++ b/drivers/platform/x86/intel/pmc/pltdrv.c
+@@ -18,6 +18,8 @@
+ #include <asm/cpu_device_id.h>
+ #include <asm/intel-family.h>
+ 
++#include <xen/xen.h>
++
+ static void intel_pmc_core_release(struct device *dev)
+ {
+ 	kfree(dev);
+@@ -53,6 +55,13 @@ static int __init pmc_core_platform_init(void)
+ 	if (acpi_dev_present("INT33A1", NULL, -1))
+ 		return -ENODEV;
+ 
++	/*
++	 * Skip forcefully attaching the device for VMs. Make an exception for
++	 * Xen dom0, which does have full hardware access.
++	 */
++	if (cpu_feature_enabled(X86_FEATURE_HYPERVISOR) && !xen_initial_domain())
++		return -ENODEV;
++
+ 	if (!x86_match_cpu(intel_pmc_core_platform_ids))
+ 		return -ENODEV;
+ 
+-- 
+cgit 
+
+
+From d0cdd85046b15089df71a50548617ac1025300d0 Mon Sep 17 00:00:00 2001
+From: Xiongfeng Wang <wangxiongfeng2@huawei.com>
+Date: Fri, 11 Nov 2022 18:07:52 +0800
+Subject: platform/x86: asus-wmi: add missing pci_dev_put() in
+ asus_wmi_set_xusb2pr()
+
+pci_get_device() will increase the reference count for the returned
+pci_dev. We need to use pci_dev_put() to decrease the reference count
+before asus_wmi_set_xusb2pr() returns.
+
+Signed-off-by: Xiongfeng Wang <wangxiongfeng2@huawei.com>
+Link: https://lore.kernel.org/r/20221111100752.134311-1-wangxiongfeng2@huawei.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/asus-wmi.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/platform/x86/asus-wmi.c b/drivers/platform/x86/asus-wmi.c
+index 6e8e093f96b3a..872efc1d5b36b 100644
+--- a/drivers/platform/x86/asus-wmi.c
++++ b/drivers/platform/x86/asus-wmi.c
+@@ -1738,6 +1738,8 @@ static void asus_wmi_set_xusb2pr(struct asus_wmi *asus)
+ 	pci_write_config_dword(xhci_pdev, USB_INTEL_XUSB2PR,
+ 				cpu_to_le32(ports_available));
+ 
++	pci_dev_put(xhci_pdev);
++
+ 	pr_info("set USB_INTEL_XUSB2PR old: 0x%04x, new: 0x%04x\n",
+ 			orig_ports_available, ports_available);
+ }
+-- 
+cgit 
+
+
+From 1e817b889c7d8c14e7005258e15fec62edafe03c Mon Sep 17 00:00:00 2001
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Fri, 11 Nov 2022 12:16:39 +0100
+Subject: platform/x86: acer-wmi: Enable SW_TABLET_MODE on Switch V 10
+ (SW5-017)
+
+Like the Acer Switch 10 (SW5-012) and Acer Switch 10 (S1003) models
+the Acer Switch V 10 (SW5-017) supports reporting SW_TABLET_MODE
+through acer-wmi.
+
+Add a DMI quirk for the SW5-017 setting force_caps to ACER_CAP_KBD_DOCK
+(these devices have no other acer-wmi based functionality).
+
+Cc: Rudolf Polzer <rpolzer@google.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+Link: https://lore.kernel.org/r/20221111111639.35730-1-hdegoede@redhat.com
+---
+ drivers/platform/x86/acer-wmi.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/platform/x86/acer-wmi.c b/drivers/platform/x86/acer-wmi.c
+index 18224f9a5bc07..ee67efdd54995 100644
+--- a/drivers/platform/x86/acer-wmi.c
++++ b/drivers/platform/x86/acer-wmi.c
+@@ -564,6 +564,15 @@ static const struct dmi_system_id acer_quirks[] __initconst = {
+ 		},
+ 		.driver_data = (void *)ACER_CAP_KBD_DOCK,
+ 	},
++	{
++		.callback = set_force_caps,
++		.ident = "Acer Aspire Switch V 10 SW5-017",
++		.matches = {
++			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Acer"),
++			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "SW5-017"),
++		},
++		.driver_data = (void *)ACER_CAP_KBD_DOCK,
++	},
+ 	{
+ 		.callback = set_force_caps,
+ 		.ident = "Acer One 10 (S1003)",
+-- 
+cgit 
+
+
+From d9a477f643eb3de71fbea5ae6103b800ceb8f547 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sun, 13 Nov 2022 19:59:50 +0100
+Subject: platform/surface: aggregator: Do not check for repeated unsequenced
+ packets
+
+Currently, we check any received packet whether we have already seen it
+previously, regardless of the packet type (sequenced / unsequenced). We
+do this by checking the sequence number. This assumes that sequence
+numbers are valid for both sequenced and unsequenced packets. However,
+this assumption appears to be incorrect.
+
+On some devices, the sequence number field of unsequenced packets (in
+particular HID input events on the Surface Pro 9) is always zero. As a
+result, the current retransmission check kicks in and discards all but
+the first unsequenced packet, breaking (among other things) keyboard and
+touchpad input.
+
+Note that we have, so far, only seen packets being retransmitted in
+sequenced communication. In particular, this happens when there is an
+ACK timeout, causing the EC (or us) to re-send the packet waiting for an
+ACK. Arguably, retransmission / duplication of unsequenced packets
+should not be an issue as there is no logical condition (such as an ACK
+timeout) to determine when a packet should be sent again.
+
+Therefore, remove the retransmission check for unsequenced packets
+entirely to resolve the issue.
+
+Fixes: c167b9c7e3d6 ("platform/surface: Add Surface Aggregator subsystem")
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Link: https://lore.kernel.org/r/20221113185951.224759-1-luzmaximilian@gmail.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ .../platform/surface/aggregator/ssh_packet_layer.c | 24 ++++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/platform/surface/aggregator/ssh_packet_layer.c b/drivers/platform/surface/aggregator/ssh_packet_layer.c
+index 6748fe4ac5d5f..def8d7ac541f7 100644
+--- a/drivers/platform/surface/aggregator/ssh_packet_layer.c
++++ b/drivers/platform/surface/aggregator/ssh_packet_layer.c
+@@ -1596,16 +1596,32 @@ static void ssh_ptl_timeout_reap(struct work_struct *work)
+ 		ssh_ptl_tx_wakeup_packet(ptl);
+ }
+ 
+-static bool ssh_ptl_rx_retransmit_check(struct ssh_ptl *ptl, u8 seq)
++static bool ssh_ptl_rx_retransmit_check(struct ssh_ptl *ptl, const struct ssh_frame *frame)
+ {
+ 	int i;
+ 
++	/*
++	 * Ignore unsequenced packets. On some devices (notably Surface Pro 9),
++	 * unsequenced events will always be sent with SEQ=0x00. Attempting to
++	 * detect retransmission would thus just block all events.
++	 *
++	 * While sequence numbers would also allow detection of retransmitted
++	 * packets in unsequenced communication, they have only ever been used
++	 * to cover edge-cases in sequenced transmission. In particular, the
++	 * only instance of packets being retransmitted (that we are aware of)
++	 * is due to an ACK timeout. As this does not happen in unsequenced
++	 * communication, skip the retransmission check for those packets
++	 * entirely.
++	 */
++	if (frame->type == SSH_FRAME_TYPE_DATA_NSQ)
++		return false;
++
+ 	/*
+ 	 * Check if SEQ has been seen recently (i.e. packet was
+ 	 * re-transmitted and we should ignore it).
+ 	 */
+ 	for (i = 0; i < ARRAY_SIZE(ptl->rx.blocked.seqs); i++) {
+-		if (likely(ptl->rx.blocked.seqs[i] != seq))
++		if (likely(ptl->rx.blocked.seqs[i] != frame->seq))
+ 			continue;
+ 
+ 		ptl_dbg(ptl, "ptl: ignoring repeated data packet\n");
+@@ -1613,7 +1629,7 @@ static bool ssh_ptl_rx_retransmit_check(struct ssh_ptl *ptl, u8 seq)
+ 	}
+ 
+ 	/* Update list of blocked sequence IDs. */
+-	ptl->rx.blocked.seqs[ptl->rx.blocked.offset] = seq;
++	ptl->rx.blocked.seqs[ptl->rx.blocked.offset] = frame->seq;
+ 	ptl->rx.blocked.offset = (ptl->rx.blocked.offset + 1)
+ 				  % ARRAY_SIZE(ptl->rx.blocked.seqs);
+ 
+@@ -1624,7 +1640,7 @@ static void ssh_ptl_rx_dataframe(struct ssh_ptl *ptl,
+ 				 const struct ssh_frame *frame,
+ 				 const struct ssam_span *payload)
+ {
+-	if (ssh_ptl_rx_retransmit_check(ptl, frame->seq))
++	if (ssh_ptl_rx_retransmit_check(ptl, frame))
+ 		return;
+ 
+ 	ptl->ops.data_received(ptl, payload);
+-- 
+cgit 
+
+
+From d076f30957b1d026e9f6340691624926db0d369d Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sun, 13 Nov 2022 19:59:51 +0100
+Subject: platform/surface: aggregator_registry: Add support for Surface Pro 9
+
+Add device nodes to enable support for battery and charger status, the
+ACPI platform profile, as well as internal and type-cover HID devices
+(including sensors, touchpad, keyboard, and other miscellaneous devices)
+on the Surface Pro 9.
+
+This does not include support for a tablet-mode switch yet, as that is
+now handled via the POS subsystem (unlike the Surface Pro 8, where it is
+handled via the KIP subsystem) and therefore needs further changes.
+
+While we're at it, also add the missing comment for the Surface Pro 8.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Link: https://lore.kernel.org/r/20221113185951.224759-2-luzmaximilian@gmail.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ .../platform/surface/surface_aggregator_registry.c  | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/drivers/platform/surface/surface_aggregator_registry.c b/drivers/platform/surface/surface_aggregator_registry.c
+index 585911020cea0..db82c2a7c5676 100644
+--- a/drivers/platform/surface/surface_aggregator_registry.c
++++ b/drivers/platform/surface/surface_aggregator_registry.c
+@@ -268,6 +268,7 @@ static const struct software_node *ssam_node_group_sp7[] = {
+ 	NULL,
+ };
+ 
++/* Devices for Surface Pro 8 */
+ static const struct software_node *ssam_node_group_sp8[] = {
+ 	&ssam_node_root,
+ 	&ssam_node_hub_kip,
+@@ -284,6 +285,23 @@ static const struct software_node *ssam_node_group_sp8[] = {
+ 	NULL,
+ };
+ 
++/* Devices for Surface Pro 9 */
++static const struct software_node *ssam_node_group_sp9[] = {
++	&ssam_node_root,
++	&ssam_node_hub_kip,
++	&ssam_node_bat_ac,
++	&ssam_node_bat_main,
++	&ssam_node_tmp_pprof,
++	/* TODO: Tablet mode switch (via POS subsystem) */
++	&ssam_node_hid_kip_keyboard,
++	&ssam_node_hid_kip_penstash,
++	&ssam_node_hid_kip_touchpad,
++	&ssam_node_hid_kip_fwupd,
++	&ssam_node_hid_sam_sensors,
++	&ssam_node_hid_sam_ucm_ucsi,
++	NULL,
++};
++
+ 
+ /* -- SSAM platform/meta-hub driver. ---------------------------------------- */
+ 
+@@ -303,6 +321,9 @@ static const struct acpi_device_id ssam_platform_hub_match[] = {
+ 	/* Surface Pro 8 */
+ 	{ "MSHW0263", (unsigned long)ssam_node_group_sp8 },
+ 
++	/* Surface Pro 9 */
++	{ "MSHW0343", (unsigned long)ssam_node_group_sp9 },
++
+ 	/* Surface Book 2 */
+ 	{ "MSHW0107", (unsigned long)ssam_node_group_gen5 },
+ 
+-- 
+cgit 
+
+
+From 4a567d164d0e0c57e7b694b988db86361f130cb7 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Wed, 16 Nov 2022 00:14:40 +0100
+Subject: platform/surface: aggregator_registry: Add support for Surface Laptop
+ 5
+
+Add device nodes to enable support for battery and charger status, the
+ACPI platform profile, as well as internal HID devices (including
+touchpad and keyboard) on the Surface Laptop 5.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Link: https://lore.kernel.org/r/20221115231440.1338142-1-luzmaximilian@gmail.com
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/surface/surface_aggregator_registry.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/drivers/platform/surface/surface_aggregator_registry.c b/drivers/platform/surface/surface_aggregator_registry.c
+index db82c2a7c5676..023f126121d7d 100644
+--- a/drivers/platform/surface/surface_aggregator_registry.c
++++ b/drivers/platform/surface/surface_aggregator_registry.c
+@@ -234,6 +234,19 @@ static const struct software_node *ssam_node_group_sl3[] = {
+ 	NULL,
+ };
+ 
++/* Devices for Surface Laptop 5. */
++static const struct software_node *ssam_node_group_sl5[] = {
++	&ssam_node_root,
++	&ssam_node_bat_ac,
++	&ssam_node_bat_main,
++	&ssam_node_tmp_pprof,
++	&ssam_node_hid_main_keyboard,
++	&ssam_node_hid_main_touchpad,
++	&ssam_node_hid_main_iid5,
++	&ssam_node_hid_sam_ucm_ucsi,
++	NULL,
++};
++
+ /* Devices for Surface Laptop Studio. */
+ static const struct software_node *ssam_node_group_sls[] = {
+ 	&ssam_node_root,
+@@ -345,6 +358,9 @@ static const struct acpi_device_id ssam_platform_hub_match[] = {
+ 	/* Surface Laptop 4 (13", Intel) */
+ 	{ "MSHW0250", (unsigned long)ssam_node_group_sl3 },
+ 
++	/* Surface Laptop 5 */
++	{ "MSHW0350", (unsigned long)ssam_node_group_sl5 },
++
+ 	/* Surface Laptop Go 1 */
+ 	{ "MSHW0118", (unsigned long)ssam_node_group_slg1 },
+ 
+-- 
+cgit 
+
+
+From 8b9b6a044b408283b086702b1d9e3cf4ba45b426 Mon Sep 17 00:00:00 2001
+From: Kai-Heng Feng <kai.heng.feng@canonical.com>
+Date: Mon, 14 Nov 2022 15:38:41 +0800
+Subject: platform/x86: hp-wmi: Ignore Smart Experience App event
+
+Sometimes hp-wmi driver complains on system resume:
+[ 483.116451] hp_wmi: Unknown event_id - 33 - 0x0
+
+According to HP it's a feature called "HP Smart Experience App" and it's
+safe to be ignored.
+
+Signed-off-by: Kai-Heng Feng <kai.heng.feng@canonical.com>
+Link: https://lore.kernel.org/r/20221114073842.205392-1-kai.heng.feng@canonical.com
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/hp-wmi.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/platform/x86/hp-wmi.c b/drivers/platform/x86/hp-wmi.c
+index 12449038bed12..0a99058be8130 100644
+--- a/drivers/platform/x86/hp-wmi.c
++++ b/drivers/platform/x86/hp-wmi.c
+@@ -90,6 +90,7 @@ enum hp_wmi_event_ids {
+ 	HPWMI_PEAKSHIFT_PERIOD		= 0x0F,
+ 	HPWMI_BATTERY_CHARGE_PERIOD	= 0x10,
+ 	HPWMI_SANITIZATION_MODE		= 0x17,
++	HPWMI_SMART_EXPERIENCE_APP	= 0x21,
+ };
+ 
+ /*
+@@ -859,6 +860,8 @@ static void hp_wmi_notify(u32 value, void *context)
+ 		break;
+ 	case HPWMI_SANITIZATION_MODE:
+ 		break;
++	case HPWMI_SMART_EXPERIENCE_APP:
++		break;
+ 	default:
+ 		pr_info("Unknown event_id - %d - 0x%x\n", event_id, event_data);
+ 		break;
+-- 
+cgit 
+
+
+From 81a5603a0f50fd7cf17ff21d106052215eaf2028 Mon Sep 17 00:00:00 2001
+From: Arnav Rawat <arnavr3@illinois.edu>
+Date: Fri, 11 Nov 2022 14:32:09 +0000
+Subject: platform/x86: ideapad-laptop: Fix interrupt storm on fn-lock toggle
+ on some Yoga laptops
+
+Commit 3ae86d2d4704 ("platform/x86: ideapad-laptop: Fix Legion 5 Fn lock
+LED") uses the WMI event-id for the fn-lock event on some Legion 5 laptops
+to manually toggle the fn-lock LED because the EC does not do it itself.
+However, the same WMI ID is also sent on some Yoga laptops. Here, setting
+the fn-lock state is not valid behavior, and causes the EC to spam
+interrupts until the laptop is rebooted.
+
+Add a set_fn_lock_led_list[] DMI-id list and only enable the workaround to
+manually set the LED on models on this list.
+
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=212671
+Cc: Meng Dong <whenov@gmail.com>
+Signed-off-by: Arnav Rawat <arnavr3@illinois.edu>
+Link: https://lore.kernel.org/r/12093851.O9o76ZdvQC@fedora
+[hdegoede@redhat.com: Check DMI-id list only once and store the result]
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+---
+ drivers/platform/x86/ideapad-laptop.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/drivers/platform/x86/ideapad-laptop.c b/drivers/platform/x86/ideapad-laptop.c
+index 33b3dfdd1b08f..6c460cdc05bb9 100644
+--- a/drivers/platform/x86/ideapad-laptop.c
++++ b/drivers/platform/x86/ideapad-laptop.c
+@@ -136,6 +136,7 @@ struct ideapad_private {
+ 		bool dytc                 : 1;
+ 		bool fan_mode             : 1;
+ 		bool fn_lock              : 1;
++		bool set_fn_lock_led      : 1;
+ 		bool hw_rfkill_switch     : 1;
+ 		bool kbd_bl               : 1;
+ 		bool touchpad_ctrl_via_ec : 1;
+@@ -1501,6 +1502,9 @@ static void ideapad_wmi_notify(u32 value, void *context)
+ 		ideapad_input_report(priv, value);
+ 		break;
+ 	case 208:
++		if (!priv->features.set_fn_lock_led)
++			break;
++
+ 		if (!eval_hals(priv->adev->handle, &result)) {
+ 			bool state = test_bit(HALS_FNLOCK_STATE_BIT, &result);
+ 
+@@ -1514,6 +1518,18 @@ static void ideapad_wmi_notify(u32 value, void *context)
+ }
+ #endif
+ 
++/* On some models we need to call exec_sals(SALS_FNLOCK_ON/OFF) to set the LED */
++static const struct dmi_system_id set_fn_lock_led_list[] = {
++	{
++		/* https://bugzilla.kernel.org/show_bug.cgi?id=212671 */
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
++			DMI_MATCH(DMI_PRODUCT_VERSION, "Lenovo Legion R7000P2020H"),
++		}
++	},
++	{}
++};
++
+ /*
+  * Some ideapads have a hardware rfkill switch, but most do not have one.
+  * Reading VPCCMD_R_RF always results in 0 on models without a hardware rfkill,
+@@ -1556,6 +1572,7 @@ static void ideapad_check_features(struct ideapad_private *priv)
+ 	acpi_handle handle = priv->adev->handle;
+ 	unsigned long val;
+ 
++	priv->features.set_fn_lock_led = dmi_check_system(set_fn_lock_led_list);
+ 	priv->features.hw_rfkill_switch = dmi_check_system(hw_rfkill_list);
+ 
+ 	/* Most ideapads with ELAN0634 touchpad don't use EC touchpad switch */
+-- 
+cgit 
+
+
+From b44fd994e45112b58b6c1dec4451d9a925784589 Mon Sep 17 00:00:00 2001
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Tue, 15 Nov 2022 20:34:00 +0100
+Subject: platform/x86: ideapad-laptop: Add module parameters to match DMI
+ quirk tables
+
+Add module parameters to allow setting the hw_rfkill_switch and
+set_fn_lock_led feature flags for testing these on laptops which are not
+on the DMI-id based allow lists for these 2 flags.
+
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+Link: https://lore.kernel.org/r/20221115193400.376159-1-hdegoede@redhat.com
+---
+ drivers/platform/x86/ideapad-laptop.c | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/platform/x86/ideapad-laptop.c b/drivers/platform/x86/ideapad-laptop.c
+index 6c460cdc05bb9..3ea8fc6a9ca36 100644
+--- a/drivers/platform/x86/ideapad-laptop.c
++++ b/drivers/platform/x86/ideapad-laptop.c
+@@ -155,7 +155,21 @@ MODULE_PARM_DESC(no_bt_rfkill, "No rfkill for bluetooth.");
+ 
+ static bool allow_v4_dytc;
+ module_param(allow_v4_dytc, bool, 0444);
+-MODULE_PARM_DESC(allow_v4_dytc, "Enable DYTC version 4 platform-profile support.");
++MODULE_PARM_DESC(allow_v4_dytc,
++	"Enable DYTC version 4 platform-profile support. "
++	"If you need this please report this to: platform-driver-x86@vger.kernel.org");
++
++static bool hw_rfkill_switch;
++module_param(hw_rfkill_switch, bool, 0444);
++MODULE_PARM_DESC(hw_rfkill_switch,
++	"Enable rfkill support for laptops with a hw on/off wifi switch/slider. "
++	"If you need this please report this to: platform-driver-x86@vger.kernel.org");
++
++static bool set_fn_lock_led;
++module_param(set_fn_lock_led, bool, 0444);
++MODULE_PARM_DESC(set_fn_lock_led,
++	"Enable driver based updates of the fn-lock LED on fn-lock changes. "
++	"If you need this please report this to: platform-driver-x86@vger.kernel.org");
+ 
+ /*
+  * ACPI Helpers
+@@ -1572,8 +1586,10 @@ static void ideapad_check_features(struct ideapad_private *priv)
+ 	acpi_handle handle = priv->adev->handle;
+ 	unsigned long val;
+ 
+-	priv->features.set_fn_lock_led = dmi_check_system(set_fn_lock_led_list);
+-	priv->features.hw_rfkill_switch = dmi_check_system(hw_rfkill_list);
++	priv->features.set_fn_lock_led =
++		set_fn_lock_led || dmi_check_system(set_fn_lock_led_list);
++	priv->features.hw_rfkill_switch =
++		hw_rfkill_switch || dmi_check_system(hw_rfkill_list);
+ 
+ 	/* Most ideapads with ELAN0634 touchpad don't use EC touchpad switch */
+ 	if (acpi_dev_present("ELAN0634", NULL, -1))
+-- 
+cgit 
+
+

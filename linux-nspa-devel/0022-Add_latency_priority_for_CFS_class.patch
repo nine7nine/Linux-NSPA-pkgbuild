@@ -1,175 +1,131 @@
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 0/7]  Add latency priority for CFS class
-Date:   Sun, 25 Sep 2022 16:39:01 +0200
-Message-Id: <20220925143908.10846-1-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-This patchset restarts the work about adding a latency priority to describe
-the latency tolerance of cfs tasks.
-
-The patches [1-3] have been done by Parth:
-https://lore.kernel.org/lkml/20200228090755.22829-1-parth@linux.ibm.com/
-
-I have just rebased and moved the set of latency priority outside the
-priority update. I have removed the reviewed tag because the patches
-are 2 years old.
-
-This aims to be a generic interface and the following patches is one use
-of it to improve the scheduling latency of cfs tasks.
-
-The patch [4] uses latency nice priority to define a latency offset
-and then decide if a cfs task can or should preempt the current
-running task. The patch gives some tests results with cyclictests and
-hackbench to highlight the benefit of latency priority for short
-interactive task or long intensive tasks.
-
-Patch [5] adds the support of latency nice priority to task group by
-adding a cpu.latency.nice field. The range is [-20:19] as for setting task
-latency priority.
-
-Patch [6] makes sched_core taking into account the latency offset.
-
-Patch [7] adds a rb tree to cover some corner cases where the latency
-sensitive task (priority < 0) is preempted by high priority task (RT/DL)
-or fails to preempt them. This patch ensures that tasks will have at least
-a slice of sched_min_granularity in priority at wakeup. The patch gives
-results to show the benefit in addition to patch 4.
-
-I have also backported the patchset on a dragonboard RB3 with an android
-mainline kernel based on v5.18 for a quick test. I have used the
-TouchLatency app which is part of AOSP and described to be a very good
-test to highlight jitter and jank frame sources of a system [1].
-In addition to the app, I have added some short running tasks waking-up
-regularly (to use the 8 cpus for 4 ms every 37777us) to stress the system
-without overloading it (and disabling EAS). The 1st results shows that the
-patchset helps to reduce the missed deadline frames from 5% to less than
-0.1% when the cpu.latency.nice of task group are set.
-
-I have also tested the patchset with the modified version of the alsa
-latency test that has been shared by Tim. The test quickly xruns with
-default latency nice priority 0 but is able to run without underuns with
-a latency -20 and hackbench running simultaneously.
-
-
-[1] https://source.android.com/docs/core/debug/eval_perf#touchlatency
-
-Change since v4:
-- Removed permission checks to set latency priority. This enables user
-  without elevated priviledge like audio application to set their latency
-  priority as requested by Tim.
-- Removed cpu.latency and replaced it by cpu.latency.nice so we keep a
-  generic interface not tied to latency_offset which can be used to
-  implement other latency features.
-- Added an entry in Documentation/admin-guide/cgroup-v2.rst to describe
-  cpu.latency.nice.
-- Fix some typos.
-
-Change since v3:
-- Fix 2 compilation warnings raised by kernel test robot <lkp@intel.com>
-
-Change since v2:
-- Set a latency_offset field instead of saving a weight and computing it
-  on the fly.
-- Make latency_offset available for task group: cpu.latency
-- Fix some corner cases to make latency sensitive tasks schedule first and
-  add a rb tree for latency sensitive task.
-
-Change since v1:
-- fix typo
-- move some codes in the right patch to make bisect happy
-- simplify and fixed how the weight is computed
-- added support of sched core patch 7
-
-Parth Shah (3):
-  sched: Introduce latency-nice as a per-task attribute
-  sched/core: Propagate parent task's latency requirements to the child
-    task
-  sched: Allow sched_{get,set}attr to change latency_nice of the task
-
-Vincent Guittot (4):
-  sched/fair: Take into account latency priority at wakeup
-  sched/fair: Add sched group latency support
-  sched/core: Support latency priority with sched core
-  sched/fair: Add latency list
-
- Documentation/admin-guide/cgroup-v2.rst |   8 +
- include/linux/sched.h                   |   5 +
- include/uapi/linux/sched.h              |   4 +-
- include/uapi/linux/sched/types.h        |  19 +++
- init/init_task.c                        |   1 +
- kernel/sched/core.c                     | 106 +++++++++++++
- kernel/sched/debug.c                    |   1 +
- kernel/sched/fair.c                     | 189 +++++++++++++++++++++++-
- kernel/sched/sched.h                    |  37 ++++-
- tools/include/uapi/linux/sched.h        |   4 +-
- 10 files changed, 366 insertions(+), 8 deletions(-)
-
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 4cc56c91e06e..c8a697f8db88 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -4645,33 +4645,17 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
+ {
+ 	u64 vruntime = cfs_rq->min_vruntime;
+ 
+-	/*
+-	 * The 'current' period is already promised to the current tasks,
+-	 * however the extra weight of the new task will slow them down a
+-	 * little, place the new task so that it fits in the slot that
+-	 * stays open at the end.
+-	 */
+-	if (initial && sched_feat(START_DEBIT))
+-		vruntime += sched_vslice(cfs_rq, se);
+-
+-	/* sleeps up to a single latency don't count. */
+-	if (!initial) {
+-		unsigned long thresh;
+-
+-		if (se_is_idle(se))
+-			thresh = sysctl_sched_min_granularity;
+-		else
+-			thresh = sysctl_sched_latency;
+-
++	if (!initial)
++		/* sleeps up to a single latency don't count. */
++		vruntime -= get_sleep_latency(se_is_idle(se));
++	else if (sched_feat(START_DEBIT))
+ 		/*
+-		 * Halve their sleep time's effect, to allow
+-		 * for a gentler effect of sleepers:
++		 * The 'current' period is already promised to the current tasks,
++		 * however the extra weight of the new task will slow them down a
++		 * little, place the new task so that it fits in the slot that
++		 * stays open at the end.
+ 		 */
+-		if (sched_feat(GENTLE_FAIR_SLEEPERS))
+-			thresh >>= 1;
+-
+-		vruntime -= thresh;
+-	}
++		vruntime += sched_vslice(cfs_rq, se);
+ 
+ 	/* ensure we never gain time by being placed backwards. */
+ 	se->vruntime = max_vruntime(se->vruntime, vruntime);
+@@ -7520,6 +7504,18 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
+ 		return -1;
+ 
+ 	gran = wakeup_gran(se);
++
++	/*
++	 * At wake up, the vruntime of a task is capped to not be older than
++	 * a sched_latency period compared to min_vruntime. This prevents long
++	 * sleeping task to get unlimited credit at wakeup. Such waking up task
++	 * has to preempt current in order to not lose its share of CPU
++	 * bandwidth but wakeup_gran() can become higher than scheduling period
++	 * for low priority task. Make sure that long sleeping task will get a
++	 * chance to preempt current.
++	 */
++	gran = min_t(s64, gran, get_latency_max());
++
+ 	if (vdiff > gran)
+ 		return 1;
+ 
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 771f8ddb7053..842ce0094d9c 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2453,9 +2453,9 @@ extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
+ extern const_debug unsigned int sysctl_sched_nr_migrate;
+ extern const_debug unsigned int sysctl_sched_migration_cost;
+ 
+-#ifdef CONFIG_SCHED_DEBUG
+ extern unsigned int sysctl_sched_latency;
+ extern unsigned int sysctl_sched_min_granularity;
++#ifdef CONFIG_SCHED_DEBUG
+ extern unsigned int sysctl_sched_idle_min_granularity;
+ extern unsigned int sysctl_sched_wakeup_granularity;
+ extern int sysctl_resched_latency_warn_ms;
+@@ -2470,6 +2470,38 @@ extern unsigned int sysctl_numa_balancing_scan_size;
+ extern unsigned int sysctl_numa_balancing_hot_threshold;
+ #endif
+ 
++static inline unsigned long get_sleep_latency(bool idle)
++{
++	unsigned long thresh;
++
++	if (idle)
++		thresh = sysctl_sched_min_granularity;
++	else
++		thresh = sysctl_sched_latency;
++
++	/*
++	 * Halve their sleep time's effect, to allow
++	 * for a gentler effect of sleepers:
++	 */
++	if (sched_feat(GENTLE_FAIR_SLEEPERS))
++		thresh >>= 1;
++
++	return thresh;
++}
++
++static inline unsigned long get_latency_max(void)
++{
++	unsigned long thresh = get_sleep_latency(false);
++
++	 /*
++	  * If the waking task failed to preempt current it could to wait up to
++	  * sysctl_sched_min_granularity before preempting it during next tick.
++	  */
++	thresh -= sysctl_sched_min_granularity;
++
++	return thresh;
++}
++
+ #ifdef CONFIG_SCHED_HRTICK
+ 
+ /*
 -- 
 2.17.1
 
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 1/7] sched: Introduce latency-nice as a per-task attribute
-Date:   Sun, 25 Sep 2022 16:39:02 +0200
-Message-Id: <20220925143908.10846-2-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220925143908.10846-1-vincent.guittot@linaro.org>
-References: <20220925143908.10846-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-From: Parth Shah <parth@linux.ibm.com>
-
-Latency-nice indicates the latency requirements of a task with respect
-to the other tasks in the system. The value of the attribute can be within
-the range of [-20, 19] both inclusive to be in-line with the values just
-like task nice values.
-
-latency_nice = -20 indicates the task to have the least latency as
-compared to the tasks having latency_nice = +19.
-
-The latency_nice may affect only the CFS SCHED_CLASS by getting
-latency requirements from the userspace.
-
-Additionally, add debugging bits for newly added latency_nice attribute.
-
-Signed-off-by: Parth Shah <parth@linux.ibm.com>
-[rebase]
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- include/linux/sched.h |  1 +
- kernel/sched/debug.c  |  1 +
- kernel/sched/sched.h  | 18 ++++++++++++++++++
- 3 files changed, 20 insertions(+)
-
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 15e3bd96e4ce..6805f378a9c3 100644
+index 23de7fe86cc4..856240573300 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -783,6 +783,7 @@ struct task_struct {
+@@ -784,6 +784,7 @@ struct task_struct {
  	int				static_prio;
  	int				normal_prio;
  	unsigned int			rt_priority;
@@ -177,25 +133,13 @@ index 15e3bd96e4ce..6805f378a9c3 100644
  
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
-diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
-index bb3d63bdf4ae..a3f7876217a6 100644
---- a/kernel/sched/debug.c
-+++ b/kernel/sched/debug.c
-@@ -1042,6 +1042,7 @@ void proc_sched_show_task(struct task_struct *p, struct pid_namespace *ns,
- #endif
- 	P(policy);
- 	P(prio);
-+	P(latency_nice);
- 	if (task_has_dl_policy(p)) {
- 		P(dl.runtime);
- 		P(dl.deadline);
-diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 1fc198be1ffd..eeb6efb0b610 100644
---- a/kernel/sched/sched.h
-+++ b/kernel/sched/sched.h
-@@ -125,6 +125,24 @@ extern int sched_rr_timeslice;
-  */
- #define NS_TO_JIFFIES(TIME)	((unsigned long)(TIME) / (NSEC_PER_SEC / HZ))
+diff --git a/include/linux/sched/prio.h b/include/linux/sched/prio.h
+index ab83d85e1183..bfcd7f1d1e11 100644
+--- a/include/linux/sched/prio.h
++++ b/include/linux/sched/prio.h
+@@ -42,4 +42,22 @@ static inline long rlimit_to_nice(long prio)
+ 	return (MAX_NICE - prio + 1);
+ }
  
 +/*
 + * Latency nice is meant to provide scheduler hints about the relative
@@ -215,50 +159,21 @@ index 1fc198be1ffd..eeb6efb0b610 100644
 + */
 +#define DEFAULT_LATENCY_NICE	0
 +
- /*
-  * Increase resolution of nice-level calculations for 64-bit architectures.
-  * The extra resolution improves shares distribution and load balancing of
+ #endif /* _LINUX_SCHED_PRIO_H */
+diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
+index 1637b65ba07a..68be7a3e42a3 100644
+--- a/kernel/sched/debug.c
++++ b/kernel/sched/debug.c
+@@ -1043,6 +1043,7 @@ void proc_sched_show_task(struct task_struct *p, struct pid_namespace *ns,
+ #endif
+ 	P(policy);
+ 	P(prio);
++	P(latency_nice);
+ 	if (task_has_dl_policy(p)) {
+ 		P(dl.runtime);
+ 		P(dl.deadline);
 -- 
 2.17.1
-
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 2/7] sched/core: Propagate parent task's latency requirements to the child task
-Date:   Sun, 25 Sep 2022 16:39:03 +0200
-Message-Id: <20220925143908.10846-3-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220925143908.10846-1-vincent.guittot@linaro.org>
-References: <20220925143908.10846-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-From: Parth Shah <parth@linux.ibm.com>
-
-Clone parent task's latency_nice attribute to the forked child task.
-
-Reset the latency_nice value to default value when the child task is
-set to sched_reset_on_fork.
-
-Also, initialize init_task.latency_nice value with DEFAULT_LATENCY_NICE
-value
-
-Signed-off-by: Parth Shah <parth@linux.ibm.com>
-[rebase]
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- init/init_task.c    | 1 +
- kernel/sched/core.c | 1 +
- 2 files changed, 2 insertions(+)
 
 diff --git a/init/init_task.c b/init/init_task.c
 index ff6c4b9bfe6b..7dd71dd2d261 100644
@@ -273,10 +188,10 @@ index ff6c4b9bfe6b..7dd71dd2d261 100644
  	.cpus_ptr	= &init_task.cpus_mask,
  	.user_cpus_ptr	= NULL,
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 4fa4a3ddb4f4..ada2d05bd894 100644
+index 07ac08caf019..8c84c652853b 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -4559,6 +4559,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
+@@ -4592,6 +4592,7 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
  		p->prio = p->normal_prio = p->static_prio;
  		set_load_weight(p, false);
  
@@ -286,46 +201,6 @@ index 4fa4a3ddb4f4..ada2d05bd894 100644
  		 * fulfilled its duty:
 -- 
 2.17.1
-
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 3/7] sched: Allow sched_{get,set}attr to change latency_nice of the task
-Date:   Sun, 25 Sep 2022 16:39:04 +0200
-Message-Id: <20220925143908.10846-4-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220925143908.10846-1-vincent.guittot@linaro.org>
-References: <20220925143908.10846-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-From: Parth Shah <parth@linux.ibm.com>
-
-Introduce the latency_nice attribute to sched_attr and provide a
-mechanism to change the value with the use of sched_setattr/sched_getattr
-syscall.
-
-Also add new flag "SCHED_FLAG_LATENCY_NICE" to hint the change in
-latency_nice of the task on every sched_setattr syscall.
-
-Signed-off-by: Parth Shah <parth@linux.ibm.com>
-[rebase and add a dedicated __setscheduler_latency ]
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- include/uapi/linux/sched.h       |  4 +++-
- include/uapi/linux/sched/types.h | 19 +++++++++++++++++++
- kernel/sched/core.c              | 24 ++++++++++++++++++++++++
- tools/include/uapi/linux/sched.h |  4 +++-
- 4 files changed, 49 insertions(+), 2 deletions(-)
 
 diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
 index 3bac0a8ceab2..b2e932c25be6 100644
@@ -393,10 +268,10 @@ index f2c4589d4dbf..db1e8199e8c8 100644
  
  #endif /* _UAPI_LINUX_SCHED_TYPES_H */
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index ada2d05bd894..6a6116ea4c2c 100644
+index 8c84c652853b..18c31a68eb18 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -7318,6 +7318,14 @@ static void __setscheduler_params(struct task_struct *p,
+@@ -7352,6 +7352,14 @@ static void __setscheduler_params(struct task_struct *p,
  	p->rt_priority = attr->sched_priority;
  	p->normal_prio = normal_prio(p);
  	set_load_weight(p, true);
@@ -411,7 +286,7 @@ index ada2d05bd894..6a6116ea4c2c 100644
  }
  
  /*
-@@ -7460,6 +7468,13 @@ static int __sched_setscheduler(struct task_struct *p,
+@@ -7494,6 +7502,13 @@ static int __sched_setscheduler(struct task_struct *p,
  			return retval;
  	}
  
@@ -425,7 +300,7 @@ index ada2d05bd894..6a6116ea4c2c 100644
  	if (pi)
  		cpuset_read_lock();
  
-@@ -7494,6 +7509,9 @@ static int __sched_setscheduler(struct task_struct *p,
+@@ -7528,6 +7543,9 @@ static int __sched_setscheduler(struct task_struct *p,
  			goto change;
  		if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP)
  			goto change;
@@ -435,7 +310,7 @@ index ada2d05bd894..6a6116ea4c2c 100644
  
  		p->sched_reset_on_fork = reset_on_fork;
  		retval = 0;
-@@ -7582,6 +7600,7 @@ static int __sched_setscheduler(struct task_struct *p,
+@@ -7616,6 +7634,7 @@ static int __sched_setscheduler(struct task_struct *p,
  		__setscheduler_params(p, attr);
  		__setscheduler_prio(p, newprio);
  	}
@@ -443,7 +318,7 @@ index ada2d05bd894..6a6116ea4c2c 100644
  	__setscheduler_uclamp(p, attr);
  
  	if (queued) {
-@@ -7792,6 +7811,9 @@ static int sched_copy_attr(struct sched_attr __user *uattr, struct sched_attr *a
+@@ -7826,6 +7845,9 @@ static int sched_copy_attr(struct sched_attr __user *uattr, struct sched_attr *a
  	    size < SCHED_ATTR_SIZE_VER1)
  		return -EINVAL;
  
@@ -453,7 +328,7 @@ index ada2d05bd894..6a6116ea4c2c 100644
  	/*
  	 * XXX: Do we want to be lenient like existing syscalls; or do we want
  	 * to be strict and return an error on out-of-bounds values?
-@@ -8029,6 +8051,8 @@ SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
+@@ -8063,6 +8085,8 @@ SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
  	get_params(p, &kattr);
  	kattr.sched_flags &= SCHED_FLAG_ALL;
  
@@ -463,14 +338,14 @@ index ada2d05bd894..6a6116ea4c2c 100644
  	/*
  	 * This could race with another potential updater, but this is fine
 diff --git a/tools/include/uapi/linux/sched.h b/tools/include/uapi/linux/sched.h
-index 3bac0a8ceab2..ecc4884bfe4b 100644
+index 3bac0a8ceab2..b2e932c25be6 100644
 --- a/tools/include/uapi/linux/sched.h
 +++ b/tools/include/uapi/linux/sched.h
 @@ -132,6 +132,7 @@ struct clone_args {
  #define SCHED_FLAG_KEEP_PARAMS		0x10
  #define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
  #define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
-+#define SCHED_FLAG_LATENCY_NICE		0X80
++#define SCHED_FLAG_LATENCY_NICE		0x80
  
  #define SCHED_FLAG_KEEP_ALL	(SCHED_FLAG_KEEP_POLICY | \
  				 SCHED_FLAG_KEEP_PARAMS)
@@ -486,138 +361,11 @@ index 3bac0a8ceab2..ecc4884bfe4b 100644
 -- 
 2.17.1
 
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 4/7] sched/fair: Take into account latency priority at wakeup
-Date:   Sun, 25 Sep 2022 16:39:05 +0200
-Message-Id: <20220925143908.10846-5-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220925143908.10846-1-vincent.guittot@linaro.org>
-References: <20220925143908.10846-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-Take into account the latency priority of a thread when deciding to
-preempt the current running thread. We don't want to provide more CPU
-bandwidth to a thread but reorder the scheduling to run latency sensitive
-task first whenever possible.
-
-As long as a thread didn't use its bandwidth, it will be able to preempt
-the current thread.
-
-At the opposite, a thread with a low latency priority will preempt current
-thread at wakeup only to keep fair CPU bandwidth sharing. Otherwise it will
-wait for the tick to get its sched slice.
-
-                                   curr vruntime
-                                       |
-                      sysctl_sched_wakeup_granularity
-                                   <-->
-----------------------------------|----|-----------------------|---------------
-                                  |    |<--------------------->
-                                  |    .  sysctl_sched_latency
-                                  |    .
-default/current latency entity    |    .
-                                  |    .
-1111111111111111111111111111111111|0000|-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-
-se preempts curr at wakeup ------>|<- se doesn't preempt curr -----------------
-                                  |    .
-                                  |    .
-                                  |    .
-low latency entity                |    .
-                                   ---------------------->|
-                               % of sysctl_sched_latency  |
-1111111111111111111111111111111111111111111111111111111111|0000|-1-1-1-1-1-1-1-
-preempt ------------------------------------------------->|<- do not preempt --
-                                  |    .
-                                  |    .
-                                  |    .
-high latency entity               |    .
-         |<-----------------------|    .
-         | % of sysctl_sched_latency   .
-111111111|0000|-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1-1
-preempt->|<- se doesn't preempt curr ------------------------------------------
-
-Tests results of nice latency impact on heavy load like hackbench:
-
-hackbench -l (2560 / group) -g group
-group        latency 0             latency 19
-1            1.350(+/- 1.10%)      1.287(+/- 1.60%) + 5%
-4            1.392(+/- 1.67%)      1.248(+/- 1.51%) +11%
-8            1.294(+/- 1.56%)      1.254(+/- 1.96%) + 3%
-16           1.315(+/- 1.02%)      1.288(+/- 1.53%) + 2%
-
-hackbench -p -l (2560 / group) -g group
-group
-1            1.768(+/- 13%)      0.805(+/- 2%) +54%
-4            1.634(+/- 13%)      0.765(+/- 1%) +53%
-8            1.305(+/-  4%)      0.745(+/- 2%) +43%
-16           0.786(+/-  4%)      0.705(+/- 2%) +10%
-
-By deacreasing the latency prio, we reduce the number of preemption at
-wakeup and help hackbench making progress.
-
-Test results of nice latency impact on short live load like cyclictest
-while competing with heavy load like hackbench:
-
-hackbench -l 10000 -g $group &
-cyclictest --policy other -D 5 -q -n
-        latency 0           latency -20
-group   min  avg    max     min  avg    max
-0       17    18     28      16   18     28
-1       67   319   7369      63   76   2479
-4       64   453  51699      45   95   8788
-8       65   814  51699      63  116  19535
-16      64  1275  37744      63  159  51134
-
-group = 0 means that hackbench is not running.
-
-The avg is significantly improved with nice latency -20 especially with
-large number of groups but min and max remain quite similar. If we add the
-histogram parameter to get details of latency, we have :
-
-hackbench -l 10000 -g 16 &
-cyclictest --policy other -D 5 -q -n  -H 20000 --histfile data.txt
-              latency 0    latency -20
-Min Latencies:    63           63
-Avg Latencies:  1459          214
-Max Latencies: 58274        82358
-50% latencies:   164           87
-75% latencies:   848           91
-85% latencies:  1246           94
-90% latencies:  2149           96
-95% latencies:  8463           99
-99% latencies:>20000          120
-
-With percentile details, we see the benefit of nice latency -20 as
-only 1% of the latencies stays above 120us whereas the default latency
-has got 25% are above 848us, 10% over the 2ms and 1% above 20ms.
-
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- include/linux/sched.h |  4 +++-
- init/init_task.c      |  2 +-
- kernel/sched/core.c   | 38 +++++++++++++++++++++++++----
- kernel/sched/debug.c  |  2 +-
- kernel/sched/fair.c   | 56 +++++++++++++++++++++++++++++++++++++++++--
- kernel/sched/sched.h  | 14 ++++++++++-
- 6 files changed, 105 insertions(+), 11 deletions(-)
-
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 6805f378a9c3..a74cad08e91e 100644
+index 856240573300..2f33326adb8d 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -567,6 +567,8 @@ struct sched_entity {
+@@ -568,6 +568,8 @@ struct sched_entity {
  	/* cached value of my_q->h_nr_running */
  	unsigned long			runnable_weight;
  #endif
@@ -626,7 +374,7 @@ index 6805f378a9c3..a74cad08e91e 100644
  
  #ifdef CONFIG_SMP
  	/*
-@@ -783,7 +785,7 @@ struct task_struct {
+@@ -784,7 +786,7 @@ struct task_struct {
  	int				static_prio;
  	int				normal_prio;
  	unsigned int			rt_priority;
@@ -635,8 +383,27 @@ index 6805f378a9c3..a74cad08e91e 100644
  
  	struct sched_entity		se;
  	struct sched_rt_entity		rt;
+diff --git a/include/linux/sched/prio.h b/include/linux/sched/prio.h
+index bfcd7f1d1e11..be79503d86af 100644
+--- a/include/linux/sched/prio.h
++++ b/include/linux/sched/prio.h
+@@ -59,5 +59,14 @@ static inline long rlimit_to_nice(long prio)
+  * Default tasks should be treated as a task with latency_nice = 0.
+  */
+ #define DEFAULT_LATENCY_NICE	0
++#define DEFAULT_LATENCY_PRIO	(DEFAULT_LATENCY_NICE + LATENCY_NICE_WIDTH/2)
++
++/*
++ * Convert user-nice values [ -20 ... 0 ... 19 ]
++ * to static latency [ 0..39 ],
++ * and back.
++ */
++#define NICE_TO_LATENCY(nice)	((nice) + DEFAULT_LATENCY_PRIO)
++#define LATENCY_TO_NICE(prio)	((prio) - DEFAULT_LATENCY_PRIO)
+ 
+ #endif /* _LINUX_SCHED_PRIO_H */
 diff --git a/init/init_task.c b/init/init_task.c
-index 7dd71dd2d261..b8ddf403bc62 100644
+index 7dd71dd2d261..071deff8dbd1 100644
 --- a/init/init_task.c
 +++ b/init/init_task.c
 @@ -78,7 +78,7 @@ struct task_struct init_task
@@ -644,15 +411,15 @@ index 7dd71dd2d261..b8ddf403bc62 100644
  	.static_prio	= MAX_PRIO - 20,
  	.normal_prio	= MAX_PRIO - 20,
 -	.latency_nice	= DEFAULT_LATENCY_NICE,
-+	.latency_prio	= NICE_WIDTH - 20,
++	.latency_prio	= DEFAULT_LATENCY_PRIO,
  	.policy		= SCHED_NORMAL,
  	.cpus_ptr	= &init_task.cpus_mask,
  	.user_cpus_ptr	= NULL,
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 6a6116ea4c2c..00fa2da12506 100644
+index 18c31a68eb18..b2b8cb6c08cd 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -1284,6 +1284,16 @@ static void set_load_weight(struct task_struct *p, bool update_load)
+@@ -1283,6 +1283,16 @@ static void set_load_weight(struct task_struct *p, bool update_load)
  	}
  }
  
@@ -661,7 +428,7 @@ index 6a6116ea4c2c..00fa2da12506 100644
 +	long weight = sched_latency_to_weight[p->latency_prio];
 +	s64 offset;
 +
-+	offset = sysctl_sched_latency * weight;
++	offset = weight * get_sleep_latency(false);
 +	offset = div_s64(offset, NICE_LATENCY_WEIGHT_MAX);
 +	p->se.latency_offset = (long)offset;
 +}
@@ -669,7 +436,7 @@ index 6a6116ea4c2c..00fa2da12506 100644
  #ifdef CONFIG_UCLAMP_TASK
  /*
   * Serializes updates of utilization clamp values
-@@ -4559,7 +4569,9 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
+@@ -4592,7 +4602,9 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
  		p->prio = p->normal_prio = p->static_prio;
  		set_load_weight(p, false);
  
@@ -680,7 +447,7 @@ index 6a6116ea4c2c..00fa2da12506 100644
  		/*
  		 * We don't need the reset flag anymore after the fork. It has
  		 * fulfilled its duty:
-@@ -7324,8 +7336,10 @@ static void __setscheduler_params(struct task_struct *p,
+@@ -7358,8 +7370,10 @@ static void __setscheduler_params(struct task_struct *p,
  static void __setscheduler_latency(struct task_struct *p,
  		const struct sched_attr *attr)
  {
@@ -693,7 +460,7 @@ index 6a6116ea4c2c..00fa2da12506 100644
  }
  
  /*
-@@ -7510,7 +7524,7 @@ static int __sched_setscheduler(struct task_struct *p,
+@@ -7544,7 +7558,7 @@ static int __sched_setscheduler(struct task_struct *p,
  		if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP)
  			goto change;
  		if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE &&
@@ -702,7 +469,7 @@ index 6a6116ea4c2c..00fa2da12506 100644
  			goto change;
  
  		p->sched_reset_on_fork = reset_on_fork;
-@@ -8051,7 +8065,7 @@ SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
+@@ -8085,7 +8099,7 @@ SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
  	get_params(p, &kattr);
  	kattr.sched_flags &= SCHED_FLAG_ALL;
  
@@ -711,7 +478,7 @@ index 6a6116ea4c2c..00fa2da12506 100644
  
  #ifdef CONFIG_UCLAMP_TASK
  	/*
-@@ -11204,6 +11218,20 @@ const u32 sched_prio_to_wmult[40] = {
+@@ -11294,6 +11308,20 @@ const u32 sched_prio_to_wmult[40] = {
   /*  15 */ 119304647, 148102320, 186737708, 238609294, 286331153,
  };
  
@@ -733,10 +500,10 @@ index 6a6116ea4c2c..00fa2da12506 100644
  {
          trace_sched_update_nr_running_tp(rq, count);
 diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
-index a3f7876217a6..06aaa0c81d4b 100644
+index 68be7a3e42a3..b3922184af91 100644
 --- a/kernel/sched/debug.c
 +++ b/kernel/sched/debug.c
-@@ -1042,7 +1042,7 @@ void proc_sched_show_task(struct task_struct *p, struct pid_namespace *ns,
+@@ -1043,7 +1043,7 @@ void proc_sched_show_task(struct task_struct *p, struct pid_namespace *ns,
  #endif
  	P(policy);
  	P(prio);
@@ -746,10 +513,10 @@ index a3f7876217a6..06aaa0c81d4b 100644
  		P(dl.runtime);
  		P(dl.deadline);
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5ffec4370602..c3f857630dcf 100644
+index c8a697f8db88..0e80e65113bd 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -4574,6 +4574,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -4858,6 +4858,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  		update_idle_cfs_rq_clock_pelt(cfs_rq);
  }
  
@@ -758,15 +525,31 @@ index 5ffec4370602..c3f857630dcf 100644
  /*
   * Preempt the current task with a newly woken task if needed:
   */
-@@ -4606,6 +4608,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+@@ -4866,7 +4868,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+ {
+ 	unsigned long ideal_runtime, delta_exec;
+ 	struct sched_entity *se;
+-	s64 delta;
++	s64 delta, offset;
  
+ 	ideal_runtime = sched_slice(cfs_rq, curr);
+ 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
+@@ -4777,10 +4836,12 @@ check_preempt_tick(struct cfs_rq *cfs_rq
  	se = __pick_first_entity(cfs_rq);
  	delta = curr->vruntime - se->vruntime;
-+	delta -= wakeup_latency_gran(curr, se);
  
- 	if (delta < 0)
+-	if (delta < 0)
++	offset = wakeup_latency_gran(curr, se);
++	if (delta < offset)
  		return;
-@@ -5732,6 +5735,35 @@ static int sched_idle_cpu(int cpu)
+ 
+-	if (delta > ideal_runtime)
++	if ((delta > ideal_runtime) ||
++	    (delta > get_latency_max()))
+ 		resched_curr_lazy(rq_of(cfs_rq));
+ }
+ 
+@@ -6019,6 +6023,35 @@ static int sched_idle_cpu(int cpu)
  }
  #endif
  
@@ -802,7 +585,7 @@ index 5ffec4370602..c3f857630dcf 100644
  /*
   * The enqueue_task method is called before nr_running is
   * increased. Here we update the fair scheduling stats and
-@@ -5818,14 +5850,15 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+@@ -6105,14 +6138,15 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
  	if (!task_new)
  		update_overutilized_status(rq);
  
@@ -820,7 +603,7 @@ index 5ffec4370602..c3f857630dcf 100644
  /*
   * The dequeue_task method is called before nr_running is
   * decreased. We remove the task from the rbtree and
-@@ -7144,6 +7177,22 @@ balance_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
+@@ -7461,6 +7495,23 @@ balance_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
  }
  #endif /* CONFIG_SMP */
  
@@ -834,8 +617,9 @@ index 5ffec4370602..c3f857630dcf 100644
 +	 * Otherwise, use the latency weight to evaluate how much scheduling
 +	 * delay is acceptable by se.
 +	 */
-+	if ((se->latency_offset < 0) || (curr->latency_offset < 0))
++	if ((latency_offset < 0) || (curr->latency_offset < 0))
 +		latency_offset -= curr->latency_offset;
++	latency_offset = min_t(long, latency_offset, get_latency_max());
 +
 +	return latency_offset;
 +}
@@ -843,39 +627,38 @@ index 5ffec4370602..c3f857630dcf 100644
  static unsigned long wakeup_gran(struct sched_entity *se)
  {
  	unsigned long gran = sysctl_sched_wakeup_granularity;
-@@ -7183,6 +7232,9 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
+@@ -7499,11 +7550,12 @@ static int
+ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
  {
  	s64 gran, vdiff = curr->vruntime - se->vruntime;
++	s64 offset = wakeup_latency_gran(curr, se);
  
-+	/* Take into account latency priority */
-+	vdiff -= wakeup_latency_gran(curr, se);
-+
- 	if (vdiff <= 0)
+-	if (vdiff <= 0)
++	if (vdiff < offset)
  		return -1;
  
+-	gran = wakeup_gran(se);
++	gran = offset + wakeup_gran(se);
+ 
+ 	/*
+ 	 * At wake up, the vruntime of a task is capped to not be older than
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index eeb6efb0b610..80c4d2f5827f 100644
+index 842ce0094d9c..7292652731d0 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -142,6 +142,17 @@ extern int sched_rr_timeslice;
-  * Default tasks should be treated as a task with latency_nice = 0.
+@@ -125,6 +125,11 @@ extern int sched_rr_timeslice;
   */
- #define DEFAULT_LATENCY_NICE	0
-+#define DEFAULT_LATENCY_PRIO	(DEFAULT_LATENCY_NICE + LATENCY_NICE_WIDTH/2)
+ #define NS_TO_JIFFIES(TIME)	((unsigned long)(TIME) / (NSEC_PER_SEC / HZ))
+ 
++/* Maximum nice latency weight used to scale the latency_offset */
 +
-+/*
-+ * Convert user-nice values [ -20 ... 0 ... 19 ]
-+ * to static latency [ 0..39 ],
-+ * and back.
-+ */
-+#define NICE_TO_LATENCY(nice)	((nice) + DEFAULT_LATENCY_PRIO)
-+#define LATENCY_TO_NICE(prio)	((prio) - DEFAULT_LATENCY_PRIO)
 +#define NICE_LATENCY_SHIFT	(SCHED_FIXEDPOINT_SHIFT)
 +#define NICE_LATENCY_WEIGHT_MAX	(1L << NICE_LATENCY_SHIFT)
- 
++
  /*
   * Increase resolution of nice-level calculations for 64-bit architectures.
-@@ -2116,6 +2127,7 @@ static_assert(WF_TTWU == SD_BALANCE_WAKE);
+  * The extra resolution improves shares distribution and load balancing of
+@@ -2115,6 +2120,7 @@ static_assert(WF_TTWU == SD_BALANCE_WAKE);
  
  extern const int		sched_prio_to_weight[40];
  extern const u32		sched_prio_to_wmult[40];
@@ -883,61 +666,14 @@ index eeb6efb0b610..80c4d2f5827f 100644
  
  /*
   * {de,en}queue flags:
-@@ -2450,8 +2462,8 @@ extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
- extern const_debug unsigned int sysctl_sched_nr_migrate;
- extern const_debug unsigned int sysctl_sched_migration_cost;
- 
--#ifdef CONFIG_SCHED_DEBUG
- extern unsigned int sysctl_sched_latency;
-+#ifdef CONFIG_SCHED_DEBUG
- extern unsigned int sysctl_sched_min_granularity;
- extern unsigned int sysctl_sched_idle_min_granularity;
- extern unsigned int sysctl_sched_wakeup_granularity;
 -- 
 2.17.1
 
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 5/7] sched/fair: Add sched group latency support
-Date:   Sun, 25 Sep 2022 16:39:06 +0200
-Message-Id: <20220925143908.10846-6-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220925143908.10846-1-vincent.guittot@linaro.org>
-References: <20220925143908.10846-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-Task can set its latency priority with sched_setattr(), which is then used
-to set the latency offset of its sched_entity, but sched group entities
-still have the default latency offset value.
-
-Add a latency.nice field in cpu cgroup controller to set the latency
-priority of the group similarly to sched_setattr(). The latency priority
-is then used to set the offset of the sched_entities of the group.
-
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- Documentation/admin-guide/cgroup-v2.rst |  8 ++++
- kernel/sched/core.c                     | 53 +++++++++++++++++++++++++
- kernel/sched/fair.c                     | 33 +++++++++++++++
- kernel/sched/sched.h                    |  4 ++
- 4 files changed, 98 insertions(+)
-
 diff --git a/Documentation/admin-guide/cgroup-v2.rst b/Documentation/admin-guide/cgroup-v2.rst
-index be4a77baf784..d8ae7e411f9c 100644
+index dc254a3cb956..93a73663a5f7 100644
 --- a/Documentation/admin-guide/cgroup-v2.rst
 +++ b/Documentation/admin-guide/cgroup-v2.rst
-@@ -1095,6 +1095,14 @@ All time durations are in microseconds.
+@@ -1118,6 +1118,16 @@ All time durations are in microseconds.
          values similar to the sched_setattr(2). This maximum utilization
          value is used to clamp the task specific maximum utilization clamp.
  
@@ -948,15 +684,17 @@ index be4a77baf784..d8ae7e411f9c 100644
 +	The nice value is in the range [-20, 19].
 +
 +	This interface file allows reading and setting latency using the
-+	same values used by sched_setattr(2).
++	same values used by sched_setattr(2). The latency_nice of a group is
++	used to limit the impact of the latency_nice of a task outside the
++	group.
  
  
  Memory
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 00fa2da12506..e8a1105bc87d 100644
+index b2b8cb6c08cd..9f6700f812ea 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -10890,6 +10890,48 @@ static int cpu_idle_write_s64(struct cgroup_subsys_state *css,
+@@ -10967,6 +10967,47 @@ static int cpu_idle_write_s64(struct cgroup_subsys_state *css,
  {
  	return sched_group_set_idle(css_tg(css), idle);
  }
@@ -964,12 +702,11 @@ index 00fa2da12506..e8a1105bc87d 100644
 +static s64 cpu_latency_nice_read_s64(struct cgroup_subsys_state *css,
 +				    struct cftype *cft)
 +{
-+	int last_delta = INT_MAX;
-+	int prio, delta;
++	int prio, delta, last_delta = INT_MAX;
 +	s64 weight;
 +
 +	weight = css_tg(css)->latency_offset * NICE_LATENCY_WEIGHT_MAX;
-+	weight = div_s64(weight, sysctl_sched_latency);
++	weight = div_s64(weight, get_sleep_latency(false));
 +
 +	/* Find the closest nice value to the current weight */
 +	for (prio = 0; prio < ARRAY_SIZE(sched_latency_to_weight); prio++) {
@@ -996,7 +733,7 @@ index 00fa2da12506..e8a1105bc87d 100644
 +	idx = array_index_nospec(idx, LATENCY_NICE_WIDTH);
 +	weight = sched_latency_to_weight[idx];
 +
-+	latency_offset = sysctl_sched_latency * weight;
++	latency_offset = weight * get_sleep_latency(false);
 +	latency_offset = div_s64(latency_offset, NICE_LATENCY_WEIGHT_MAX);
 +
 +	return sched_group_set_latency(css_tg(css), latency_offset);
@@ -1005,7 +742,7 @@ index 00fa2da12506..e8a1105bc87d 100644
  #endif
  
  static struct cftype cpu_legacy_files[] = {
-@@ -10904,6 +10946,11 @@ static struct cftype cpu_legacy_files[] = {
+@@ -10981,6 +11022,11 @@ static struct cftype cpu_legacy_files[] = {
  		.read_s64 = cpu_idle_read_s64,
  		.write_s64 = cpu_idle_write_s64,
  	},
@@ -1017,7 +754,7 @@ index 00fa2da12506..e8a1105bc87d 100644
  #endif
  #ifdef CONFIG_CFS_BANDWIDTH
  	{
-@@ -11121,6 +11168,12 @@ static struct cftype cpu_files[] = {
+@@ -11198,6 +11244,12 @@ static struct cftype cpu_files[] = {
  		.read_s64 = cpu_idle_read_s64,
  		.write_s64 = cpu_idle_write_s64,
  	},
@@ -1031,10 +768,10 @@ index 00fa2da12506..e8a1105bc87d 100644
  #ifdef CONFIG_CFS_BANDWIDTH
  	{
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index c3f857630dcf..74e42d19c1ce 100644
+index 0e80e65113bd..75c0a8d203c3 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -11768,6 +11768,7 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
+@@ -12158,6 +12158,7 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
  		goto err;
  
  	tg->shares = NICE_0_LOAD;
@@ -1042,7 +779,7 @@ index c3f857630dcf..74e42d19c1ce 100644
  
  	init_cfs_bandwidth(tg_cfs_bandwidth(tg));
  
-@@ -11866,6 +11867,9 @@ void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
+@@ -12256,6 +12257,9 @@ void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
  	}
  
  	se->my_q = cfs_rq;
@@ -1052,7 +789,7 @@ index c3f857630dcf..74e42d19c1ce 100644
  	/* guarantee group entities always have weight */
  	update_load_set(&se->load, NICE_0_LOAD);
  	se->parent = parent;
-@@ -11996,6 +12000,35 @@ int sched_group_set_idle(struct task_group *tg, long idle)
+@@ -12386,6 +12390,35 @@ int sched_group_set_idle(struct task_group *tg, long idle)
  	return 0;
  }
  
@@ -1089,10 +826,10 @@ index c3f857630dcf..74e42d19c1ce 100644
  
  void free_fair_sched_group(struct task_group *tg) { }
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 80c4d2f5827f..a15fb955092c 100644
+index 7292652731d0..c3735a34d394 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -407,6 +407,8 @@ struct task_group {
+@@ -383,6 +383,8 @@ struct task_group {
  
  	/* A positive value indicates that this is a SCHED_IDLE group. */
  	int			idle;
@@ -1101,7 +838,7 @@ index 80c4d2f5827f..a15fb955092c 100644
  
  #ifdef	CONFIG_SMP
  	/*
-@@ -517,6 +519,8 @@ extern int sched_group_set_shares(struct task_group *tg, unsigned long shares);
+@@ -493,6 +495,8 @@ extern int sched_group_set_shares(struct task_group *tg, unsigned long shares);
  
  extern int sched_group_set_idle(struct task_group *tg, long idle);
  
@@ -1113,45 +850,16 @@ index 80c4d2f5827f..a15fb955092c 100644
 -- 
 2.17.1
 
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 6/7] sched/core: Support latency priority with sched core
-Date:   Sun, 25 Sep 2022 16:39:07 +0200
-Message-Id: <20220925143908.10846-7-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220925143908.10846-1-vincent.guittot@linaro.org>
-References: <20220925143908.10846-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-Take into account wakeup_latency_gran() when ordering the cfs threads.
-
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- kernel/sched/fair.c | 4 ++++
- 1 file changed, 4 insertions(+)
-
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 74e42d19c1ce..e524e892d118 100644
+index 75c0a8d203c3..be446dc58be7 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -11443,6 +11443,10 @@ bool cfs_prio_less(struct task_struct *a, struct task_struct *b, bool in_fi)
+@@ -11833,6 +11833,9 @@ bool cfs_prio_less(struct task_struct *a, struct task_struct *b, bool in_fi)
  	delta = (s64)(sea->vruntime - seb->vruntime) +
  		(s64)(cfs_rqb->min_vruntime_fi - cfs_rqa->min_vruntime_fi);
  
 +	/* Take into account latency prio */
 +	delta -= wakeup_latency_gran(sea, seb);
-+
 +
  	return delta > 0;
  }
@@ -1159,92 +867,35 @@ index 74e42d19c1ce..e524e892d118 100644
 -- 
 2.17.1
 
-From:   Vincent Guittot <vincent.guittot@linaro.org>
-To:     mingo@redhat.com, peterz@infradead.org, juri.lelli@redhat.com,
-        dietmar.eggemann@arm.com, rostedt@goodmis.org, bsegall@google.com,
-        mgorman@suse.de, bristot@redhat.com, vschneid@redhat.com,
-        linux-kernel@vger.kernel.org, parth@linux.ibm.com
-Cc:     qais.yousef@arm.com, chris.hyser@oracle.com,
-        valentin.schneider@arm.com, patrick.bellasi@matbug.net,
-        David.Laight@aculab.com, pjt@google.com, pavel@ucw.cz,
-        tj@kernel.org, qperret@google.com, tim.c.chen@linux.intel.com,
-        joshdon@google.com, timj@gnu.org,
-        Vincent Guittot <vincent.guittot@linaro.org>
-Subject: [PATCH v5 7/7] sched/fair: Add latency list
-Date:   Sun, 25 Sep 2022 16:39:08 +0200
-Message-Id: <20220925143908.10846-8-vincent.guittot@linaro.org>
-X-Mailer: git-send-email 2.17.1
-In-Reply-To: <20220925143908.10846-1-vincent.guittot@linaro.org>
-References: <20220925143908.10846-1-vincent.guittot@linaro.org>
-Precedence: bulk
-List-ID: <linux-kernel.vger.kernel.org>
-X-Mailing-List: linux-kernel@vger.kernel.org
-
-Add a rb tree for latency sensitive entities so we can schedule the most
-sensitive one first even when it failed to preempt current at wakeup or
-when it got quickly preempted by another entity of higher priority.
-
-In order to keep fairness, the latency is used once at wakeup to get a
-minimum slice and not during the following scheduling slice to prevent
-long running entity to got more running time than allocated to his nice
-priority.
-
-The rb tree nebales to cover the last corner case where latency
-sensitive entity can't got schedule quickly after the wakeup.
-
-hackbench -l 10000 -g $group &
-cyclictest --policy other -D 5 -q -n
-        latency 0           latency -20
-group   min  avg    max     min  avg    max
-0       17    19     29      17   18     30
-1       65   306   7149      64   83    208
-4       50   395  15731      56   80    271
-8       56   781  41548      54   80    301
-16      60  1392  87237      59   86    490
-
-group = 0 means that hackbench is not running.
-
-Both avg and max are significantly improved with nice latency -20. If we
-add the histogram parameters to get details of latency, we have :
-
-hackbench -l 10000 -g 16 &
-cyclictest --policy other -D 5 -q -n  -H 20000 --histfile data.txt
-              latency 0    latency -20
-Min Latencies:    60           61
-Avg Latencies:  1077           86
-Max Latencies: 87311          444
-50% latencies:    92           85
-75% latencies:   554           90
-85% latencies:  1019           93
-90% latencies:  1346           96
-95% latencies:  5400          100
-99% latencies: 19044          110
-
-Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
----
- include/linux/sched.h |  2 +
- kernel/sched/fair.c   | 96 +++++++++++++++++++++++++++++++++++++++++--
- kernel/sched/sched.h  |  1 +
- 3 files changed, 96 insertions(+), 3 deletions(-)
-
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index a74cad08e91e..0b92674e3664 100644
+index 2f33326adb8d..5187114a9920 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -547,6 +547,8 @@ struct sched_entity {
+@@ -548,6 +548,7 @@ struct sched_entity {
  	/* For load-balancing: */
  	struct load_weight		load;
  	struct rb_node			run_node;
 +	struct rb_node			latency_node;
-+	unsigned int			on_latency;
  	struct list_head		group_node;
  	unsigned int			on_rq;
  
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 9f6700f812ea..eaca0e34ab58 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4361,6 +4361,7 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
+ 	p->se.nr_migrations		= 0;
+ 	p->se.vruntime			= 0;
+ 	INIT_LIST_HEAD(&p->se.group_node);
++	RB_CLEAR_NODE(&p->se.latency_node);
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	p->se.cfs_rq			= NULL;
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index e524e892d118..1a72f34136d8 100644
+index be446dc58be7..76da7c7a13ab 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -664,7 +664,77 @@ struct sched_entity *__pick_last_entity(struct cfs_rq *cfs_rq)
+@@ -665,7 +665,76 @@ struct sched_entity *__pick_last_entity(struct cfs_rq *cfs_rq)
  
  	return __node_2_se(last);
  }
@@ -1279,7 +930,7 @@ index e524e892d118..1a72f34136d8 100644
 +	if (se->latency_offset >= 0)
 +		return;
 +
-+	if (se->on_latency)
++	if (!RB_EMPTY_NODE(&se->latency_node))
 +		return;
 +
 +	/*
@@ -1297,14 +948,13 @@ index e524e892d118..1a72f34136d8 100644
 +	}
 +
 +	rb_add_cached(&se->latency_node, &cfs_rq->latency_timeline, __latency_less);
-+	se->on_latency = 1;
 +}
 +
 +static void __dequeue_latency(struct cfs_rq *cfs_rq, struct sched_entity *se)
 +{
-+	if (se->on_latency) {
++	if (!RB_EMPTY_NODE(&se->latency_node)) {
 +		rb_erase_cached(&se->latency_node, &cfs_rq->latency_timeline);
-+		se->on_latency = 0;
++		RB_CLEAR_NODE(&se->latency_node);
 +	}
 +}
 +
@@ -1322,7 +972,7 @@ index e524e892d118..1a72f34136d8 100644
  /**************************************************************
   * Scheduling class statistics methods:
   */
-@@ -4455,8 +4525,10 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -4739,8 +4808,10 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	check_schedstat_required();
  	update_stats_enqueue_fair(cfs_rq, se, flags);
  	check_spread(cfs_rq, se);
@@ -1334,7 +984,7 @@ index e524e892d118..1a72f34136d8 100644
  	se->on_rq = 1;
  
  	if (cfs_rq->nr_running == 1) {
-@@ -4542,8 +4614,10 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -4826,8 +4897,10 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  
  	clear_buddies(cfs_rq, se);
  
@@ -1346,7 +996,7 @@ index e524e892d118..1a72f34136d8 100644
  	se->on_rq = 0;
  	account_entity_dequeue(cfs_rq, se);
  
-@@ -4631,6 +4705,7 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -4916,6 +4989,7 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
  		 */
  		update_stats_wait_end_fair(cfs_rq, se);
  		__dequeue_entity(cfs_rq, se);
@@ -1354,7 +1004,7 @@ index e524e892d118..1a72f34136d8 100644
  		update_load_avg(cfs_rq, se, UPDATE_TG);
  	}
  
-@@ -4669,7 +4744,7 @@ static struct sched_entity *
+@@ -4954,7 +5028,7 @@ static struct sched_entity *
  pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
  {
  	struct sched_entity *left = __pick_first_entity(cfs_rq);
@@ -1363,7 +1013,7 @@ index e524e892d118..1a72f34136d8 100644
  
  	/*
  	 * If curr is set we have to see if its left of the leftmost entity
-@@ -4711,6 +4786,12 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
+@@ -4996,6 +5070,12 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
  		se = cfs_rq->last;
  	}
  
@@ -1376,7 +1026,7 @@ index e524e892d118..1a72f34136d8 100644
  	return se;
  }
  
-@@ -4734,6 +4815,7 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
+@@ -5019,6 +5099,7 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
  		update_stats_wait_start_fair(cfs_rq, prev);
  		/* Put 'current' back into the tree. */
  		__enqueue_entity(cfs_rq, prev);
@@ -1384,7 +1034,7 @@ index e524e892d118..1a72f34136d8 100644
  		/* in !on_rq case, update occurred at dequeue */
  		update_load_avg(cfs_rq, prev, 0);
  	}
-@@ -11661,6 +11799,7 @@ static void set_next_task_fair(struct rq
+@@ -12106,6 +12187,7 @@ static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first)
  void init_cfs_rq(struct cfs_rq *cfs_rq)
  {
  	cfs_rq->tasks_timeline = RB_ROOT_CACHED;
@@ -1392,7 +1042,7 @@ index e524e892d118..1a72f34136d8 100644
  	u64_u32_store(cfs_rq->min_vruntime, (u64)(-(1LL << 20)));
  #ifdef CONFIG_SMP
  	raw_spin_lock_init(&cfs_rq->removed.lock);
-@@ -12025,8 +12108,15 @@ int sched_group_set_latency(struct task_group *tg, s64 latency)
+@@ -12414,8 +12496,15 @@ int sched_group_set_latency(struct task_group *tg, s64 latency)
  
  	for_each_possible_cpu(i) {
  		struct sched_entity *se = tg->se[i];
@@ -1409,10 +1059,10 @@ index e524e892d118..1a72f34136d8 100644
  
  	mutex_unlock(&shares_mutex);
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index a15fb955092c..76bca172585c 100644
+index c3735a34d394..b81179c512e6 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
-@@ -599,6 +599,7 @@ struct cfs_rq {
+@@ -575,6 +575,7 @@ struct cfs_rq {
  #endif
  
  	struct rb_root_cached	tasks_timeline;
@@ -1420,6 +1070,67 @@ index a15fb955092c..76bca172585c 100644
  
  	/*
  	 * 'curr' points to currently running entity on this cfs_rq.
+-- 
+2.17.1
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 76da7c7a13ab..466a2fee1592 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6104,35 +6104,6 @@ static int sched_idle_cpu(int cpu)
+ }
+ #endif
+ 
+-static void set_next_buddy(struct sched_entity *se);
+-
+-static void check_preempt_from_others(struct cfs_rq *cfs, struct sched_entity *se)
+-{
+-	struct sched_entity *next;
+-
+-	if (se->latency_offset >= 0)
+-		return;
+-
+-	if (cfs->nr_running <= 1)
+-		return;
+-	/*
+-	 * When waking from another class, we don't need to check to preempt at
+-	 * wakeup and don't set next buddy as a candidate for being picked in
+-	 * priority.
+-	 * In case of simultaneous wakeup when current is another class, the
+-	 * latency sensitive tasks lost opportunity to preempt non sensitive
+-	 * tasks which woke up simultaneously.
+-	 */
+-
+-	if (cfs->next)
+-		next = cfs->next;
+-	else
+-		next = __pick_first_entity(cfs);
+-
+-	if (next && wakeup_preempt_entity(next, se) == 1)
+-		set_next_buddy(se);
+-}
+-
+ /*
+  * The enqueue_task method is called before nr_running is
+  * increased. Here we update the fair scheduling stats and
+@@ -6219,15 +6190,14 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
+ 	if (!task_new)
+ 		update_overutilized_status(rq);
+ 
+-	if (rq->curr->sched_class != &fair_sched_class)
+-		check_preempt_from_others(cfs_rq_of(&p->se), &p->se);
+-
+ enqueue_throttle:
+ 	assert_list_leaf_cfs_rq(rq);
+ 
+ 	hrtick_update(rq);
+ }
+ 
++static void set_next_buddy(struct sched_entity *se);
++
+ /*
+  * The dequeue_task method is called before nr_running is
+  * decreased. We remove the task from the rbtree and
 -- 
 2.17.1
 
