@@ -538,3 +538,36 @@ index b744288c58a4b..8ce3b63851e95 100644
  
 -- 
 2.31.1
+
+From: Richard Clark <richard.xnu.clark@gmail.com>
+Subject: [PATCH] workqueue: Remove the unbound release work from the per-cpu type
+
+Both the per-cpu and unbound workqueue will call init_pwq(...) currently,
+the latter will init an unbound release work for the pwq which is unnecessary
+for the per-cpu type workqueue.
+This commit will remove this work item from the per-cpu workqueue by checking the
+wq->flags in init_pwq(...), the work is still reserved for the unbound workqueue.
+
+Signed-off-by: Richard Clark <richard.xnu.clark@gmail.com>
+Cc: Tejun Heo <tj@kernel.org>
+Cc: Lai Jiangshan <jiangshanlai@gmail.com>
+---
+ kernel/workqueue.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/workqueue.c b/kernel/workqueue.c
+index 7cd5f5e7e0a1..01bdfb74081e 100644
+--- a/kernel/workqueue.c
++++ b/kernel/workqueue.c
+@@ -3807,7 +3807,8 @@ static void init_pwq(struct pool_workqueue *pwq, struct workqueue_struct *wq,
+ 	INIT_LIST_HEAD(&pwq->inactive_works);
+ 	INIT_LIST_HEAD(&pwq->pwqs_node);
+ 	INIT_LIST_HEAD(&pwq->mayday_node);
+-	INIT_WORK(&pwq->unbound_release_work, pwq_unbound_release_workfn);
++	if (wq->flags & WQ_UNBOUND)
++		INIT_WORK(&pwq->unbound_release_work, pwq_unbound_release_workfn);
+ }
+ 
+ /* sync @pwq with the current state of its associated wq and link it */
+-- 
+2.37.2
