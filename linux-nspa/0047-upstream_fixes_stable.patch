@@ -2510,3 +2510,1147 @@ index 88de9f0d4728..983899574464 100644
  
 -- 
 2.35.1
+
+From 23df39fc6a36183af5e6e4f47523f1ad2cdc1d30 Mon Sep 17 00:00:00 2001
+From: Guo Jin <guoj17@chinatelecom.cn>
+Date: Tue, 8 Nov 2022 14:01:26 +0800
+Subject: locking: Fix qspinlock/x86 inline asm error
+
+When compiling linux 6.1.0-rc3 configured with CONFIG_64BIT=y and
+CONFIG_PARAVIRT_SPINLOCKS=y on x86_64 using LLVM 11.0, an error:
+"<inline asm> error: changed section flags for .spinlock.text,
+expected:: 0x6" occurred.
+
+The reason is the .spinlock.text in kernel/locking/qspinlock.o
+is used many times, but its flags are omitted in subsequent use.
+
+LLVM 11.0 assembler didn't permit to
+leave out flags in subsequent uses of the same sections.
+
+So this patch adds the corresponding flags to avoid above error.
+
+Fixes: 501f7f69bca1 ("locking: Add __lockfunc to slow path functions")
+Signed-off-by: Guo Jin <guoj17@chinatelecom.cn>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Nathan Chancellor <nathan@kernel.org>
+Link: https://lore.kernel.org/r/20221108060126.2505-1-guoj17@chinatelecom.cn
+---
+ arch/x86/include/asm/qspinlock_paravirt.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/x86/include/asm/qspinlock_paravirt.h b/arch/x86/include/asm/qspinlock_paravirt.h
+index 60ece592b2207..dbb38a6b4dfb6 100644
+--- a/arch/x86/include/asm/qspinlock_paravirt.h
++++ b/arch/x86/include/asm/qspinlock_paravirt.h
+@@ -37,7 +37,7 @@ __PV_CALLEE_SAVE_REGS_THUNK(__pv_queued_spin_unlock_slowpath, ".spinlock.text");
+  *   rsi = lockval           (second argument)
+  *   rdx = internal variable (set to 0)
+  */
+-asm    (".pushsection .spinlock.text;"
++asm    (".pushsection .spinlock.text, \"ax\";"
+ 	".globl " PV_UNLOCK ";"
+ 	".type " PV_UNLOCK ", @function;"
+ 	".align 4,0x90;"
+-- 
+cgit 
+
+From 4979524f5a2a8210e87fde2f642b0dc060860821 Mon Sep 17 00:00:00 2001
+From: Shang XiaoJing <shangxiaojing@huawei.com>
+Date: Tue, 1 Nov 2022 15:07:16 +0800
+Subject: drm: Fix potential null-ptr-deref in drm_vblank_destroy_worker()
+
+drm_vblank_init() call drmm_add_action_or_reset() with
+drm_vblank_init_release() as action. If __drmm_add_action() failed, will
+directly call drm_vblank_init_release() with the vblank whose worker is
+NULL. As the resule, a null-ptr-deref will happen in
+kthread_destroy_worker(). Add the NULL check before calling
+drm_vblank_destroy_worker().
+
+BUG: null-ptr-deref
+KASAN: null-ptr-deref in range [0x0000000000000068-0x000000000000006f]
+CPU: 5 PID: 961 Comm: modprobe Not tainted 6.0.0-11331-gd465bff130bf-dirty
+RIP: 0010:kthread_destroy_worker+0x25/0xb0
+  Call Trace:
+    <TASK>
+    drm_vblank_init_release+0x124/0x220 [drm]
+    ? drm_crtc_vblank_restore+0x8b0/0x8b0 [drm]
+    __drmm_add_action_or_reset+0x41/0x50 [drm]
+    drm_vblank_init+0x282/0x310 [drm]
+    vkms_init+0x35f/0x1000 [vkms]
+    ? 0xffffffffc4508000
+    ? lock_is_held_type+0xd7/0x130
+    ? __kmem_cache_alloc_node+0x1c2/0x2b0
+    ? lock_is_held_type+0xd7/0x130
+    ? 0xffffffffc4508000
+    do_one_initcall+0xd0/0x4f0
+    ...
+    do_syscall_64+0x35/0x80
+    entry_SYSCALL_64_after_hwframe+0x46/0xb0
+
+Fixes: 5e6c2b4f9161 ("drm/vblank: Add vblank works")
+Signed-off-by: Shang XiaoJing <shangxiaojing@huawei.com>
+Reviewed-by: Lyude Paul <lyude@redhat.com>
+Signed-off-by: Lyude Paul <lyude@redhat.com>
+Link: https://patchwork.freedesktop.org/patch/msgid/20221101070716.9189-3-shangxiaojing@huawei.com
+---
+ drivers/gpu/drm/drm_internal.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/drm_internal.h b/drivers/gpu/drm/drm_internal.h
+index 7bb98e6a446d0..5ea5e260118c2 100644
+--- a/drivers/gpu/drm/drm_internal.h
++++ b/drivers/gpu/drm/drm_internal.h
+@@ -104,7 +104,8 @@ static inline void drm_vblank_flush_worker(struct drm_vblank_crtc *vblank)
+ 
+ static inline void drm_vblank_destroy_worker(struct drm_vblank_crtc *vblank)
+ {
+-	kthread_destroy_worker(vblank->worker);
++	if (vblank->worker)
++		kthread_destroy_worker(vblank->worker);
+ }
+ 
+ int drm_vblank_worker_init(struct drm_vblank_crtc *vblank);
+-- 
+cgit 
+ivers/gpu/drm/amd/amdgpu/psp_v13_0.c
+From 0d502ef8898b3983eef9e40f50dfe100a0de5d93 Mon Sep 17 00:00:00 2001
+From: Stylon Wang <stylon.wang@amd.com>
+Date: Mon, 24 Oct 2022 15:36:16 +0800
+Subject: drm/amd/display: Fix access timeout to DPIA AUX at boot time
+
+[Why]
+Since introduction of patch "Query DPIA HPD status.", link detection at
+boot could be accessing DPIA AUX, which will not succeed until
+DMUB outbox messaging is enabled and results in below dmesg logs:
+
+[  160.840227] [drm:amdgpu_dm_process_dmub_aux_transfer_sync [amdgpu]] *ERROR* wait_for_completion_timeout timeout!
+
+[How]
+Enable DMUB outbox messaging before link detection at boot time.
+
+Reviewed-by: Wayne Lin <Wayne.Lin@amd.com>
+Acked-by: Tom Chung <chiahsuan.chung@amd.com>
+Signed-off-by: Stylon Wang <stylon.wang@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+---
+ drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+index 509739d83b5af..5a2faa8927485 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+@@ -1637,12 +1637,6 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
+ 		}
+ 	}
+ 
+-	if (amdgpu_dm_initialize_drm_device(adev)) {
+-		DRM_ERROR(
+-		"amdgpu: failed to initialize sw for display support.\n");
+-		goto error;
+-	}
+-
+ 	/* Enable outbox notification only after IRQ handlers are registered and DMUB is alive.
+ 	 * It is expected that DMUB will resend any pending notifications at this point, for
+ 	 * example HPD from DPIA.
+@@ -1650,6 +1644,12 @@ static int amdgpu_dm_init(struct amdgpu_device *adev)
+ 	if (dc_is_dmub_outbox_supported(adev->dm.dc))
+ 		dc_enable_dmub_outbox(adev->dm.dc);
+ 
++	if (amdgpu_dm_initialize_drm_device(adev)) {
++		DRM_ERROR(
++		"amdgpu: failed to initialize sw for display support.\n");
++		goto error;
++	}
++
+ 	/* create fake encoders for MST */
+ 	dm_dp_create_fake_mst_encoders(adev);
+ 
+-- 
+cgit 
+
+
+From 7af87fc1ba136143314c870059b8f60180247cbd Mon Sep 17 00:00:00 2001
+From: Rodrigo Siqueira <Rodrigo.Siqueira@amd.com>
+Date: Mon, 31 Oct 2022 14:58:12 -0400
+Subject: drm/amd/display: Add HUBP surface flip interrupt handler
+
+On IGT, there is a test named amd_hotplug, and when the subtest basic is
+executed on DCN31, we get the following error:
+
+[drm] *ERROR* [CRTC:71:crtc-0] flip_done timed out
+[drm] *ERROR* flip_done timed out
+[drm] *ERROR* [CRTC:71:crtc-0] commit wait timed out
+[drm] *ERROR* flip_done timed out
+[drm] *ERROR* [CONNECTOR:88:DP-1] commit wait timed out
+[drm] *ERROR* flip_done timed out
+[drm] *ERROR* [PLANE:59:plane-3] commit wait timed out
+
+After enable the page flip log with the below command:
+
+ echo -n 'format "[PFLIP]" +p' > /sys/kernel/debug/dynamic_debug/control
+
+It is possible to see that the flip was submitted, but DC never replied
+back, which generates time-out issues. This is an indication that the
+HUBP surface flip is missing. This commit fixes this issue by adding
+hubp1_set_flip_int to DCN31.
+
+Reviewed-by: Nicholas Kazlauskas <Nicholas.Kazlauskas@amd.com>
+Acked-by: Tom Chung <chiahsuan.chung@amd.com>
+Signed-off-by: Rodrigo Siqueira <Rodrigo.Siqueira@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org
+---
+ drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hubp.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hubp.c b/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hubp.c
+index 84e1486f3d515..39a57bcd78667 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hubp.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn31/dcn31_hubp.c
+@@ -87,6 +87,7 @@ static struct hubp_funcs dcn31_hubp_funcs = {
+ 	.hubp_init = hubp3_init,
+ 	.set_unbounded_requesting = hubp31_set_unbounded_requesting,
+ 	.hubp_soft_reset = hubp31_soft_reset,
++	.hubp_set_flip_int = hubp1_set_flip_int,
+ 	.hubp_in_blank = hubp1_in_blank,
+ 	.program_extended_blank = hubp31_program_extended_blank,
+ };
+-- 
+cgit 
+
+From 8d8494c3467d366eb0f7c8198dab80be8bdc47d2 Mon Sep 17 00:00:00 2001
+From: Stylon Wang <stylon.wang@amd.com>
+Date: Wed, 26 Oct 2022 21:00:40 +0800
+Subject: drm/amd/display: Fix invalid DPIA AUX reply causing system hang
+
+[Why]
+Some DPIA AUX replies have incorrect data length from original request.
+This could lead to overwriting of destination buffer if reply length is
+larger, which could cause invalid access to stack since many destination
+buffers are declared as local variables.
+
+[How]
+Check for invalid length from DPIA AUX replies and trigger a retry if
+reply length is not the same as original request. A DRM_WARN() dmesg log
+is also produced.
+
+Reviewed-by: Roman Li <Roman.Li@amd.com>
+Acked-by: Tom Chung <chiahsuan.chung@amd.com>
+Signed-off-by: Stylon Wang <stylon.wang@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+---
+ drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c | 20 ++++++++++++++++++++
+ drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.h |  6 ------
+ 2 files changed, 20 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+index 5a2faa8927485..3e1ecca724305 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.c
+@@ -147,6 +147,14 @@ MODULE_FIRMWARE(FIRMWARE_NAVI12_DMCU);
+ /* Number of bytes in PSP footer for firmware. */
+ #define PSP_FOOTER_BYTES 0x100
+ 
++/*
++ * DMUB Async to Sync Mechanism Status
++ */
++#define DMUB_ASYNC_TO_SYNC_ACCESS_FAIL 1
++#define DMUB_ASYNC_TO_SYNC_ACCESS_TIMEOUT 2
++#define DMUB_ASYNC_TO_SYNC_ACCESS_SUCCESS 3
++#define DMUB_ASYNC_TO_SYNC_ACCESS_INVALID 4
++
+ /**
+  * DOC: overview
+  *
+@@ -10109,6 +10117,8 @@ static int amdgpu_dm_set_dmub_async_sync_status(bool is_cmd_aux,
+ 			*operation_result = AUX_RET_ERROR_TIMEOUT;
+ 		} else if (status_type == DMUB_ASYNC_TO_SYNC_ACCESS_FAIL) {
+ 			*operation_result = AUX_RET_ERROR_ENGINE_ACQUIRE;
++		} else if (status_type == DMUB_ASYNC_TO_SYNC_ACCESS_INVALID) {
++			*operation_result = AUX_RET_ERROR_INVALID_REPLY;
+ 		} else {
+ 			*operation_result = AUX_RET_ERROR_UNKNOWN;
+ 		}
+@@ -10156,6 +10166,16 @@ int amdgpu_dm_process_dmub_aux_transfer_sync(bool is_cmd_aux, struct dc_context
+ 			payload->reply[0] = adev->dm.dmub_notify->aux_reply.command;
+ 			if (!payload->write && adev->dm.dmub_notify->aux_reply.length &&
+ 			    payload->reply[0] == AUX_TRANSACTION_REPLY_AUX_ACK) {
++
++				if (payload->length != adev->dm.dmub_notify->aux_reply.length) {
++					DRM_WARN("invalid read from DPIA AUX %x(%d) got length %d!\n",
++							payload->address, payload->length,
++							adev->dm.dmub_notify->aux_reply.length);
++					return amdgpu_dm_set_dmub_async_sync_status(is_cmd_aux, ctx,
++							DMUB_ASYNC_TO_SYNC_ACCESS_INVALID,
++							(uint32_t *)operation_result);
++				}
++
+ 				memcpy(payload->data, adev->dm.dmub_notify->aux_reply.data,
+ 				       adev->dm.dmub_notify->aux_reply.length);
+ 			}
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.h b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.h
+index b5ce15c43bcc1..635c398fcefe7 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.h
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm.h
+@@ -50,12 +50,6 @@
+ 
+ #define AMDGPU_DMUB_NOTIFICATION_MAX 5
+ 
+-/*
+- * DMUB Async to Sync Mechanism Status
+- */
+-#define DMUB_ASYNC_TO_SYNC_ACCESS_FAIL 1
+-#define DMUB_ASYNC_TO_SYNC_ACCESS_TIMEOUT 2
+-#define DMUB_ASYNC_TO_SYNC_ACCESS_SUCCESS 3
+ /*
+ #include "include/amdgpu_dal_power_if.h"
+ #include "amdgpu_dm_irq.h"
+-- 
+cgit 
+
+
+From 7e952a18eb978a3e51fc1704b752378be66226b2 Mon Sep 17 00:00:00 2001
+From: George Shen <george.shen@amd.com>
+Date: Wed, 2 Nov 2022 15:06:48 -0400
+Subject: drm/amd/display: Support parsing VRAM info v3.0 from VBIOS
+
+[Why]
+For DCN3.2 and DCN3.21, VBIOS has switch to using v3.0 of the VRAM
+info struct. We should read and override the VRAM info in driver with
+values provided by VBIOS to support memory downbin cases.
+
+Reviewed-by: Alvin Lee <Alvin.Lee2@amd.com>
+Acked-by: Tom Chung <chiahsuan.chung@amd.com>
+Signed-off-by: George Shen <george.shen@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+---
+ drivers/gpu/drm/amd/display/dc/bios/bios_parser2.c | 30 ++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/bios/bios_parser2.c b/drivers/gpu/drm/amd/display/dc/bios/bios_parser2.c
+index ee0456b5e14e4..e0c8d6f09bb4b 100644
+--- a/drivers/gpu/drm/amd/display/dc/bios/bios_parser2.c
++++ b/drivers/gpu/drm/amd/display/dc/bios/bios_parser2.c
+@@ -2393,6 +2393,26 @@ static enum bp_result get_vram_info_v25(
+ 	return result;
+ }
+ 
++static enum bp_result get_vram_info_v30(
++	struct bios_parser *bp,
++	struct dc_vram_info *info)
++{
++	struct atom_vram_info_header_v3_0 *info_v30;
++	enum bp_result result = BP_RESULT_OK;
++
++	info_v30 = GET_IMAGE(struct atom_vram_info_header_v3_0,
++						DATA_TABLES(vram_info));
++
++	if (info_v30 == NULL)
++		return BP_RESULT_BADBIOSTABLE;
++
++	info->num_chans = info_v30->channel_num;
++	info->dram_channel_width_bytes = (1 << info_v30->channel_width) / 8;
++
++	return result;
++}
++
++
+ /*
+  * get_integrated_info_v11
+  *
+@@ -3060,6 +3080,16 @@ static enum bp_result bios_parser_get_vram_info(
+ 			}
+ 			break;
+ 
++		case 3:
++			switch (revision.minor) {
++			case 0:
++				result = get_vram_info_v30(bp, info);
++				break;
++			default:
++				break;
++			}
++			break;
++
+ 		default:
+ 			return result;
+ 		}
+-- 
+cgit 
+
+From e7e4f77c991c9abf90924929a9d55f90b0bb78de Mon Sep 17 00:00:00 2001
+From: Roman Li <roman.li@amd.com>
+Date: Thu, 3 Nov 2022 17:33:07 -0400
+Subject: drm/amd/display: Fix optc2_configure warning on dcn314
+
+[Why]
+dcn314 uses optc2_configure_crc() that wraps
+optc1_configure_crc() + set additional registers
+not applicable to dcn314.
+It's not critical but when used leads to warning like:
+WARNING: drivers/gpu/drm/amd/amdgpu/../display/dc/dc_helper.c
+Call Trace:
+<TASK>
+generic_reg_set_ex+0x6d/0xe0 [amdgpu]
+optc2_configure_crc+0x60/0x80 [amdgpu]
+dc_stream_configure_crc+0x129/0x150 [amdgpu]
+amdgpu_dm_crtc_configure_crc_source+0x5d/0xe0 [amdgpu]
+
+[How]
+Use optc1_configure_crc() directly
+
+Reviewed-by: Nicholas Kazlauskas <Nicholas.Kazlauskas@amd.com>
+Acked-by: Tom Chung <chiahsuan.chung@amd.com>
+Signed-off-by: Roman Li <roman.li@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+---
+ drivers/gpu/drm/amd/display/dc/dcn314/dcn314_optc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_optc.c b/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_optc.c
+index 47eb162f1a758..7dd36e402bac7 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_optc.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_optc.c
+@@ -237,7 +237,7 @@ static struct timing_generator_funcs dcn314_tg_funcs = {
+ 		.clear_optc_underflow = optc1_clear_optc_underflow,
+ 		.setup_global_swap_lock = NULL,
+ 		.get_crc = optc1_get_crc,
+-		.configure_crc = optc2_configure_crc,
++		.configure_crc = optc1_configure_crc,
+ 		.set_dsc_config = optc3_set_dsc_config,
+ 		.get_dsc_status = optc2_get_dsc_status,
+ 		.set_dwb_source = NULL,
+-- 
+cgit 
+
+
+From 246e667079e8d0fc85f842bceca8c5a3c5da5905 Mon Sep 17 00:00:00 2001
+From: Dillon Varone <Dillon.Varone@amd.com>
+Date: Thu, 3 Nov 2022 18:33:38 -0400
+Subject: drm/amd/display: Fix prefetch calculations for dcn32
+
+[Description]
+Prefetch calculation loop was not exiting until utilizing all of vstartup if it
+failed once.  Locals need to be reset on each iteration of the loop.
+
+Reviewed-by: Jun Lei <Jun.Lei@amd.com>
+Acked-by: Tom Chung <chiahsuan.chung@amd.com>
+Signed-off-by: Dillon Varone <Dillon.Varone@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+---
+ drivers/gpu/drm/amd/display/dc/dml/dcn32/display_mode_vba_32.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/dcn32/display_mode_vba_32.c b/drivers/gpu/drm/amd/display/dc/dml/dcn32/display_mode_vba_32.c
+index 244fd15d24b43..9afd9ba23fb2a 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/dcn32/display_mode_vba_32.c
++++ b/drivers/gpu/drm/amd/display/dc/dml/dcn32/display_mode_vba_32.c
+@@ -718,6 +718,8 @@ static void DISPCLKDPPCLKDCFCLKDeepSleepPrefetchParametersWatermarksAndPerforman
+ 
+ 	do {
+ 		MaxTotalRDBandwidth = 0;
++		DestinationLineTimesForPrefetchLessThan2 = false;
++		VRatioPrefetchMoreThanMax = false;
+ #ifdef __DML_VBA_DEBUG__
+ 		dml_print("DML::%s: Start loop: VStartup = %d\n", __func__, mode_lib->vba.VStartupLines);
+ #endif
+-- 
+cgit 
+
+
+From c149947b188c651b943c1d8ca1494d1a98a3e27f Mon Sep 17 00:00:00 2001
+From: Dillon Varone <Dillon.Varone@amd.com>
+Date: Thu, 3 Nov 2022 18:38:13 -0400
+Subject: drm/amd/display: use uclk pstate latency for fw assisted mclk
+ validation dcn32
+
+[WHY?]
+DCN32 uses fclk pstate watermarks for dummy pstate, and must always be
+supported.
+
+[HOW?]
+Validation needs to be run with fclk pstate latency set
+as the dummy pstate latency to get correct prefetch and bandwidth outputs.
+
+Reviewed-by: Jun Lei <Jun.Lei@amd.com>
+Acked-by: Tom Chung <chiahsuan.chung@amd.com>
+Signed-off-by: Dillon Varone <Dillon.Varone@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c b/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c
+index 659323ebd79d8..12e17bcfca3f0 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c
++++ b/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c
+@@ -1803,6 +1803,12 @@ void dcn32_calculate_wm_and_dlg_fpu(struct dc *dc, struct dc_state *context,
+ 			 */
+ 			context->bw_ctx.dml.soc.dram_clock_change_latency_us =
+ 					dc->clk_mgr->bw_params->wm_table.nv_entries[WM_A].dml_input.pstate_latency_us;
++			/* For DCN32/321 need to validate with fclk pstate change latency equal to dummy so
++			 * prefetch is scheduled correctly to account for dummy pstate.
++			 */
++			if (dummy_latency_index == 0)
++				context->bw_ctx.dml.soc.fclk_change_latency_us =
++						dc->clk_mgr->bw_params->dummy_pstate_table[dummy_latency_index].dummy_pstate_latency_us;
+ 			dcn32_internal_validate_bw(dc, context, pipes, &pipe_cnt, &vlevel, false);
+ 			maxMpcComb = context->bw_ctx.dml.vba.maxMpcComb;
+ 			dcfclk_from_fw_based_mclk_switching = context->bw_ctx.dml.vba.DCFCLKState[vlevel][context->bw_ctx.dml.vba.maxMpcComb];
+@@ -1990,6 +1996,10 @@ void dcn32_calculate_wm_and_dlg_fpu(struct dc *dc, struct dc_state *context,
+ 
+ 	context->perf_params.stutter_period_us = context->bw_ctx.dml.vba.StutterPeriod;
+ 
++	if (context->bw_ctx.bw.dcn.clk.fw_based_mclk_switching && dummy_latency_index == 0)
++		context->bw_ctx.dml.soc.fclk_change_latency_us =
++				dc->clk_mgr->bw_params->dummy_pstate_table[dummy_latency_index].dummy_pstate_latency_us;
++
+ 	dcn32_calculate_dlg_params(dc, context, pipes, pipe_cnt, vlevel);
+ 
+ 	if (!pstate_en)
+@@ -1997,8 +2007,12 @@ void dcn32_calculate_wm_and_dlg_fpu(struct dc *dc, struct dc_state *context,
+ 		context->bw_ctx.dml.soc.dram_clock_change_latency_us =
+ 				dc->clk_mgr->bw_params->wm_table.nv_entries[WM_A].dml_input.pstate_latency_us;
+ 
+-	if (context->bw_ctx.bw.dcn.clk.fw_based_mclk_switching)
++	if (context->bw_ctx.bw.dcn.clk.fw_based_mclk_switching) {
+ 		dcn30_setup_mclk_switch_using_fw_based_vblank_stretch(dc, context);
++		if (dummy_latency_index == 0)
++			context->bw_ctx.dml.soc.fclk_change_latency_us =
++					dc->clk_mgr->bw_params->wm_table.nv_entries[WM_A].dml_input.fclk_change_latency_us;
++	}
+ }
+ 
+ static void dcn32_get_optimal_dcfclk_fclk_for_uclk(unsigned int uclk_mts,
+-- 
+cgit 
+
+From 0e444a4de6b38c4593a07e4cfb5bf54c40cc79b6 Mon Sep 17 00:00:00 2001
+From: Melissa Wen <mwen@igalia.com>
+Date: Thu, 3 Nov 2022 17:45:00 -0100
+Subject: drm/amd/display: don't enable DRM CRTC degamma property for DCE
+
+DM maps DRM CRTC degamma to DPP (pre-blending) degamma block, but DCE doesn't
+support programmable degamma curve anywhere. Currently, a custom degamma is
+accepted by DM but just ignored by DCE driver and degamma correction isn't
+actually applied. There is no way to map custom degamma in DCE, therefore, DRM
+CRTC degamma property shouldn't be enabled for DCE drivers.
+
+Reviewed-by: Rodrigo Siqueira <Rodrigo.Siqueira@amd.com>
+Signed-off-by: Melissa Wen <mwen@igalia.com>
+Signed-off-by: Rodrigo Siqueira <Rodrigo.Siqueira@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org
+---
+ drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_crtc.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_crtc.c b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_crtc.c
+index 594fe8a4d02b0..64dd029702926 100644
+--- a/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_crtc.c
++++ b/drivers/gpu/drm/amd/display/amdgpu_dm/amdgpu_dm_crtc.c
+@@ -412,7 +412,7 @@ int amdgpu_dm_crtc_init(struct amdgpu_display_manager *dm,
+ {
+ 	struct amdgpu_crtc *acrtc = NULL;
+ 	struct drm_plane *cursor_plane;
+-
++	bool is_dcn;
+ 	int res = -ENOMEM;
+ 
+ 	cursor_plane = kzalloc(sizeof(*cursor_plane), GFP_KERNEL);
+@@ -450,8 +450,14 @@ int amdgpu_dm_crtc_init(struct amdgpu_display_manager *dm,
+ 	acrtc->otg_inst = -1;
+ 
+ 	dm->adev->mode_info.crtcs[crtc_index] = acrtc;
+-	drm_crtc_enable_color_mgmt(&acrtc->base, MAX_COLOR_LUT_ENTRIES,
++
++	/* Don't enable DRM CRTC degamma property for DCE since it doesn't
++	 * support programmable degamma anywhere.
++	 */
++	is_dcn = dm->adev->dm.dc->caps.color.dpp.dcn_arch;
++	drm_crtc_enable_color_mgmt(&acrtc->base, is_dcn ? MAX_COLOR_LUT_ENTRIES : 0,
+ 				   true, MAX_COLOR_LUT_ENTRIES);
++
+ 	drm_mode_crtc_set_gamma_size(&acrtc->base, MAX_COLOR_LEGACY_LUT_ENTRIES);
+ 
+ 	return 0;
+-- 
+cgit 
+
+
+From 6f9eea4392a178af19360694b1db64f985d0b459 Mon Sep 17 00:00:00 2001
+From: Eric Huang <jinhuieric.huang@amd.com>
+Date: Mon, 14 Nov 2022 11:43:48 -0500
+Subject: drm/amdkfd: Fix a memory limit issue
+
+It is to resolve a regression, which fails to allocate
+VRAM due to no free memory in application, the reason
+is we add check of vram_pin_size for memory limit, and
+application is pinning the memory for Peerdirect, KFD
+should not count it in memory limit. So removing
+vram_pin_size will resolve it.
+
+Signed-off-by: Eric Huang <jinhuieric.huang@amd.com>
+Reviewed-by: Felix Kuehling <Felix.Kuehling@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
+index 84f44f7e41118..6d1ff7b9258da 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
+@@ -171,9 +171,7 @@ int amdgpu_amdkfd_reserve_mem_limit(struct amdgpu_device *adev,
+ 	    (kfd_mem_limit.ttm_mem_used + ttm_mem_needed >
+ 	     kfd_mem_limit.max_ttm_mem_limit) ||
+ 	    (adev && adev->kfd.vram_used + vram_needed >
+-	     adev->gmc.real_vram_size -
+-	     atomic64_read(&adev->vram_pin_size) -
+-	     reserved_for_pt)) {
++	     adev->gmc.real_vram_size - reserved_for_pt)) {
+ 		ret = -ENOMEM;
+ 		goto release;
+ 	}
+-- 
+cgit 
+
+From 8652da45d09abe1b3174dbb80dc5176b8c3fa08e Mon Sep 17 00:00:00 2001
+From: Evan Quan <evan.quan@amd.com>
+Date: Tue, 8 Nov 2022 15:44:46 +0800
+Subject: drm/amd/pm: enable runpm support over BACO for SMU13.0.0
+
+Enable SMU13.0.0 runpm support.
+
+Signed-off-by: Evan Quan <evan.quan@amd.com>
+Reviewed-by: Hawking Zhang <Hawking.Zhang@amd.com>
+Reviewed-by: Feifei Xu <Feifei.Xu@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+---
+ drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h      |  8 ++++++
+ drivers/gpu/drm/amd/pm/swsmu/inc/smu_v11_0.h       | 10 +-------
+ drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h       | 11 +++-----
+ drivers/gpu/drm/amd/pm/swsmu/smu11/smu_v11_0.c     |  2 +-
+ drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0.c     |  9 +++++++
+ .../gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c   | 30 ++++++++++++++++++++--
+ 6 files changed, 50 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h b/drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h
+index e2fa3b066b968..f816b1dd110ee 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h
++++ b/drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h
+@@ -1388,6 +1388,14 @@ enum smu_cmn2asic_mapping_type {
+ 	CMN2ASIC_MAPPING_WORKLOAD,
+ };
+ 
++enum smu_baco_seq {
++	BACO_SEQ_BACO = 0,
++	BACO_SEQ_MSR,
++	BACO_SEQ_BAMACO,
++	BACO_SEQ_ULPS,
++	BACO_SEQ_COUNT,
++};
++
+ #define MSG_MAP(msg, index, valid_in_vf) \
+ 	[SMU_MSG_##msg] = {1, (index), (valid_in_vf)}
+ 
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v11_0.h b/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v11_0.h
+index a9215494dcddb..d466db6f0ad4f 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v11_0.h
++++ b/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v11_0.h
+@@ -147,14 +147,6 @@ struct smu_11_5_power_context {
+ 	uint32_t	max_fast_ppt_limit;
+ };
+ 
+-enum smu_v11_0_baco_seq {
+-	BACO_SEQ_BACO = 0,
+-	BACO_SEQ_MSR,
+-	BACO_SEQ_BAMACO,
+-	BACO_SEQ_ULPS,
+-	BACO_SEQ_COUNT,
+-};
+-
+ #if defined(SWSMU_CODE_LAYER_L2) || defined(SWSMU_CODE_LAYER_L3)
+ 
+ int smu_v11_0_init_microcode(struct smu_context *smu);
+@@ -257,7 +249,7 @@ int smu_v11_0_baco_enter(struct smu_context *smu);
+ int smu_v11_0_baco_exit(struct smu_context *smu);
+ 
+ int smu_v11_0_baco_set_armd3_sequence(struct smu_context *smu,
+-				      enum smu_v11_0_baco_seq baco_seq);
++				      enum smu_baco_seq baco_seq);
+ 
+ int smu_v11_0_mode1_reset(struct smu_context *smu);
+ 
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h b/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h
+index 80fb583b18d93..b7f4569aff2a3 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h
++++ b/drivers/gpu/drm/amd/pm/swsmu/inc/smu_v13_0.h
+@@ -124,14 +124,6 @@ struct smu_13_0_power_context {
+ 	enum smu_13_0_power_state power_state;
+ };
+ 
+-enum smu_v13_0_baco_seq {
+-	BACO_SEQ_BACO = 0,
+-	BACO_SEQ_MSR,
+-	BACO_SEQ_BAMACO,
+-	BACO_SEQ_ULPS,
+-	BACO_SEQ_COUNT,
+-};
+-
+ #if defined(SWSMU_CODE_LAYER_L2) || defined(SWSMU_CODE_LAYER_L3)
+ 
+ int smu_v13_0_init_microcode(struct smu_context *smu);
+@@ -218,6 +210,9 @@ int smu_v13_0_set_azalia_d3_pme(struct smu_context *smu);
+ int smu_v13_0_get_max_sustainable_clocks_by_dc(struct smu_context *smu,
+ 					       struct pp_smu_nv_clock_table *max_clocks);
+ 
++int smu_v13_0_baco_set_armd3_sequence(struct smu_context *smu,
++				      enum smu_baco_seq baco_seq);
++
+ bool smu_v13_0_baco_is_support(struct smu_context *smu);
+ 
+ enum smu_baco_state smu_v13_0_baco_get_state(struct smu_context *smu);
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu11/smu_v11_0.c b/drivers/gpu/drm/amd/pm/swsmu/smu11/smu_v11_0.c
+index dccbd9f707238..70b560737687e 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/smu_v11_0.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/smu_v11_0.c
+@@ -1576,7 +1576,7 @@ int smu_v11_0_set_azalia_d3_pme(struct smu_context *smu)
+ }
+ 
+ int smu_v11_0_baco_set_armd3_sequence(struct smu_context *smu,
+-				      enum smu_v11_0_baco_seq baco_seq)
++				      enum smu_baco_seq baco_seq)
+ {
+ 	return smu_cmn_send_smc_msg_with_param(smu, SMU_MSG_ArmD3, baco_seq, NULL);
+ }
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0.c b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0.c
+index 43fb102a65f56..89f0f6eb19f3d 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0.c
+@@ -2230,6 +2230,15 @@ int smu_v13_0_gfx_ulv_control(struct smu_context *smu,
+ 	return ret;
+ }
+ 
++int smu_v13_0_baco_set_armd3_sequence(struct smu_context *smu,
++				      enum smu_baco_seq baco_seq)
++{
++	return smu_cmn_send_smc_msg_with_param(smu,
++					       SMU_MSG_ArmD3,
++					       baco_seq,
++					       NULL);
++}
++
+ bool smu_v13_0_baco_is_support(struct smu_context *smu)
+ {
+ 	struct smu_baco_context *smu_baco = &smu->smu_baco;
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c
+index 29529328152d0..f0121d1716301 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_0_ppt.c
+@@ -120,6 +120,7 @@ static struct cmn2asic_msg_mapping smu_v13_0_0_message_map[SMU_MSG_MAX_COUNT] =
+ 	MSG_MAP(Mode1Reset,			PPSMC_MSG_Mode1Reset,                  0),
+ 	MSG_MAP(PrepareMp1ForUnload,		PPSMC_MSG_PrepareMp1ForUnload,         0),
+ 	MSG_MAP(DFCstateControl,		PPSMC_MSG_SetExternalClientDfCstateAllow, 0),
++	MSG_MAP(ArmD3,				PPSMC_MSG_ArmD3,                       0),
+ };
+ 
+ static struct cmn2asic_mapping smu_v13_0_0_clk_map[SMU_CLK_COUNT] = {
+@@ -1566,6 +1567,31 @@ static int smu_v13_0_0_set_power_profile_mode(struct smu_context *smu,
+ 					       NULL);
+ }
+ 
++static int smu_v13_0_0_baco_enter(struct smu_context *smu)
++{
++	struct smu_baco_context *smu_baco = &smu->smu_baco;
++	struct amdgpu_device *adev = smu->adev;
++
++	if (adev->in_runpm && smu_cmn_is_audio_func_enabled(adev))
++		return smu_v13_0_baco_set_armd3_sequence(smu,
++				smu_baco->maco_support ? BACO_SEQ_BAMACO : BACO_SEQ_BACO);
++	else
++		return smu_v13_0_baco_enter(smu);
++}
++
++static int smu_v13_0_0_baco_exit(struct smu_context *smu)
++{
++	struct amdgpu_device *adev = smu->adev;
++
++	if (adev->in_runpm && smu_cmn_is_audio_func_enabled(adev)) {
++		/* Wait for PMFW handling for the Dstate change */
++		usleep_range(10000, 11000);
++		return smu_v13_0_baco_set_armd3_sequence(smu, BACO_SEQ_ULPS);
++	} else {
++		return smu_v13_0_baco_exit(smu);
++	}
++}
++
+ static bool smu_v13_0_0_is_mode1_reset_supported(struct smu_context *smu)
+ {
+ 	struct amdgpu_device *adev = smu->adev;
+@@ -1827,8 +1853,8 @@ static const struct pptable_funcs smu_v13_0_0_ppt_funcs = {
+ 	.baco_is_support = smu_v13_0_baco_is_support,
+ 	.baco_get_state = smu_v13_0_baco_get_state,
+ 	.baco_set_state = smu_v13_0_baco_set_state,
+-	.baco_enter = smu_v13_0_baco_enter,
+-	.baco_exit = smu_v13_0_baco_exit,
++	.baco_enter = smu_v13_0_0_baco_enter,
++	.baco_exit = smu_v13_0_0_baco_exit,
+ 	.mode1_reset_is_support = smu_v13_0_0_is_mode1_reset_supported,
+ 	.mode1_reset = smu_v13_0_mode1_reset,
+ 	.set_mp1_state = smu_v13_0_0_set_mp1_state,
+-- 
+cgit 
+
+
+From df7c013efc1a0da8861099802b2d6ab2aacaeb1b Mon Sep 17 00:00:00 2001
+From: Evan Quan <evan.quan@amd.com>
+Date: Tue, 8 Nov 2022 16:07:39 +0800
+Subject: drm/amd/pm: enable runpm support over BACO for SMU13.0.7
+
+Enable SMU13.0.7 runpm support.
+
+Signed-off-by: Evan Quan <evan.quan@amd.com>
+Reviewed-by: Hawking Zhang <Hawking.Zhang@amd.com>
+Reviewed-by: Feifei Xu <Feifei.Xu@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org # 6.0.x
+---
+ .../gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c   | 30 ++++++++++++++++++++--
+ 1 file changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c
+index c4102cfb734c2..d74debc584f89 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu13/smu_v13_0_7_ppt.c
+@@ -122,6 +122,7 @@ static struct cmn2asic_msg_mapping smu_v13_0_7_message_map[SMU_MSG_MAX_COUNT] =
+ 	MSG_MAP(PrepareMp1ForUnload,		PPSMC_MSG_PrepareMp1ForUnload,         0),
+ 	MSG_MAP(SetMGpuFanBoostLimitRpm,	PPSMC_MSG_SetMGpuFanBoostLimitRpm,     0),
+ 	MSG_MAP(DFCstateControl,		PPSMC_MSG_SetExternalClientDfCstateAllow, 0),
++	MSG_MAP(ArmD3,				PPSMC_MSG_ArmD3,                       0),
+ };
+ 
+ static struct cmn2asic_mapping smu_v13_0_7_clk_map[SMU_CLK_COUNT] = {
+@@ -1578,6 +1579,31 @@ static int smu_v13_0_7_set_mp1_state(struct smu_context *smu,
+ 	return ret;
+ }
+ 
++static int smu_v13_0_7_baco_enter(struct smu_context *smu)
++{
++	struct smu_baco_context *smu_baco = &smu->smu_baco;
++	struct amdgpu_device *adev = smu->adev;
++
++	if (adev->in_runpm && smu_cmn_is_audio_func_enabled(adev))
++		return smu_v13_0_baco_set_armd3_sequence(smu,
++				smu_baco->maco_support ? BACO_SEQ_BAMACO : BACO_SEQ_BACO);
++	else
++		return smu_v13_0_baco_enter(smu);
++}
++
++static int smu_v13_0_7_baco_exit(struct smu_context *smu)
++{
++	struct amdgpu_device *adev = smu->adev;
++
++	if (adev->in_runpm && smu_cmn_is_audio_func_enabled(adev)) {
++		/* Wait for PMFW handling for the Dstate change */
++		usleep_range(10000, 11000);
++		return smu_v13_0_baco_set_armd3_sequence(smu, BACO_SEQ_ULPS);
++	} else {
++		return smu_v13_0_baco_exit(smu);
++	}
++}
++
+ static bool smu_v13_0_7_is_mode1_reset_supported(struct smu_context *smu)
+ {
+ 	struct amdgpu_device *adev = smu->adev;
+@@ -1655,8 +1681,8 @@ static const struct pptable_funcs smu_v13_0_7_ppt_funcs = {
+ 	.baco_is_support = smu_v13_0_baco_is_support,
+ 	.baco_get_state = smu_v13_0_baco_get_state,
+ 	.baco_set_state = smu_v13_0_baco_set_state,
+-	.baco_enter = smu_v13_0_baco_enter,
+-	.baco_exit = smu_v13_0_baco_exit,
++	.baco_enter = smu_v13_0_7_baco_enter,
++	.baco_exit = smu_v13_0_7_baco_exit,
+ 	.mode1_reset_is_support = smu_v13_0_7_is_mode1_reset_supported,
+ 	.mode1_reset = smu_v13_0_mode1_reset,
+ 	.set_mp1_state = smu_v13_0_7_set_mp1_state,
+-- 
+cgit 
+
+
+From 4b14841c9a820e484bc8c4c3f5a6fed1bc528cbc Mon Sep 17 00:00:00 2001
+From: Evan Quan <evan.quan@amd.com>
+Date: Tue, 8 Nov 2022 15:52:20 +0800
+Subject: drm/amd/pm: fix SMU13 runpm hang due to unintentional workaround
+
+The workaround designed for some specific ASICs is wrongly applied
+to SMU13 ASICs. That leads to some runpm hang.
+
+Signed-off-by: Evan Quan <evan.quan@amd.com>
+Reviewed-by: Hawking Zhang <Hawking.Zhang@amd.com>
+Reviewed-by: Feifei Xu <Feifei.Xu@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+Cc: stable@vger.kernel.org
+---
+ drivers/gpu/drm/amd/pm/swsmu/amdgpu_smu.c | 23 +++++++++++------------
+ 1 file changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/amdgpu_smu.c b/drivers/gpu/drm/amd/pm/swsmu/amdgpu_smu.c
+index 4fe75dd2b329d..b880f4d7d67e6 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/amdgpu_smu.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/amdgpu_smu.c
+@@ -1156,22 +1156,21 @@ static int smu_smc_hw_setup(struct smu_context *smu)
+ 	uint64_t features_supported;
+ 	int ret = 0;
+ 
+-	if (adev->in_suspend && smu_is_dpm_running(smu)) {
+-		dev_info(adev->dev, "dpm has been enabled\n");
+-		/* this is needed specifically */
+-		switch (adev->ip_versions[MP1_HWIP][0]) {
+-		case IP_VERSION(11, 0, 7):
+-		case IP_VERSION(11, 0, 11):
+-		case IP_VERSION(11, 5, 0):
+-		case IP_VERSION(11, 0, 12):
++	switch (adev->ip_versions[MP1_HWIP][0]) {
++	case IP_VERSION(11, 0, 7):
++	case IP_VERSION(11, 0, 11):
++	case IP_VERSION(11, 5, 0):
++	case IP_VERSION(11, 0, 12):
++		if (adev->in_suspend && smu_is_dpm_running(smu)) {
++			dev_info(adev->dev, "dpm has been enabled\n");
+ 			ret = smu_system_features_control(smu, true);
+ 			if (ret)
+ 				dev_err(adev->dev, "Failed system features control!\n");
+-			break;
+-		default:
+-			break;
++			return ret;
+ 		}
+-		return ret;
++		break;
++	default:
++		break;
+ 	}
+ 
+ 	ret = smu_init_display_count(smu, 0);
+-- 
+cgit 
+
+
+From 5954acbacbd1946b96ce8ee799d309cb0cd3cb9d Mon Sep 17 00:00:00 2001
+From: Simon Rettberg <simon.rettberg@rz.uni-freiburg.de>
+Date: Thu, 6 Oct 2022 11:33:14 +0200
+Subject: drm/display: Don't assume dual mode adaptors support i2c
+ sub-addressing
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Current dual mode adaptor ("DP++") detection code assumes that all
+adaptors support i2c sub-addressing for read operations from the
+DP-HDMI adaptor ID buffer.  It has been observed that multiple
+adaptors do not in fact support this, and always return data starting
+at register 0.  On affected adaptors, the code fails to read the proper
+registers that would identify the device as a type 2 adaptor, and
+handles those as type 1, limiting the TMDS clock to 165MHz, even if
+the according register would announce a higher TMDS clock.
+Fix this by always reading the ID buffer starting from offset 0, and
+discarding any bytes before the actual offset of interest.
+
+We tried finding authoritative documentation on whether or not this is
+allowed behaviour, but since all the official VESA docs are paywalled,
+the best we could come up with was the spec sheet for Texas Instruments'
+SNx5DP149 chip family.[1]  It explicitly mentions that sub-addressing is
+supported for register writes, but *not* for reads (See NOTE in
+section 8.5.3).  Unless TI openly decided to violate the VESA spec, one
+could take that as a hint that sub-addressing is in fact not mandated
+by VESA.
+The other two adaptors affected used the PS8409(A) and the LT8611,
+according to the data returned from their ID buffers.
+
+[1] https://www.ti.com/lit/ds/symlink/sn75dp149.pdf
+
+Cc: stable@vger.kernel.org
+Signed-off-by: Simon Rettberg <simon.rettberg@rz.uni-freiburg.de>
+Reviewed-by: Rafael Gieschke <rafael.gieschke@rz.uni-freiburg.de>
+Signed-off-by: Ville Syrjälä <ville.syrjala@linux.intel.com>
+Link: https://patchwork.freedesktop.org/patch/msgid/20221006113314.41101987@computer
+Acked-by: Jani Nikula <jani.nikula@intel.com>
+---
+ drivers/gpu/drm/display/drm_dp_dual_mode_helper.c | 51 +++++++++++++----------
+ 1 file changed, 29 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/gpu/drm/display/drm_dp_dual_mode_helper.c b/drivers/gpu/drm/display/drm_dp_dual_mode_helper.c
+index 3ea53bb67d3bd..bd61e20770a5b 100644
+--- a/drivers/gpu/drm/display/drm_dp_dual_mode_helper.c
++++ b/drivers/gpu/drm/display/drm_dp_dual_mode_helper.c
+@@ -63,23 +63,45 @@
+ ssize_t drm_dp_dual_mode_read(struct i2c_adapter *adapter,
+ 			      u8 offset, void *buffer, size_t size)
+ {
++	u8 zero = 0;
++	char *tmpbuf = NULL;
++	/*
++	 * As sub-addressing is not supported by all adaptors,
++	 * always explicitly read from the start and discard
++	 * any bytes that come before the requested offset.
++	 * This way, no matter whether the adaptor supports it
++	 * or not, we'll end up reading the proper data.
++	 */
+ 	struct i2c_msg msgs[] = {
+ 		{
+ 			.addr = DP_DUAL_MODE_SLAVE_ADDRESS,
+ 			.flags = 0,
+ 			.len = 1,
+-			.buf = &offset,
++			.buf = &zero,
+ 		},
+ 		{
+ 			.addr = DP_DUAL_MODE_SLAVE_ADDRESS,
+ 			.flags = I2C_M_RD,
+-			.len = size,
++			.len = size + offset,
+ 			.buf = buffer,
+ 		},
+ 	};
+ 	int ret;
+ 
++	if (offset) {
++		tmpbuf = kmalloc(size + offset, GFP_KERNEL);
++		if (!tmpbuf)
++			return -ENOMEM;
++
++		msgs[1].buf = tmpbuf;
++	}
++
+ 	ret = i2c_transfer(adapter, msgs, ARRAY_SIZE(msgs));
++	if (tmpbuf)
++		memcpy(buffer, tmpbuf + offset, size);
++
++	kfree(tmpbuf);
++
+ 	if (ret < 0)
+ 		return ret;
+ 	if (ret != ARRAY_SIZE(msgs))
+@@ -208,18 +230,6 @@ enum drm_dp_dual_mode_type drm_dp_dual_mode_detect(const struct drm_device *dev,
+ 	if (ret)
+ 		return DRM_DP_DUAL_MODE_UNKNOWN;
+ 
+-	/*
+-	 * Sigh. Some (maybe all?) type 1 adaptors are broken and ack
+-	 * the offset but ignore it, and instead they just always return
+-	 * data from the start of the HDMI ID buffer. So for a broken
+-	 * type 1 HDMI adaptor a single byte read will always give us
+-	 * 0x44, and for a type 1 DVI adaptor it should give 0x00
+-	 * (assuming it implements any registers). Fortunately neither
+-	 * of those values will match the type 2 signature of the
+-	 * DP_DUAL_MODE_ADAPTOR_ID register so we can proceed with
+-	 * the type 2 adaptor detection safely even in the presence
+-	 * of broken type 1 adaptors.
+-	 */
+ 	ret = drm_dp_dual_mode_read(adapter, DP_DUAL_MODE_ADAPTOR_ID,
+ 				    &adaptor_id, sizeof(adaptor_id));
+ 	drm_dbg_kms(dev, "DP dual mode adaptor ID: %02x (err %zd)\n", adaptor_id, ret);
+@@ -233,11 +243,10 @@ enum drm_dp_dual_mode_type drm_dp_dual_mode_detect(const struct drm_device *dev,
+ 				return DRM_DP_DUAL_MODE_TYPE2_DVI;
+ 		}
+ 		/*
+-		 * If neither a proper type 1 ID nor a broken type 1 adaptor
+-		 * as described above, assume type 1, but let the user know
+-		 * that we may have misdetected the type.
++		 * If not a proper type 1 ID, still assume type 1, but let
++		 * the user know that we may have misdetected the type.
+ 		 */
+-		if (!is_type1_adaptor(adaptor_id) && adaptor_id != hdmi_id[0])
++		if (!is_type1_adaptor(adaptor_id))
+ 			drm_err(dev, "Unexpected DP dual mode adaptor ID %02x\n", adaptor_id);
+ 
+ 	}
+@@ -343,10 +352,8 @@ EXPORT_SYMBOL(drm_dp_dual_mode_get_tmds_output);
+  * @enable: enable (as opposed to disable) the TMDS output buffers
+  *
+  * Set the state of the TMDS output buffers in the adaptor. For
+- * type2 this is set via the DP_DUAL_MODE_TMDS_OEN register. As
+- * some type 1 adaptors have problems with registers (see comments
+- * in drm_dp_dual_mode_detect()) we avoid touching the register,
+- * making this function a no-op on type 1 adaptors.
++ * type2 this is set via the DP_DUAL_MODE_TMDS_OEN register.
++ * Type1 adaptors do not support any register writes.
+  *
+  * Returns:
+  * 0 on success, negative error code on failure
+-- 
+cgit 
+
+
+From c2418f911a31a266af4fbaca998dc73d3676475a Mon Sep 17 00:00:00 2001
+From: Robin Murphy <robin.murphy@arm.com>
+Date: Thu, 20 Oct 2022 15:23:40 +0100
+Subject: gpu: host1x: Avoid trying to use GART on Tegra20
+
+Since commit c7e3ca515e78 ("iommu/tegra: gart: Do not register with
+bus") quite some time ago, the GART driver has effectively disabled
+itself to avoid issues with the GPU driver expecting it to work in ways
+that it doesn't. As of commit 57365a04c921 ("iommu: Move bus setup to
+IOMMU device registration") that bodge no longer works, but really the
+GPU driver should be responsible for its own behaviour anyway. Make the
+workaround explicit.
+
+Reported-by: Jon Hunter <jonathanh@nvidia.com>
+Suggested-by: Dmitry Osipenko <digetx@gmail.com>
+Signed-off-by: Robin Murphy <robin.murphy@arm.com>
+Tested-by: Jon Hunter <jonathanh@nvidia.com>
+Signed-off-by: Thierry Reding <treding@nvidia.com>
+---
+ drivers/gpu/drm/tegra/drm.c | 4 ++++
+ drivers/gpu/host1x/dev.c    | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/drivers/gpu/drm/tegra/drm.c b/drivers/gpu/drm/tegra/drm.c
+index 6748ec1e00057..a1f909dac89a7 100644
+--- a/drivers/gpu/drm/tegra/drm.c
++++ b/drivers/gpu/drm/tegra/drm.c
+@@ -1093,6 +1093,10 @@ static bool host1x_drm_wants_iommu(struct host1x_device *dev)
+ 	struct host1x *host1x = dev_get_drvdata(dev->dev.parent);
+ 	struct iommu_domain *domain;
+ 
++	/* Our IOMMU usage policy doesn't currently play well with GART */
++	if (of_machine_is_compatible("nvidia,tegra20"))
++		return false;
++
+ 	/*
+ 	 * If the Tegra DRM clients are backed by an IOMMU, push buffers are
+ 	 * likely to be allocated beyond the 32-bit boundary if sufficient
+diff --git a/drivers/gpu/host1x/dev.c b/drivers/gpu/host1x/dev.c
+index 0cd3f97e7e49f..f60ea24db0ec8 100644
+--- a/drivers/gpu/host1x/dev.c
++++ b/drivers/gpu/host1x/dev.c
+@@ -292,6 +292,10 @@ static void host1x_setup_virtualization_tables(struct host1x *host)
+ 
+ static bool host1x_wants_iommu(struct host1x *host1x)
+ {
++	/* Our IOMMU usage policy doesn't currently play well with GART */
++	if (of_machine_is_compatible("nvidia,tegra20"))
++		return false;
++
+ 	/*
+ 	 * If we support addressing a maximum of 32 bits of physical memory
+ 	 * and if the host1x firewall is enabled, there's no need to enable
+-- 
+cgit 
+
+

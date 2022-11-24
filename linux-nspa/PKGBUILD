@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=27
+pkgrel=28
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -139,6 +139,7 @@ source=(
   "0050-futex-Resend_potentially_swallowed_owner_death_notification.patch"
   "0051-workqueue-destroy_worker_vs_isolated_CPUs.patch"
   "0052-timers-Provide_timer_shutdown_sync.patch"
+  "0053-sched-Fix-NULL-user_cpus_ptr-check-in-dup_user_cpus_ptr.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -534,10 +535,11 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '9a3268c064470b0e2665d296027a2e7d9a8e5bab437a1eee4be8ad67a2f42046'
             '7042db914dc7287782ff5d04b8e62da0e9200dc4b4d370d623a1ababb54535d2'
             'a3aa689da7950661fbbe5fb796807a676072bae60a21d1eaf9d5401558ecaef5'
-            'e78a5a2d072a14e29358e827d4a4cfa68dcdba0c9ec85c60785775af3fb1c121'
+            '472f7b7b19191802809d60d0c1f925c394519b18dbbca827c1b00e7914cb3fbb'
             '85e141479d6787ef2098098c746d6140690b6a23403564458cd7e00a86a9f902'
             '98478724f938b4ac96e8c5b1267702c309be444ce417d04bf12c7e786b725dae'
             '6fde851ce77d776a6b3ebde6f7c242cf394d36f87c3954b0fd1ffdbaa86aeef0'
             '3e77a086f598ae68b8271aff793d6bc0c4734c62a7bd394e1942925065b406d6'
-            '70ab013a3a3d771767ee9cdfd5de7c7bc1043ab70626068b01c1a516cfb074b9')
+            '70ab013a3a3d771767ee9cdfd5de7c7bc1043ab70626068b01c1a516cfb074b9'
+            '8022b215c6b5a0c1067e2739598e0223e450981caf142f7582d6bbb187542dad')
 
