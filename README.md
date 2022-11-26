@@ -6,12 +6,13 @@
 
 This repo contains customized PREEMPT_RT kernel packages that have additional
 patchwork and out-of-tree features added. Patchwork taken from CachyOS, Intel,
-Google, Kernel Toast, upstream and various other sources.
+Google, KernelToast, Mainline/Upstream and various other sources.
 
 ### Features/Patchwork:
 
 * PREEMPT_RT_FULL : Realtime Linux Patchset
 * Fair/RT Scheduler optimizations, modifications + backports
+* Locking backport and modifications
 * MM Multi-Gnerational LRU (https://lwn.net/Articles/856931/)
 * MM Maple-Tree patchwork 
 * Tunable WorkingSet Protection Mechanism 
@@ -19,9 +20,9 @@ Google, Kernel Toast, upstream and various other sources.
 * Various Performance / interactivity related changes
 * Wine-related performance patchwork
 * Power management improvements
-* Numerous subsystem backports from 5.19+
+* Numerous subsystem backports from mainline, -next and tip
+* Subset KernelToast's kernel patchwork
 * Misc fixes/changes
-* various backports
 
 SPECIAL NOTE: the included kernel config is specifically for my laptop. If
 anyone is using these packages, you will need to have a look at the 
