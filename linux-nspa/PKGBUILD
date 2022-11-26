@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=28
+pkgrel=30
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -95,7 +95,7 @@ source=(
   "0000-io_uring-6.1_updates.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-MM-Maple-Tree-MGlru-all_6.1.patch"
-  "0003-MM-stable-nonmm-hotfixes_oct28.patch"
+  "0003-MM-stable-nonmm-hotfixes_nov24.patch"
   "0004-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"
   "0005-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
   "0006-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
@@ -135,7 +135,6 @@ source=(
   "0046-v5-locking-rwsem-Enable-direct-rwsem-lock-handoff.patch"
   "0047-upstream_fixes_stable.patch"
   "0048-mm-hotfixes-stable-2022-11-11.patch"
-  "0049-ipc-shm-call_underlying_open-close_vm_ops.patch"
   "0050-futex-Resend_potentially_swallowed_owner_death_notification.patch"
   "0051-workqueue-destroy_worker_vs_isolated_CPUs.patch"
   "0052-timers-Provide_timer_shutdown_sync.patch"
@@ -497,7 +496,7 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '9d6ac17bf79e322299471161465003da0e1168a51846da9561bef74edba0d7d3'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
             'a16d854c622377ba752d5e17c1fc728a10802ac43289c17feef9bcb153385cde'
-            'f0b92151ebac232020ea048968a3d1bd2beb2b7d2a04d51b1d77ffe53dab26cc'
+            '33b942b49181e0a4e97f597ff369eba35ef2a7c031f0fbe5b16fac5b85b55619'
             'f6383abef027fd9a430fd33415355e0df492cdc3c90e9938bf2d98f4f63b32e6'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             'e3c106cfac323c6f677b698b080b48798ea63786a7153f81d9a21f749e73168d'
@@ -537,9 +536,8 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             'a3aa689da7950661fbbe5fb796807a676072bae60a21d1eaf9d5401558ecaef5'
             '472f7b7b19191802809d60d0c1f925c394519b18dbbca827c1b00e7914cb3fbb'
             '85e141479d6787ef2098098c746d6140690b6a23403564458cd7e00a86a9f902'
-            '98478724f938b4ac96e8c5b1267702c309be444ce417d04bf12c7e786b725dae'
             '6fde851ce77d776a6b3ebde6f7c242cf394d36f87c3954b0fd1ffdbaa86aeef0'
             '3e77a086f598ae68b8271aff793d6bc0c4734c62a7bd394e1942925065b406d6'
             '70ab013a3a3d771767ee9cdfd5de7c7bc1043ab70626068b01c1a516cfb074b9'
-            '8022b215c6b5a0c1067e2739598e0223e450981caf142f7582d6bbb187542dad')
+            '28fbb1892c2ad7c8fafe45ec0181515500102ab9c7e4e846a090de93afc74222')
 

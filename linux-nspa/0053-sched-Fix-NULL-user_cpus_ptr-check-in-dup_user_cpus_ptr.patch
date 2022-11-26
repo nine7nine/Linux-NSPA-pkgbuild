@@ -1,14 +1,20 @@
-diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 8df51b08bb38..6b259d9e127a 100644
+ddiff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 8df51b08bb38..f2b75faaf71a 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -2624,8 +2624,14 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
+@@ -2624,19 +2624,43 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
  int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
  		      int node)
  {
-+	cpumask_t *user_mask = NULL;
++	cpumask_t *user_mask;
  	unsigned long flags;
  
++	/*
++	 * Always clear dst->user_cpus_ptr first as their user_cpus_ptr's
++	 * may differ by now due to racing.
++	 */
++	dst->user_cpus_ptr = NULL;
++
 +	/*
 +	 * This check is racy and losing the race is a valid situation.
 +	 * It is not worth the extra overhead of taking the pi_lock on
@@ -17,8 +23,10 @@ index 8df51b08bb38..6b259d9e127a 100644
  	if (!src->user_cpus_ptr)
  		return 0;
  
-@@ -2633,10 +2639,23 @@ int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
- 	if (!dst->user_cpus_ptr)
+-	dst->user_cpus_ptr = kmalloc_node(cpumask_size(), GFP_KERNEL, node);
+-	if (!dst->user_cpus_ptr)
++	user_mask = kmalloc_node(cpumask_size(), GFP_KERNEL, node);
++	if (!user_mask)
  		return -ENOMEM;
  
 -	/* Use pi_lock to protect content of user_cpus_ptr */
@@ -26,15 +34,14 @@ index 8df51b08bb38..6b259d9e127a 100644
 +	 * Use pi_lock to protect content of user_cpus_ptr
 +	 *
 +	 * Though unlikely, user_cpus_ptr can be reset to NULL by a concurrent
-+	 * do_set_cpus_allowed(). When this happens, we need to clear
-+	 * dst->user_cpus_ptr and free the allocated memory afterward.
++	 * do_set_cpus_allowed().
 +	 */
  	raw_spin_lock_irqsave(&src->pi_lock, flags);
 -	cpumask_copy(dst->user_cpus_ptr, src->user_cpus_ptr);
-+	if (src->user_cpus_ptr)
-+		cpumask_copy(dst->user_cpus_ptr, src->user_cpus_ptr);
-+	else
++	if (src->user_cpus_ptr) {
 +		swap(dst->user_cpus_ptr, user_mask);
++		cpumask_copy(dst->user_cpus_ptr, src->user_cpus_ptr);
++	}
  	raw_spin_unlock_irqrestore(&src->pi_lock, flags);
 +
 +	if (unlikely(user_mask))

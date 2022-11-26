@@ -6790,4 +6790,1785 @@ index 349a5da91efe8..7ab1f27b805dc 100644
 -- 
 cgit 
 
+From f53af4285d775cd9a9a146fc438bd0a1bee1838a Mon Sep 17 00:00:00 2001
+From: Johannes Weiner <hannes@cmpxchg.org>
+Date: Tue, 2 Aug 2022 12:28:11 -0400
+Subject: mm: vmscan: fix extreme overreclaim and swap floods
+
+During proactive reclaim, we sometimes observe severe overreclaim, with
+several thousand times more pages reclaimed than requested.
+
+This trace was obtained from shrink_lruvec() during such an instance:
+
+    prio:0 anon_cost:1141521 file_cost:7767
+    nr_reclaimed:4387406 nr_to_reclaim:1047 (or_factor:4190)
+    nr=[7161123 345 578 1111]
+
+While he reclaimer requested 4M, vmscan reclaimed close to 16G, most of it
+by swapping.  These requests take over a minute, during which the write()
+to memory.reclaim is unkillably stuck inside the kernel.
+
+Digging into the source, this is caused by the proportional reclaim
+bailout logic.  This code tries to resolve a fundamental conflict: to
+reclaim roughly what was requested, while also aging all LRUs fairly and
+in accordance to their size, swappiness, refault rates etc.  The way it
+attempts fairness is that once the reclaim goal has been reached, it stops
+scanning the LRUs with the smaller remaining scan targets, and adjusts the
+remainder of the bigger LRUs according to how much of the smaller LRUs was
+scanned.  It then finishes scanning that remainder regardless of the
+reclaim goal.
+
+This works fine if priority levels are low and the LRU lists are
+comparable in size.  However, in this instance, the cgroup that is
+targeted by proactive reclaim has almost no files left - they've already
+been squeezed out by proactive reclaim earlier - and the remaining anon
+pages are hot.  Anon rotations cause the priority level to drop to 0,
+which results in reclaim targeting all of anon (a lot) and all of file
+(almost nothing).  By the time reclaim decides to bail, it has scanned
+most or all of the file target, and therefor must also scan most or all of
+the enormous anon target.  This target is thousands of times larger than
+the reclaim goal, thus causing the overreclaim.
+
+The bailout code hasn't changed in years, why is this failing now?  The
+most likely explanations are two other recent changes in anon reclaim:
+
+1. Before the series starting with commit 5df741963d52 ("mm: fix LRU
+   balancing effect of new transparent huge pages"), the VM was
+   overall relatively reluctant to swap at all, even if swap was
+   configured. This means the LRU balancing code didn't come into play
+   as often as it does now, and mostly in high pressure situations
+   where pronounced swap activity wouldn't be as surprising.
+
+2. For historic reasons, shrink_lruvec() loops on the scan targets of
+   all LRU lists except the active anon one, meaning it would bail if
+   the only remaining pages to scan were active anon - even if there
+   were a lot of them.
+
+   Before the series starting with commit ccc5dc67340c ("mm/vmscan:
+   make active/inactive ratio as 1:1 for anon lru"), most anon pages
+   would live on the active LRU; the inactive one would contain only a
+   handful of preselected reclaim candidates. After the series, anon
+   gets aged similarly to file, and the inactive list is the default
+   for new anon pages as well, making it often the much bigger list.
+
+   As a result, the VM is now more likely to actually finish large
+   anon targets than before.
+
+Change the code such that only one SWAP_CLUSTER_MAX-sized nudge toward the
+larger LRU lists is made before bailing out on a met reclaim goal.
+
+This fixes the extreme overreclaim problem.
+
+Fairness is more subtle and harder to evaluate.  No obvious misbehavior
+was observed on the test workload, in any case.  Conceptually, fairness
+should primarily be a cumulative effect from regular, lower priority
+scans.  Once the VM is in trouble and needs to escalate scan targets to
+make forward progress, fairness needs to take a backseat.  This is also
+acknowledged by the myriad exceptions in get_scan_count().  This patch
+makes fairness decrease gradually, as it keeps fairness work static over
+increasing priority levels with growing scan targets.  This should make
+more sense - although we may have to re-visit the exact values.
+
+Link: https://lkml.kernel.org/r/20220802162811.39216-1-hannes@cmpxchg.org
+Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
+Reviewed-by: Rik van Riel <riel@surriel.com>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Cc: Hugh Dickins <hughd@google.com>
+Cc: Joonsoo Kim <iamjoonsoo.kim@lge.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/vmscan.c | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 04d8b88e52164..0317d4cf48849 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -5844,8 +5844,8 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
+ 	enum lru_list lru;
+ 	unsigned long nr_reclaimed = 0;
+ 	unsigned long nr_to_reclaim = sc->nr_to_reclaim;
++	bool proportional_reclaim;
+ 	struct blk_plug plug;
+-	bool scan_adjusted;
+ 
+ 	if (lru_gen_enabled()) {
+ 		lru_gen_shrink_lruvec(lruvec, sc);
+@@ -5868,8 +5868,8 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
+ 	 * abort proportional reclaim if either the file or anon lru has already
+ 	 * dropped to zero at the first pass.
+ 	 */
+-	scan_adjusted = (!cgroup_reclaim(sc) && !current_is_kswapd() &&
+-			 sc->priority == DEF_PRIORITY);
++	proportional_reclaim = (!cgroup_reclaim(sc) && !current_is_kswapd() &&
++				sc->priority == DEF_PRIORITY);
+ 
+ 	blk_start_plug(&plug);
+ 	while (nr[LRU_INACTIVE_ANON] || nr[LRU_ACTIVE_FILE] ||
+@@ -5889,7 +5889,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
+ 
+ 		cond_resched();
+ 
+-		if (nr_reclaimed < nr_to_reclaim || scan_adjusted)
++		if (nr_reclaimed < nr_to_reclaim || proportional_reclaim)
+ 			continue;
+ 
+ 		/*
+@@ -5940,8 +5940,6 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
+ 		nr_scanned = targets[lru] - nr[lru];
+ 		nr[lru] = targets[lru] * (100 - percentage) / 100;
+ 		nr[lru] -= min(nr[lru], nr_scanned);
+-
+-		scan_adjusted = true;
+ 	}
+ 	blk_finish_plug(&plug);
+ 	sc->nr_reclaimed += nr_reclaimed;
+-- 
+cgit 
+
+
+From e031ff96b334a08704d40ef64cd9024d7d83af9b Mon Sep 17 00:00:00 2001
+From: Yang Shi <shy828301@gmail.com>
+Date: Tue, 8 Nov 2022 10:43:56 -0800
+Subject: mm: khugepaged: allow page allocation fallback to eligible nodes
+
+Syzbot reported the below splat:
+
+WARNING: CPU: 1 PID: 3646 at include/linux/gfp.h:221 __alloc_pages_node include/linux/gfp.h:221 [inline]
+WARNING: CPU: 1 PID: 3646 at include/linux/gfp.h:221 hpage_collapse_alloc_page mm/khugepaged.c:807 [inline]
+WARNING: CPU: 1 PID: 3646 at include/linux/gfp.h:221 alloc_charge_hpage+0x802/0xaa0 mm/khugepaged.c:963
+Modules linked in:
+CPU: 1 PID: 3646 Comm: syz-executor210 Not tainted 6.1.0-rc1-syzkaller-00454-ga70385240892 #0
+Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 10/11/2022
+RIP: 0010:__alloc_pages_node include/linux/gfp.h:221 [inline]
+RIP: 0010:hpage_collapse_alloc_page mm/khugepaged.c:807 [inline]
+RIP: 0010:alloc_charge_hpage+0x802/0xaa0 mm/khugepaged.c:963
+Code: e5 01 4c 89 ee e8 6e f9 ae ff 4d 85 ed 0f 84 28 fc ff ff e8 70 fc ae ff 48 8d 6b ff 4c 8d 63 07 e9 16 fc ff ff e8 5e fc ae ff <0f> 0b e9 96 fa ff ff 41 bc 1a 00 00 00 e9 86 fd ff ff e8 47 fc ae
+RSP: 0018:ffffc90003fdf7d8 EFLAGS: 00010293
+RAX: 0000000000000000 RBX: 0000000000000000 RCX: 0000000000000000
+RDX: ffff888077f457c0 RSI: ffffffff81cd8f42 RDI: 0000000000000001
+RBP: ffff888079388c0c R08: 0000000000000001 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000000 R12: 0000000000000000
+R13: dffffc0000000000 R14: 0000000000000000 R15: 0000000000000000
+FS:  00007f6b48ccf700(0000) GS:ffff8880b9b00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007f6b48a819f0 CR3: 00000000171e7000 CR4: 00000000003506e0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+Call Trace:
+ <TASK>
+ collapse_file+0x1ca/0x5780 mm/khugepaged.c:1715
+ hpage_collapse_scan_file+0xd6c/0x17a0 mm/khugepaged.c:2156
+ madvise_collapse+0x53a/0xb40 mm/khugepaged.c:2611
+ madvise_vma_behavior+0xd0a/0x1cc0 mm/madvise.c:1066
+ madvise_walk_vmas+0x1c7/0x2b0 mm/madvise.c:1240
+ do_madvise.part.0+0x24a/0x340 mm/madvise.c:1419
+ do_madvise mm/madvise.c:1432 [inline]
+ __do_sys_madvise mm/madvise.c:1432 [inline]
+ __se_sys_madvise mm/madvise.c:1430 [inline]
+ __x64_sys_madvise+0x113/0x150 mm/madvise.c:1430
+ do_syscall_x64 arch/x86/entry/common.c:50 [inline]
+ do_syscall_64+0x35/0xb0 arch/x86/entry/common.c:80
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+RIP: 0033:0x7f6b48a4eef9
+Code: 28 00 00 00 75 05 48 83 c4 28 c3 e8 b1 15 00 00 90 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48> 3d 01 f0 ff ff 73 01 c3 48 c7 c1 b8 ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007f6b48ccf318 EFLAGS: 00000246 ORIG_RAX: 000000000000001c
+RAX: ffffffffffffffda RBX: 00007f6b48af0048 RCX: 00007f6b48a4eef9
+RDX: 0000000000000019 RSI: 0000000000600003 RDI: 0000000020000000
+RBP: 00007f6b48af0040 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000000 R11: 0000000000000246 R12: 00007f6b48aa53a4
+R13: 00007f6b48bffcbf R14: 00007f6b48ccf400 R15: 0000000000022000
+ </TASK>
+
+The khugepaged code would pick up the node with the most hit as the preferred
+node, and also tries to do some balance if several nodes have the same
+hit record.  Basically it does conceptually:
+    * If the target_node <= last_target_node, then iterate from
+last_target_node + 1 to MAX_NUMNODES (1024 on default config)
+    * If the max_value == node_load[nid], then target_node = nid
+
+But there is a corner case, paritucularly for MADV_COLLAPSE, that the
+non-existing node may be returned as preferred node.
+
+Assuming the system has 2 nodes, the target_node is 0 and the
+last_target_node is 1, if MADV_COLLAPSE path is hit, the max_value may
+be 0, then it may return 2 for target_node, but it is actually not
+existing (offline), so the warn is triggered.
+
+The node balance was introduced by commit 9f1b868a13ac ("mm: thp:
+khugepaged: add policy for finding target node") to satisfy
+"numactl --interleave=all".  But interleaving is a mere hint rather than
+something that has hard requirements.
+
+So use nodemask to record the nodes which have the same hit record, the
+hugepage allocation could fallback to those nodes.  And remove
+__GFP_THISNODE since it does disallow fallback.  And if the nodemask
+just has one node set, it means there is one single node has the most
+hit record, the nodemask approach actually behaves like __GFP_THISNODE.
+
+Link: https://lkml.kernel.org/r/20221108184357.55614-2-shy828301@gmail.com
+Fixes: 7d8faaf15545 ("mm/madvise: introduce MADV_COLLAPSE sync hugepage collapse")
+Signed-off-by: Yang Shi <shy828301@gmail.com>
+Suggested-by: Zach O'Keefe <zokeefe@google.com>
+Suggested-by: Michal Hocko <mhocko@suse.com>
+Reviewed-by: Zach O'Keefe <zokeefe@google.com>
+Acked-by: Michal Hocko <mhocko@suse.com>
+Reported-by: <syzbot+0044b22d177870ee974f@syzkaller.appspotmail.com>
+
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/khugepaged.c | 32 ++++++++++++++------------------
+ 1 file changed, 14 insertions(+), 18 deletions(-)
+
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 4734315f79407..52b9cae2412d7 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -97,8 +97,8 @@ struct collapse_control {
+ 	/* Num pages scanned per node */
+ 	u32 node_load[MAX_NUMNODES];
+ 
+-	/* Last target selected in hpage_collapse_find_target_node() */
+-	int last_target_node;
++	/* nodemask for allocation fallback */
++	nodemask_t alloc_nmask;
+ };
+ 
+ /**
+@@ -734,7 +734,6 @@ static void khugepaged_alloc_sleep(void)
+ 
+ struct collapse_control khugepaged_collapse_control = {
+ 	.is_khugepaged = true,
+-	.last_target_node = NUMA_NO_NODE,
+ };
+ 
+ static bool hpage_collapse_scan_abort(int nid, struct collapse_control *cc)
+@@ -783,16 +782,11 @@ static int hpage_collapse_find_target_node(struct collapse_control *cc)
+ 			target_node = nid;
+ 		}
+ 
+-	/* do some balance if several nodes have the same hit record */
+-	if (target_node <= cc->last_target_node)
+-		for (nid = cc->last_target_node + 1; nid < MAX_NUMNODES;
+-		     nid++)
+-			if (max_value == cc->node_load[nid]) {
+-				target_node = nid;
+-				break;
+-			}
++	for_each_online_node(nid) {
++		if (max_value == cc->node_load[nid])
++			node_set(nid, cc->alloc_nmask);
++	}
+ 
+-	cc->last_target_node = target_node;
+ 	return target_node;
+ }
+ #else
+@@ -802,9 +796,10 @@ static int hpage_collapse_find_target_node(struct collapse_control *cc)
+ }
+ #endif
+ 
+-static bool hpage_collapse_alloc_page(struct page **hpage, gfp_t gfp, int node)
++static bool hpage_collapse_alloc_page(struct page **hpage, gfp_t gfp, int node,
++				      nodemask_t *nmask)
+ {
+-	*hpage = __alloc_pages_node(node, gfp, HPAGE_PMD_ORDER);
++	*hpage = __alloc_pages(gfp, HPAGE_PMD_ORDER, node, nmask);
+ 	if (unlikely(!*hpage)) {
+ 		count_vm_event(THP_COLLAPSE_ALLOC_FAILED);
+ 		return false;
+@@ -955,12 +950,11 @@ static int __collapse_huge_page_swapin(struct mm_struct *mm,
+ static int alloc_charge_hpage(struct page **hpage, struct mm_struct *mm,
+ 			      struct collapse_control *cc)
+ {
+-	/* Only allocate from the target node */
+ 	gfp_t gfp = (cc->is_khugepaged ? alloc_hugepage_khugepaged_gfpmask() :
+-		     GFP_TRANSHUGE) | __GFP_THISNODE;
++		     GFP_TRANSHUGE);
+ 	int node = hpage_collapse_find_target_node(cc);
+ 
+-	if (!hpage_collapse_alloc_page(hpage, gfp, node))
++	if (!hpage_collapse_alloc_page(hpage, gfp, node, &cc->alloc_nmask))
+ 		return SCAN_ALLOC_HUGE_PAGE_FAIL;
+ 	if (unlikely(mem_cgroup_charge(page_folio(*hpage), mm, gfp)))
+ 		return SCAN_CGROUP_CHARGE_FAIL;
+@@ -1144,6 +1138,7 @@ static int hpage_collapse_scan_pmd(struct mm_struct *mm,
+ 		goto out;
+ 
+ 	memset(cc->node_load, 0, sizeof(cc->node_load));
++	nodes_clear(cc->alloc_nmask);
+ 	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
+ 	for (_address = address, _pte = pte; _pte < pte + HPAGE_PMD_NR;
+ 	     _pte++, _address += PAGE_SIZE) {
+@@ -2077,6 +2072,7 @@ static int hpage_collapse_scan_file(struct mm_struct *mm, unsigned long addr,
+ 	present = 0;
+ 	swap = 0;
+ 	memset(cc->node_load, 0, sizeof(cc->node_load));
++	nodes_clear(cc->alloc_nmask);
+ 	rcu_read_lock();
+ 	xas_for_each(&xas, page, start + HPAGE_PMD_NR - 1) {
+ 		if (xas_retry(&xas, page))
+@@ -2576,7 +2572,6 @@ int madvise_collapse(struct vm_area_struct *vma, struct vm_area_struct **prev,
+ 	if (!cc)
+ 		return -ENOMEM;
+ 	cc->is_khugepaged = false;
+-	cc->last_target_node = NUMA_NO_NODE;
+ 
+ 	mmgrab(mm);
+ 	lru_add_drain_all();
+@@ -2602,6 +2597,7 @@ int madvise_collapse(struct vm_area_struct *vma, struct vm_area_struct **prev,
+ 		}
+ 		mmap_assert_locked(mm);
+ 		memset(cc->node_load, 0, sizeof(cc->node_load));
++		nodes_clear(cc->alloc_nmask);
+ 		if (IS_ENABLED(CONFIG_SHMEM) && vma->vm_file) {
+ 			struct file *file = get_file(vma->vm_file);
+ 			pgoff_t pgoff = linear_page_index(vma, addr);
+-- 
+cgit 
+
+
+From ed86b74874f839f0e579bdf92ea0a5aabdfabebb Mon Sep 17 00:00:00 2001
+From: Charan Teja Kalla <quic_charante@quicinc.com>
+Date: Tue, 8 Nov 2022 10:46:22 +0530
+Subject: mm/page_exit: fix kernel doc warning in page_ext_put()
+
+Fix the below compiler warnings reported with 'make W=1 mm/'.
+mm/page_ext.c:178: warning: Function parameter or member 'page_ext' not
+described in 'page_ext_put'.
+
+[quic_pkondeti@quicinc.com: better patch title]
+Link: https://lkml.kernel.org/r/1667884582-2465-1-git-send-email-quic_charante@quicinc.com
+Fixes: b1d5488a252dc9 ("mm: fix use-after free of page_ext after race with memory-offline")
+Signed-off-by: Charan Teja Kalla <quic_charante@quicinc.com>
+Reported-by: Vlastimil Babka <vbabka@suse.cz>
+Tested-by: Vlastimil Babka <vbabka@suse.cz>
+Cc: Pavan Kondeti <quic_pkondeti@quicinc.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/page_ext.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/page_ext.c b/mm/page_ext.c
+index affe80243b6d6..ddf1968560f0c 100644
+--- a/mm/page_ext.c
++++ b/mm/page_ext.c
+@@ -166,7 +166,7 @@ struct page_ext *page_ext_get(struct page *page)
+ 
+ /**
+  * page_ext_put() - Working with page extended information is done.
+- * @page_ext - Page extended information received from page_ext_get().
++ * @page_ext: Page extended information received from page_ext_get().
+  *
+  * The page extended information of the page may not be valid after this
+  * function is called.
+-- 
+cgit 
+
+
+From 045634ff1e8615714546d9dca92fcdbe0fd898ef Mon Sep 17 00:00:00 2001
+From: Gautam Menghani <gautammenghani201@gmail.com>
+Date: Wed, 26 Oct 2022 10:15:24 +0530
+Subject: mm/khugepaged: refactor mm_khugepaged_scan_file tracepoint to remove
+ filename from function call
+
+Refactor the mm_khugepaged_scan_file tracepoint to move filename
+dereference to the tracepoint definition, to maintain consistency with
+other tracepoints[1].
+
+[1]:lore.kernel.org/lkml/20221024111621.3ba17e2c@gandalf.local.home/
+
+Link: https://lkml.kernel.org/r/20221026044524.54793-1-gautammenghani201@gmail.com
+Fixes: d41fd2016ed07 ("mm/khugepaged: add tracepoint to hpage_collapse_scan_file()")
+Signed-off-by: Gautam Menghani <gautammenghani201@gmail.com>
+Reviewed-by: Yang Shi <shy828301@gmail.com>
+Reviewed-by: Zach O'Keefe <zokeefe@google.com>
+Reviewed-by: Steven Rostedt (Google) <rostedt@goodmis.org>
+Cc: David Hildenbrand <david@redhat.com>
+Cc: Masami Hiramatsu (Google) <mhiramat@kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ include/trace/events/huge_memory.h | 8 ++++----
+ mm/khugepaged.c                    | 3 +--
+ 2 files changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/include/trace/events/huge_memory.h b/include/trace/events/huge_memory.h
+index 935af49479173..760455dfa8600 100644
+--- a/include/trace/events/huge_memory.h
++++ b/include/trace/events/huge_memory.h
+@@ -171,15 +171,15 @@ TRACE_EVENT(mm_collapse_huge_page_swapin,
+ 
+ TRACE_EVENT(mm_khugepaged_scan_file,
+ 
+-	TP_PROTO(struct mm_struct *mm, struct page *page, const char *filename,
++	TP_PROTO(struct mm_struct *mm, struct page *page, struct file *file,
+ 		 int present, int swap, int result),
+ 
+-	TP_ARGS(mm, page, filename, present, swap, result),
++	TP_ARGS(mm, page, file, present, swap, result),
+ 
+ 	TP_STRUCT__entry(
+ 		__field(struct mm_struct *, mm)
+ 		__field(unsigned long, pfn)
+-		__string(filename, filename)
++		__string(filename, file->f_path.dentry->d_iname)
+ 		__field(int, present)
+ 		__field(int, swap)
+ 		__field(int, result)
+@@ -188,7 +188,7 @@ TRACE_EVENT(mm_khugepaged_scan_file,
+ 	TP_fast_assign(
+ 		__entry->mm = mm;
+ 		__entry->pfn = page ? page_to_pfn(page) : -1;
+-		__assign_str(filename, filename);
++		__assign_str(filename, file->f_path.dentry->d_iname);
+ 		__entry->present = present;
+ 		__entry->swap = swap;
+ 		__entry->result = result;
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 52b9cae2412d7..a8d5ef2a77d24 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -2153,8 +2153,7 @@ static int hpage_collapse_scan_file(struct mm_struct *mm, unsigned long addr,
+ 		}
+ 	}
+ 
+-	trace_mm_khugepaged_scan_file(mm, page, file->f_path.dentry->d_iname,
+-				      present, swap, result);
++	trace_mm_khugepaged_scan_file(mm, page, file, present, swap, result);
+ 	return result;
+ }
+ #else
+-- 
+cgit 
+
+
+From a6f810efabfd789d3bbafeacb4502958ec56c5ce Mon Sep 17 00:00:00 2001
+From: Mukesh Ojha <quic_mojha@quicinc.com>
+Date: Thu, 10 Nov 2022 00:31:37 +0530
+Subject: gcov: clang: fix the buffer overflow issue
+
+Currently, in clang version of gcov code when module is getting removed
+gcov_info_add() incorrectly adds the sfn_ptr->counter to all the
+dst->functions and it result in the kernel panic in below crash report.
+Fix this by properly handling it.
+
+[    8.899094][  T599] Unable to handle kernel write to read-only memory at virtual address ffffff80461cc000
+[    8.899100][  T599] Mem abort info:
+[    8.899102][  T599]   ESR = 0x9600004f
+[    8.899103][  T599]   EC = 0x25: DABT (current EL), IL = 32 bits
+[    8.899105][  T599]   SET = 0, FnV = 0
+[    8.899107][  T599]   EA = 0, S1PTW = 0
+[    8.899108][  T599]   FSC = 0x0f: level 3 permission fault
+[    8.899110][  T599] Data abort info:
+[    8.899111][  T599]   ISV = 0, ISS = 0x0000004f
+[    8.899113][  T599]   CM = 0, WnR = 1
+[    8.899114][  T599] swapper pgtable: 4k pages, 39-bit VAs, pgdp=00000000ab8de000
+[    8.899116][  T599] [ffffff80461cc000] pgd=18000009ffcde003, p4d=18000009ffcde003, pud=18000009ffcde003, pmd=18000009ffcad003, pte=00600000c61cc787
+[    8.899124][  T599] Internal error: Oops: 9600004f [#1] PREEMPT SMP
+[    8.899265][  T599] Skip md ftrace buffer dump for: 0x1609e0
+....
+..,
+[    8.899544][  T599] CPU: 7 PID: 599 Comm: modprobe Tainted: G S         OE     5.15.41-android13-8-g38e9b1af6bce #1
+[    8.899547][  T599] Hardware name: XXX (DT)
+[    8.899549][  T599] pstate: 82400005 (Nzcv daif +PAN -UAO +TCO -DIT -SSBS BTYPE=--)
+[    8.899551][  T599] pc : gcov_info_add+0x9c/0xb8
+[    8.899557][  T599] lr : gcov_event+0x28c/0x6b8
+[    8.899559][  T599] sp : ffffffc00e733b00
+[    8.899560][  T599] x29: ffffffc00e733b00 x28: ffffffc00e733d30 x27: ffffffe8dc297470
+[    8.899563][  T599] x26: ffffffe8dc297000 x25: ffffffe8dc297000 x24: ffffffe8dc297000
+[    8.899566][  T599] x23: ffffffe8dc0a6200 x22: ffffff880f68bf20 x21: 0000000000000000
+[    8.899569][  T599] x20: ffffff880f68bf00 x19: ffffff8801babc00 x18: ffffffc00d7f9058
+[    8.899572][  T599] x17: 0000000000088793 x16: ffffff80461cbe00 x15: 9100052952800785
+[    8.899575][  T599] x14: 0000000000000200 x13: 0000000000000041 x12: 9100052952800785
+[    8.899577][  T599] x11: ffffffe8dc297000 x10: ffffffe8dc297000 x9 : ffffff80461cbc80
+[    8.899580][  T599] x8 : ffffff8801babe80 x7 : ffffffe8dc2ec000 x6 : ffffffe8dc2ed000
+[    8.899583][  T599] x5 : 000000008020001f x4 : fffffffe2006eae0 x3 : 000000008020001f
+[    8.899586][  T599] x2 : ffffff8027c49200 x1 : ffffff8801babc20 x0 : ffffff80461cb3a0
+[    8.899589][  T599] Call trace:
+[    8.899590][  T599]  gcov_info_add+0x9c/0xb8
+[    8.899592][  T599]  gcov_module_notifier+0xbc/0x120
+[    8.899595][  T599]  blocking_notifier_call_chain+0xa0/0x11c
+[    8.899598][  T599]  do_init_module+0x2a8/0x33c
+[    8.899600][  T599]  load_module+0x23cc/0x261c
+[    8.899602][  T599]  __arm64_sys_finit_module+0x158/0x194
+[    8.899604][  T599]  invoke_syscall+0x94/0x2bc
+[    8.899607][  T599]  el0_svc_common+0x1d8/0x34c
+[    8.899609][  T599]  do_el0_svc+0x40/0x54
+[    8.899611][  T599]  el0_svc+0x94/0x2f0
+[    8.899613][  T599]  el0t_64_sync_handler+0x88/0xec
+[    8.899615][  T599]  el0t_64_sync+0x1b4/0x1b8
+[    8.899618][  T599] Code: f905f56c f86e69ec f86e6a0f 8b0c01ec (f82e6a0c)
+[    8.899620][  T599] ---[ end trace ed5218e9e5b6e2e6 ]---
+
+Link: https://lkml.kernel.org/r/1668020497-13142-1-git-send-email-quic_mojha@quicinc.com
+Fixes: e178a5beb369 ("gcov: clang support")
+Signed-off-by: Mukesh Ojha <quic_mojha@quicinc.com>
+Reviewed-by: Peter Oberparleiter <oberpar@linux.ibm.com>
+Tested-by: Peter Oberparleiter <oberpar@linux.ibm.com>
+Cc: Nathan Chancellor <nathan@kernel.org>
+Cc: Nick Desaulniers <ndesaulniers@google.com>
+Cc: Tom Rix <trix@redhat.com>
+Cc: <stable@vger.kernel.org>	[5.2+]
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ kernel/gcov/clang.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/gcov/clang.c b/kernel/gcov/clang.c
+index cbb0bed958abd..7670a811a5657 100644
+--- a/kernel/gcov/clang.c
++++ b/kernel/gcov/clang.c
+@@ -280,6 +280,8 @@ void gcov_info_add(struct gcov_info *dst, struct gcov_info *src)
+ 
+ 		for (i = 0; i < sfn_ptr->num_counters; i++)
+ 			dfn_ptr->counters[i] += sfn_ptr->counters[i];
++
++		sfn_ptr = list_next_entry(sfn_ptr, head);
+ 	}
+ }
+ 
+-- 
+cgit 
+
+
+From b6305049f30652f1efcf78d627fc6656151a7929 Mon Sep 17 00:00:00 2001
+From: Mike Kravetz <mike.kravetz@oracle.com>
+Date: Mon, 14 Nov 2022 13:00:18 -0800
+Subject: ipc/shm: call underlying open/close vm_ops
+
+Shared memory segments can be created that are backed by hugetlb pages.
+When this happens, the vmas associated with any mappings (shmat) are
+marked VM_HUGETLB, yet the vm_ops for such mappings are provided by
+ipc/shm (shm_vm_ops).  There is a mechanism to call the underlying hugetlb
+vm_ops, and this is done for most operations.  However, it is not done for
+open and close.
+
+This was not an issue until the introduction of the hugetlb vma_lock.
+This lock structure is pointed to by vm_private_data and the open/close
+vm_ops help maintain this structure.  The special hugetlb routine called
+at fork took care of structure updates at fork time.  However,
+vma_splitting is not properly handled for ipc shared memory mappings
+backed by hugetlb pages.  This can result in a "kernel NULL pointer
+dereference" BUG or use after free as two vmas point to the same lock
+structure.
+
+Update the shm open and close routines to always call the underlying open
+and close routines.
+
+Link: https://lkml.kernel.org/r/20221114210018.49346-1-mike.kravetz@oracle.com
+Fixes: 8d9bfb260814 ("hugetlb: add vma based lock for pmd sharing")
+Signed-off-by: Mike Kravetz <mike.kravetz@oracle.com>
+Reported-by: Doug Nelson <doug.nelson@intel.com>
+Reported-by: <syzbot+83b4134621b7c326d950@syzkaller.appspotmail.com>
+Cc: Alexander Mikhalitsyn <alexander.mikhalitsyn@virtuozzo.com>
+Cc: "Eric W . Biederman" <ebiederm@xmission.com>
+Cc: Manfred Spraul <manfred@colorfullife.com>
+Cc: Matthew Wilcox <willy@infradead.org>
+Cc: Miaohe Lin <linmiaohe@huawei.com>
+Cc: Michal Hocko <mhocko@suse.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ ipc/shm.c | 34 +++++++++++++++++++++++++---------
+ 1 file changed, 25 insertions(+), 9 deletions(-)
+
+diff --git a/ipc/shm.c b/ipc/shm.c
+index 7d86f058fb861..bd2fcc4d454e0 100644
+--- a/ipc/shm.c
++++ b/ipc/shm.c
+@@ -275,10 +275,8 @@ static inline void shm_rmid(struct shmid_kernel *s)
+ }
+ 
+ 
+-static int __shm_open(struct vm_area_struct *vma)
++static int __shm_open(struct shm_file_data *sfd)
+ {
+-	struct file *file = vma->vm_file;
+-	struct shm_file_data *sfd = shm_file_data(file);
+ 	struct shmid_kernel *shp;
+ 
+ 	shp = shm_lock(sfd->ns, sfd->id);
+@@ -302,7 +300,15 @@ static int __shm_open(struct vm_area_struct *vma)
+ /* This is called by fork, once for every shm attach. */
+ static void shm_open(struct vm_area_struct *vma)
+ {
+-	int err = __shm_open(vma);
++	struct file *file = vma->vm_file;
++	struct shm_file_data *sfd = shm_file_data(file);
++	int err;
++
++	/* Always call underlying open if present */
++	if (sfd->vm_ops->open)
++		sfd->vm_ops->open(vma);
++
++	err = __shm_open(sfd);
+ 	/*
+ 	 * We raced in the idr lookup or with shm_destroy().
+ 	 * Either way, the ID is busted.
+@@ -359,10 +365,8 @@ static bool shm_may_destroy(struct shmid_kernel *shp)
+  * The descriptor has already been removed from the current->mm->mmap list
+  * and will later be kfree()d.
+  */
+-static void shm_close(struct vm_area_struct *vma)
++static void __shm_close(struct shm_file_data *sfd)
+ {
+-	struct file *file = vma->vm_file;
+-	struct shm_file_data *sfd = shm_file_data(file);
+ 	struct shmid_kernel *shp;
+ 	struct ipc_namespace *ns = sfd->ns;
+ 
+@@ -388,6 +392,18 @@ done:
+ 	up_write(&shm_ids(ns).rwsem);
+ }
+ 
++static void shm_close(struct vm_area_struct *vma)
++{
++	struct file *file = vma->vm_file;
++	struct shm_file_data *sfd = shm_file_data(file);
++
++	/* Always call underlying close if present */
++	if (sfd->vm_ops->close)
++		sfd->vm_ops->close(vma);
++
++	__shm_close(sfd);
++}
++
+ /* Called with ns->shm_ids(ns).rwsem locked */
+ static int shm_try_destroy_orphaned(int id, void *p, void *data)
+ {
+@@ -583,13 +599,13 @@ static int shm_mmap(struct file *file, struct vm_area_struct *vma)
+ 	 * IPC ID that was removed, and possibly even reused by another shm
+ 	 * segment already.  Propagate this case as an error to caller.
+ 	 */
+-	ret = __shm_open(vma);
++	ret = __shm_open(sfd);
+ 	if (ret)
+ 		return ret;
+ 
+ 	ret = call_mmap(sfd->file, vma);
+ 	if (ret) {
+-		shm_close(vma);
++		__shm_close(sfd);
+ 		return ret;
+ 	}
+ 	sfd->vm_ops = vma->vm_ops;
+-- 
+cgit 
+
+
+From cd08d80ecdac577bad2e8d6805c7a3859fdefb8d Mon Sep 17 00:00:00 2001
+From: Li Liguang <liliguang@baidu.com>
+Date: Mon, 14 Nov 2022 14:48:28 -0500
+Subject: mm: correctly charge compressed memory to its memcg
+
+Kswapd will reclaim memory when memory pressure is high, the annonymous
+memory will be compressed and stored in the zpool if zswap is enabled.
+The memcg_kmem_bypass() in get_obj_cgroup_from_page() will bypass the
+kernel thread and cause the compressed memory not be charged to its memory
+cgroup.
+
+Remove the memcg_kmem_bypass() call and properly charge compressed memory
+to its corresponding memory cgroup.
+
+Link: https://lore.kernel.org/linux-mm/CALvZod4nnn8BHYqAM4xtcR0Ddo2-Wr8uKm9h_CHWUaXw7g_DCg@mail.gmail.com/
+Link: https://lkml.kernel.org/r/20221114194828.100822-1-hannes@cmpxchg.org
+Fixes: f4840ccfca25 ("zswap: memcg accounting")
+Signed-off-by: Li Liguang <liliguang@baidu.com>
+Signed-off-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Shakeel Butt <shakeelb@google.com>
+Reviewed-by: Muchun Song <songmuchun@bytedance.com>
+Cc: Michal Hocko <mhocko@suse.com>
+Cc: Roman Gushchin <roman.gushchin@linux.dev>
+Cc: <stable@vger.kernel.org>	[5.19+]
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/memcontrol.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/memcontrol.c b/mm/memcontrol.c
+index 2d8549ae1b300..a1a35c12635ef 100644
+--- a/mm/memcontrol.c
++++ b/mm/memcontrol.c
+@@ -3026,7 +3026,7 @@ struct obj_cgroup *get_obj_cgroup_from_page(struct page *page)
+ {
+ 	struct obj_cgroup *objcg;
+ 
+-	if (!memcg_kmem_enabled() || memcg_kmem_bypass())
++	if (!memcg_kmem_enabled())
+ 		return NULL;
+ 
+ 	if (PageMemcgKmem(page)) {
+-- 
+cgit 
+
+
+From 4a955bed882e734807024afd8f53213d4c61ff97 Mon Sep 17 00:00:00 2001
+From: Alistair Popple <apopple@nvidia.com>
+Date: Mon, 14 Nov 2022 22:55:37 +1100
+Subject: mm/memory: return vm_fault_t result from migrate_to_ram() callback
+
+The migrate_to_ram() callback should always succeed, but in rare cases can
+fail usually returning VM_FAULT_SIGBUS.  Commit 16ce101db85d
+("mm/memory.c: fix race when faulting a device private page") incorrectly
+stopped passing the return code up the stack.  Fix this by setting the ret
+variable, restoring the previous behaviour on migrate_to_ram() failure.
+
+Link: https://lkml.kernel.org/r/20221114115537.727371-1-apopple@nvidia.com
+Fixes: 16ce101db85d ("mm/memory.c: fix race when faulting a device private page")
+Signed-off-by: Alistair Popple <apopple@nvidia.com>
+Acked-by: David Hildenbrand <david@redhat.com>
+Reviewed-by: Felix Kuehling <Felix.Kuehling@amd.com>
+Cc: Ralph Campbell <rcampbell@nvidia.com>
+Cc: John Hubbard <jhubbard@nvidia.com>
+Cc: Alex Sierra <alex.sierra@amd.com>
+Cc: Ben Skeggs <bskeggs@redhat.com>
+Cc: Lyude Paul <lyude@redhat.com>
+Cc: Jason Gunthorpe <jgg@nvidia.com>
+Cc: Michael Ellerman <mpe@ellerman.id.au>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/memory.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index f88c351aecd41..8a6d5c823f91b 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -3763,7 +3763,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
+ 			 */
+ 			get_page(vmf->page);
+ 			pte_unmap_unlock(vmf->pte, vmf->ptl);
+-			vmf->page->pgmap->ops->migrate_to_ram(vmf);
++			ret = vmf->page->pgmap->ops->migrate_to_ram(vmf);
+ 			put_page(vmf->page);
+ 		} else if (is_hwpoison_entry(entry)) {
+ 			ret = VM_FAULT_HWPOISON;
+-- 
+cgit 
+
+
+From 8468b486612c808c9e337708d66a435498f1735c Mon Sep 17 00:00:00 2001
+From: SeongJae Park <sj@kernel.org>
+Date: Mon, 14 Nov 2022 17:55:52 +0000
+Subject: mm/damon/sysfs-schemes: skip stats update if the scheme directory is
+ removed
+
+A DAMON sysfs interface user can start DAMON with a scheme, remove the
+sysfs directory for the scheme, and then ask update of the scheme's stats.
+Because the schemes stats update logic isn't aware of the situation, it
+results in an invalid memory access.  Fix the bug by checking if the
+scheme sysfs directory exists.
+
+Link: https://lkml.kernel.org/r/20221114175552.1951-1-sj@kernel.org
+Fixes: 0ac32b8affb5 ("mm/damon/sysfs: support DAMOS stats")
+Signed-off-by: SeongJae Park <sj@kernel.org>
+Cc: <stable@vger.kernel.org>	[v5.18]
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/damon/sysfs.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mm/damon/sysfs.c b/mm/damon/sysfs.c
+index 9f1219a67e3f1..5ce403378c200 100644
+--- a/mm/damon/sysfs.c
++++ b/mm/damon/sysfs.c
+@@ -2339,6 +2339,10 @@ static int damon_sysfs_upd_schemes_stats(struct damon_sysfs_kdamond *kdamond)
+ 	damon_for_each_scheme(scheme, ctx) {
+ 		struct damon_sysfs_stats *sysfs_stats;
+ 
++		/* user could have removed the scheme sysfs dir */
++		if (schemes_idx >= sysfs_schemes->nr)
++			break;
++
+ 		sysfs_stats = sysfs_schemes->schemes_arr[schemes_idx++]->stats;
+ 		sysfs_stats->nr_tried = scheme->stat.nr_tried;
+ 		sysfs_stats->sz_tried = scheme->stat.sz_tried;
+-- 
+cgit 
+
+
+From 4a42344081ff7fbb890c0741e11d22cd7f658894 Mon Sep 17 00:00:00 2001
+From: Ian Cowan <ian@linux.cowan.aero>
+Date: Sun, 13 Nov 2022 19:33:49 -0500
+Subject: mm: mmap: fix documentation for vma_mas_szero
+
+When the struct_mm input, mm, was changed to a struct ma_state, mas, the
+documentation for the function was never updated.  This updates that
+documentation reference.
+
+Link: https://lkml.kernel.org/r/20221114003349.41235-1-ian@linux.cowan.aero
+Signed-off-by: Ian Cowan <ian@linux.cowan.aero>
+Acked-by: David Hildenbrand <david@redhat.com>
+Cc: Liam Howlett <liam.howlett@oracle.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/mmap.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index c3c5c1d6103d1..74a84eb33b904 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -456,7 +456,7 @@ void vma_mas_remove(struct vm_area_struct *vma, struct ma_state *mas)
+  * vma_mas_szero() - Set a given range to zero.  Used when modifying a
+  * vm_area_struct start or end.
+  *
+- * @mm: The struct_mm
++ * @mas: The maple tree ma_state
+  * @start: The start address to zero
+  * @end: The end address to zero.
+  */
+-- 
+cgit 
+
+
+From d39e2ad63def4432ed0ec59c0e64fee988ef42f0 Mon Sep 17 00:00:00 2001
+From: Alex Hung <alexhung@gmail.com>
+Date: Sun, 13 Nov 2022 17:13:01 -0700
+Subject: mailmap: update Alex Hung's email address
+
+I am no longer at Canonical and add entry of my personal email address.
+
+Link: https://lkml.kernel.org/r/20221114001302.671897-1-alex.hung@amd.com
+Signed-off-by: Alex Hung <alexhung@gmail.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ .mailmap | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.mailmap b/.mailmap
+index fdd7989492fc3..f9e4472b891a7 100644
+--- a/.mailmap
++++ b/.mailmap
+@@ -29,6 +29,7 @@ Alexandre Belloni <alexandre.belloni@bootlin.com> <alexandre.belloni@free-electr
+ Alexei Starovoitov <ast@kernel.org> <alexei.starovoitov@gmail.com>
+ Alexei Starovoitov <ast@kernel.org> <ast@fb.com>
+ Alexei Starovoitov <ast@kernel.org> <ast@plumgrid.com>
++Alex Hung <alexhung@gmail.com> <alex.hung@canonical.com>
+ Alex Shi <alexs@kernel.org> <alex.shi@intel.com>
+ Alex Shi <alexs@kernel.org> <alex.shi@linaro.org>
+ Alex Shi <alexs@kernel.org> <alex.shi@linux.alibaba.com>
+-- 
+cgit 
+
+
+From db8e0998c35af67bceee91cad8acf3f6f330782f Mon Sep 17 00:00:00 2001
+From: Alex Hung <alexhung@gmail.com>
+Date: Sun, 13 Nov 2022 17:13:02 -0700
+Subject: MAINTAINERS: update Alex Hung's email address
+
+Use my personal email address.
+
+Link: https://lkml.kernel.org/r/20221114001302.671897-2-alex.hung@amd.com
+Signed-off-by: Alex Hung <alexhung@gmail.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ MAINTAINERS | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 046ff06ff97fa..0e152a7afda82 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -10288,7 +10288,7 @@ T:	git https://github.com/intel/gvt-linux.git
+ F:	drivers/gpu/drm/i915/gvt/
+ 
+ INTEL HID EVENT DRIVER
+-M:	Alex Hung <alex.hung@canonical.com>
++M:	Alex Hung <alexhung@gmail.com>
+ L:	platform-driver-x86@vger.kernel.org
+ S:	Maintained
+ F:	drivers/platform/x86/intel/hid.c
+-- 
+cgit 
+
+
+From 50c697215a8cc22f0e58c88f06f2716c05a26e85 Mon Sep 17 00:00:00 2001
+From: Sam James <sam@gentoo.org>
+Date: Wed, 16 Nov 2022 18:26:34 +0000
+Subject: kbuild: fix -Wimplicit-function-declaration in
+ license_is_gpl_compatible
+
+Add missing <linux/string.h> include for strcmp.
+
+Clang 16 makes -Wimplicit-function-declaration an error by default.
+Unfortunately, out of tree modules may use this in configure scripts,
+which means failure might cause silent miscompilation or misconfiguration.
+
+For more information, see LWN.net [0] or LLVM's Discourse [1], gentoo-dev@ [2],
+or the (new) c-std-porting mailing list [3].
+
+[0] https://lwn.net/Articles/913505/
+[1] https://discourse.llvm.org/t/configure-script-breakage-with-the-new-werror-implicit-function-declaration/65213
+[2] https://archives.gentoo.org/gentoo-dev/message/dd9f2d3082b8b6f8dfbccb0639e6e240
+[3] hosted at lists.linux.dev.
+
+[akpm@linux-foundation.org: remember "linux/"]
+Link: https://lkml.kernel.org/r/20221116182634.2823136-1-sam@gentoo.org
+Signed-off-by: Sam James <sam@gentoo.org>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ include/linux/license.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/include/linux/license.h b/include/linux/license.h
+index 7cce390f120b4..ad937f57f2cbb 100644
+--- a/include/linux/license.h
++++ b/include/linux/license.h
+@@ -2,6 +2,8 @@
+ #ifndef __LICENSE_H
+ #define __LICENSE_H
+ 
++#include <linux/string.h>
++
+ static inline int license_is_gpl_compatible(const char *license)
+ {
+ 	return (strcmp(license, "GPL") == 0
+-- 
+cgit 
+
+
+From 44af0b45d58d7b6f09ebb9081aa89b8bdc33a630 Mon Sep 17 00:00:00 2001
+From: Alistair Popple <apopple@nvidia.com>
+Date: Fri, 11 Nov 2022 11:51:35 +1100
+Subject: mm/migrate_device: return number of migrating pages in args->cpages
+
+migrate_vma->cpages originally contained a count of the number of pages
+migrating including non-present pages which can be populated directly on
+the target.
+
+Commit 241f68859656 ("mm/migrate_device.c: refactor migrate_vma and
+migrate_device_coherent_page()") inadvertantly changed this to contain
+just the number of pages that were unmapped.  Usage of migrate_vma->cpages
+isn't documented, but most drivers use it to see if all the requested
+addresses can be migrated so restore the original behaviour.
+
+Link: https://lkml.kernel.org/r/20221111005135.1344004-1-apopple@nvidia.com
+Fixes: 241f68859656 ("mm/migrate_device.c: refactor migrate_vma and migrate_deivce_coherent_page()")
+Signed-off-by: Alistair Popple <apopple@nvidia.com>
+Reported-by: Ralph Campbell <rcampbell@nvidia.com>
+Reviewed-by: Ralph Campbell <rcampbell@nvidia.com>
+Cc: John Hubbard <jhubbard@nvidia.com>
+Cc: Alex Sierra <alex.sierra@amd.com>
+Cc: Ben Skeggs <bskeggs@redhat.com>
+Cc: Felix Kuehling <Felix.Kuehling@amd.com>
+Cc: Lyude Paul <lyude@redhat.com>
+Cc: Jason Gunthorpe <jgg@nvidia.com>
+Cc: Michael Ellerman <mpe@ellerman.id.au>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/migrate_device.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/mm/migrate_device.c b/mm/migrate_device.c
+index 6fa682eef7a00..721b2365dbca9 100644
+--- a/mm/migrate_device.c
++++ b/mm/migrate_device.c
+@@ -357,7 +357,8 @@ static bool migrate_vma_check_page(struct page *page, struct page *fault_page)
+ }
+ 
+ /*
+- * Unmaps pages for migration. Returns number of unmapped pages.
++ * Unmaps pages for migration. Returns number of source pfns marked as
++ * migrating.
+  */
+ static unsigned long migrate_device_unmap(unsigned long *src_pfns,
+ 					  unsigned long npages,
+@@ -373,8 +374,11 @@ static unsigned long migrate_device_unmap(unsigned long *src_pfns,
+ 		struct page *page = migrate_pfn_to_page(src_pfns[i]);
+ 		struct folio *folio;
+ 
+-		if (!page)
++		if (!page) {
++			if (src_pfns[i] & MIGRATE_PFN_MIGRATE)
++				unmapped++;
+ 			continue;
++		}
+ 
+ 		/* ZONE_DEVICE pages are not on LRU */
+ 		if (!is_zone_device_page(page)) {
+-- 
+cgit 
+
+
+From 47123d7fdffff7389f8ffa833110784ab9fc8bc6 Mon Sep 17 00:00:00 2001
+From: Satya Priya <quic_c_skakit@quicinc.com>
+Date: Wed, 16 Nov 2022 16:20:17 +0530
+Subject: mailmap: update email address for Satya Priya
+
+Add and also update email address, skakit@codeaurora.org is no longer
+active.
+
+Link: https://lkml.kernel.org/r/20221116105017.3018971-1-quic_c_skakit@quicinc.com
+Signed-off-by: Satya Priya <quic_c_skakit@quicinc.com>
+Cc: Konrad Dybcio <konrad.dybcio@linaro.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ .mailmap | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.mailmap b/.mailmap
+index f9e4472b891a7..aec51726551f1 100644
+--- a/.mailmap
++++ b/.mailmap
+@@ -383,6 +383,7 @@ Santosh Shilimkar <santosh.shilimkar@oracle.org>
+ Santosh Shilimkar <ssantosh@kernel.org>
+ Sarangdhar Joshi <spjoshi@codeaurora.org>
+ Sascha Hauer <s.hauer@pengutronix.de>
++Satya Priya <quic_c_skakit@quicinc.com> <skakit@codeaurora.org>
+ S.Çağlar Onur <caglar@pardus.org.tr>
+ Sean Christopherson <seanjc@google.com> <sean.j.christopherson@intel.com>
+ Sean Nyekjaer <sean@geanix.com> <sean.nyekjaer@prevas.dk>
+-- 
+cgit 
+
+
+From 359a5e1416caaf9ce28396a65ed3e386cc5de663 Mon Sep 17 00:00:00 2001
+From: Yu Zhao <yuzhao@google.com>
+Date: Tue, 15 Nov 2022 18:38:07 -0700
+Subject: mm: multi-gen LRU: retry folios written back while isolated
+
+The page reclaim isolates a batch of folios from the tail of one of the
+LRU lists and works on those folios one by one.  For a suitable
+swap-backed folio, if the swap device is async, it queues that folio for
+writeback.  After the page reclaim finishes an entire batch, it puts back
+the folios it queued for writeback to the head of the original LRU list.
+
+In the meantime, the page writeback flushes the queued folios also by
+batches.  Its batching logic is independent from that of the page reclaim.
+For each of the folios it writes back, the page writeback calls
+folio_rotate_reclaimable() which tries to rotate a folio to the tail.
+
+folio_rotate_reclaimable() only works for a folio after the page reclaim
+has put it back.  If an async swap device is fast enough, the page
+writeback can finish with that folio while the page reclaim is still
+working on the rest of the batch containing it.  In this case, that folio
+will remain at the head and the page reclaim will not retry it before
+reaching there.
+
+This patch adds a retry to evict_folios().  After evict_folios() has
+finished an entire batch and before it puts back folios it cannot free
+immediately, it retries those that may have missed the rotation.
+
+Before this patch, ~60% of folios swapped to an Intel Optane missed
+folio_rotate_reclaimable().  After this patch, ~99% of missed folios were
+reclaimed upon retry.
+
+This problem affects relatively slow async swap devices like Samsung 980
+Pro much less and does not affect sync swap devices like zram or zswap at
+all.
+
+Link: https://lkml.kernel.org/r/20221116013808.3995280-1-yuzhao@google.com
+Fixes: ac35a4902374 ("mm: multi-gen LRU: minimal implementation")
+Signed-off-by: Yu Zhao <yuzhao@google.com>
+Cc: "Yin, Fengwei" <fengwei.yin@intel.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/vmscan.c | 48 +++++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 37 insertions(+), 11 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 0317d4cf48849..e36666679e1c0 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -4971,10 +4971,13 @@ static int evict_folios(struct lruvec *lruvec, struct scan_control *sc, int swap
+ 	int scanned;
+ 	int reclaimed;
+ 	LIST_HEAD(list);
++	LIST_HEAD(clean);
+ 	struct folio *folio;
++	struct folio *next;
+ 	enum vm_event_item item;
+ 	struct reclaim_stat stat;
+ 	struct lru_gen_mm_walk *walk;
++	bool skip_retry = false;
+ 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
+ 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
+ 
+@@ -4991,20 +4994,37 @@ static int evict_folios(struct lruvec *lruvec, struct scan_control *sc, int swap
+ 
+ 	if (list_empty(&list))
+ 		return scanned;
+-
++retry:
+ 	reclaimed = shrink_folio_list(&list, pgdat, sc, &stat, false);
++	sc->nr_reclaimed += reclaimed;
+ 
+-	list_for_each_entry(folio, &list, lru) {
+-		/* restore LRU_REFS_FLAGS cleared by isolate_folio() */
+-		if (folio_test_workingset(folio))
+-			folio_set_referenced(folio);
++	list_for_each_entry_safe_reverse(folio, next, &list, lru) {
++		if (!folio_evictable(folio)) {
++			list_del(&folio->lru);
++			folio_putback_lru(folio);
++			continue;
++		}
+ 
+-		/* don't add rejected pages to the oldest generation */
+ 		if (folio_test_reclaim(folio) &&
+-		    (folio_test_dirty(folio) || folio_test_writeback(folio)))
+-			folio_clear_active(folio);
+-		else
+-			folio_set_active(folio);
++		    (folio_test_dirty(folio) || folio_test_writeback(folio))) {
++			/* restore LRU_REFS_FLAGS cleared by isolate_folio() */
++			if (folio_test_workingset(folio))
++				folio_set_referenced(folio);
++			continue;
++		}
++
++		if (skip_retry || folio_test_active(folio) || folio_test_referenced(folio) ||
++		    folio_mapped(folio) || folio_test_locked(folio) ||
++		    folio_test_dirty(folio) || folio_test_writeback(folio)) {
++			/* don't add rejected folios to the oldest generation */
++			set_mask_bits(&folio->flags, LRU_REFS_MASK | LRU_REFS_FLAGS,
++				      BIT(PG_active));
++			continue;
++		}
++
++		/* retry folios that may have missed folio_rotate_reclaimable() */
++		list_move(&folio->lru, &clean);
++		sc->nr_scanned -= folio_nr_pages(folio);
+ 	}
+ 
+ 	spin_lock_irq(&lruvec->lru_lock);
+@@ -5026,7 +5046,13 @@ static int evict_folios(struct lruvec *lruvec, struct scan_control *sc, int swap
+ 	mem_cgroup_uncharge_list(&list);
+ 	free_unref_page_list(&list);
+ 
+-	sc->nr_reclaimed += reclaimed;
++	INIT_LIST_HEAD(&list);
++	list_splice_init(&clean, &list);
++
++	if (!list_empty(&list)) {
++		skip_retry = true;
++		goto retry;
++	}
+ 
+ 	if (need_swapping && type == LRU_GEN_ANON)
+ 		*need_swapping = true;
+-- 
+cgit 
+
+From 747c0f35f2d55de20093e992bd9fc7292193c0e6 Mon Sep 17 00:00:00 2001
+From: Marco Elver <elver@google.com>
+Date: Fri, 18 Nov 2022 16:22:16 +0100
+Subject: kfence: fix stack trace pruning
+
+Commit b14051352465 ("mm/sl[au]b: generalize kmalloc subsystem")
+refactored large parts of the kmalloc subsystem, resulting in the stack
+trace pruning logic done by KFENCE to no longer work.
+
+While b14051352465 attempted to fix the situation by including
+'__kmem_cache_free' in the list of functions KFENCE should skip through,
+this only works when the compiler actually optimized the tail call from
+kfree() to __kmem_cache_free() into a jump (and thus kfree() _not_
+appearing in the full stack trace to begin with).
+
+In some configurations, the compiler no longer optimizes the tail call
+into a jump, and __kmem_cache_free() appears in the stack trace.  This
+means that the pruned stack trace shown by KFENCE would include kfree()
+which is not intended - for example:
+
+ | BUG: KFENCE: invalid free in kfree+0x7c/0x120
+ |
+ | Invalid free of 0xffff8883ed8fefe0 (in kfence-#126):
+ |  kfree+0x7c/0x120
+ |  test_double_free+0x116/0x1a9
+ |  kunit_try_run_case+0x90/0xd0
+ | [...]
+
+Fix it by moving __kmem_cache_free() to the list of functions that may be
+tail called by an allocator entry function, making the pruning logic work
+in both the optimized and unoptimized tail call cases.
+
+Link: https://lkml.kernel.org/r/20221118152216.3914899-1-elver@google.com
+Fixes: b14051352465 ("mm/sl[au]b: generalize kmalloc subsystem")
+Signed-off-by: Marco Elver <elver@google.com>
+Reviewed-by: Alexander Potapenko <glider@google.com>
+Cc: Hyeonggon Yoo <42.hyeyoo@gmail.com>
+Cc: Feng Tang <feng.tang@intel.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/kfence/report.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/mm/kfence/report.c b/mm/kfence/report.c
+index 7e496856c2ebe..46ecea18c4ca0 100644
+--- a/mm/kfence/report.c
++++ b/mm/kfence/report.c
+@@ -75,17 +75,22 @@ static int get_stack_skipnr(const unsign
+ 
+ 		if (str_has_prefix(buf, ARCH_FUNC_PREFIX "kfence_") ||
+ 		    str_has_prefix(buf, ARCH_FUNC_PREFIX "__kfence_") ||
++		    str_has_prefix(buf, ARCH_FUNC_PREFIX "__kmem_cache_free") ||
+ 		    !strncmp(buf, ARCH_FUNC_PREFIX "__slab_free", len)) {
+ 			/*
+-			 * In case of tail calls from any of the below
+-			 * to any of the above.
++			 * In case of tail calls from any of the below to any of
++			 * the above, optimized by the compiler such that the
++			 * stack trace would omit the initial entry point below.
+ 			 */
+ 			fallback = skipnr + 1;
+ 		}
+ 
+-		/* Also the *_bulk() variants by only checking prefixes. */
++		/*
++		 * The below list should only include the initial entry points
++		 * into the slab allocators. Includes the *_bulk() variants by
++		 * checking prefixes.
++		 */
+ 		if (str_has_prefix(buf, ARCH_FUNC_PREFIX "kfree") ||
+-		    str_has_prefix(buf, ARCH_FUNC_PREFIX "kmem_cache_free") ||
+ 		    str_has_prefix(buf, ARCH_FUNC_PREFIX "__kmalloc") ||
+ 		    str_has_prefix(buf, ARCH_FUNC_PREFIX "kmem_cache_alloc"))
+ 			goto found;
+
+-- 
+cgit 
+
+
+From 7fb0728a9b005b8fc55e835529047cca15191031 Mon Sep 17 00:00:00 2001
+From: Mike Kravetz <mike.kravetz@oracle.com>
+Date: Fri, 18 Nov 2022 11:52:49 -0800
+Subject: hugetlb: fix __prep_compound_gigantic_page page flag setting
+
+Commit 2b21624fc232 ("hugetlb: freeze allocated pages before creating
+hugetlb pages") changed the order page flags were cleared and set in the
+head page.  It moved the __ClearPageReserved after __SetPageHead.
+However, there is a check to make sure __ClearPageReserved is never done
+on a head page.  If CONFIG_DEBUG_VM_PGFLAGS is enabled, the following BUG
+will be hit when creating a hugetlb gigantic page:
+
+    page dumped because: VM_BUG_ON_PAGE(1 && PageCompound(page))
+    ------------[ cut here ]------------
+    kernel BUG at include/linux/page-flags.h:500!
+    Call Trace will differ depending on whether hugetlb page is created
+    at boot time or run time.
+
+Make sure to __ClearPageReserved BEFORE __SetPageHead.
+
+Link: https://lkml.kernel.org/r/20221118195249.178319-1-mike.kravetz@oracle.com
+Fixes: 2b21624fc232 ("hugetlb: freeze allocated pages before creating hugetlb pages")
+Signed-off-by: Mike Kravetz <mike.kravetz@oracle.com>
+Reported-by: Aneesh Kumar K.V <aneesh.kumar@linux.ibm.com>
+Acked-by: Muchun Song <songmuchun@bytedance.com>
+Tested-by: Tarun Sahu <tsahu@linux.ibm.com>
+Reviewed-by: Miaohe Lin <linmiaohe@huawei.com>
+Cc: Joao Martins <joao.m.martins@oracle.com>
+Cc: Matthew Wilcox <willy@infradead.org>
+Cc: Michal Hocko <mhocko@suse.com>
+Cc: Naoya Horiguchi <naoya.horiguchi@nec.com>
+Cc: Oscar Salvador <osalvador@suse.de>
+Cc: Peter Xu <peterx@redhat.com>
+Cc: Sidhartha Kumar <sidhartha.kumar@oracle.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/hugetlb.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index e48f8ef45b17f..f1385c3b6c963 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -1800,6 +1800,7 @@ static bool __prep_compound_gigantic_page(struct page *page, unsigned int order,
+ 
+ 	/* we rely on prep_new_huge_page to set the destructor */
+ 	set_compound_order(page, order);
++	__ClearPageReserved(page);
+ 	__SetPageHead(page);
+ 	for (i = 0; i < nr_pages; i++) {
+ 		p = nth_page(page, i);
+@@ -1816,7 +1817,8 @@ static bool __prep_compound_gigantic_page(struct page *page, unsigned int order,
+ 		 * on the head page when they need know if put_page() is needed
+ 		 * after get_user_pages().
+ 		 */
+-		__ClearPageReserved(p);
++		if (i != 0)	/* head page cleared above */
++			__ClearPageReserved(p);
+ 		/*
+ 		 * Subtle and very unlikely
+ 		 *
+-- 
+cgit 
+
+
+From de1ccfb648243a031cfbdc2d5571dfdaf5023106 Mon Sep 17 00:00:00 2001
+From: Chen Wandun <chenwandun@huawei.com>
+Date: Fri, 18 Nov 2022 21:38:50 +0800
+Subject: swapfile: fix soft lockup in scan_swap_map_slots
+
+A softlockup occurs in scan free swap slot under huge memory pressure.
+The test scenario is: 64 CPU cores, 64GB memory, and 28 zram devices, the
+disksize of each zram device is 50MB.
+
+LATENCY_LIMIT is used to prevent softlockups in scan_swap_map_slots(), but
+the real loop number would more than LATENCY_LIMIT because of "goto checks
+and goto scan" repeatly without decreasing latency limit.
+
+In order to fix it, decrease latency_ration in advance.
+
+There is also a suspicious place that will cause softlockups in
+get_swap_pages().  In this function, the "goto start_over" may result in
+continuous scanning of the swap partition.  If there is no cond_sched in
+scan_swap_map_slots(), it would cause a softlockup (I am not sure about
+this).
+
+WARN: soft lockup - CPU#11 stuck for 11s! [kswapd0:466]
+CPU: 11 PID: 466 Comm: kswapd@ Kdump: loaded Tainted: G
+dump backtrace+0x0/0x1le4
+show stack+0x20/@x2c
+dump_stack+0xd8/0x140
+watchdog print_info+0x48/0x54
+watchdog_process_before_softlockup+0x98/0xa0
+watchdog_timer_fn+0xlac/0x2d0
+hrtimer_rum_queues+0xb0/0x130
+hrtimer_interrupt+0x13c/0x3c0
+arch_timer_handler_virt+0x3c/0x50
+handLe_percpu_devid_irq+0x90/0x1f4
+handle domain irq+0x84/0x100
+gic_handle_irq+0x88/0x2b0
+e11 ira+0xhB/Bx140
+scan_swap_map_slots+0x678/0x890
+get_swap_pages+0x29c/0x440
+get_swap_page+0x120/0x2e0
+add_to_swap+UX2U/0XyC
+shrink_page_list+0x5d0/0x152c
+shrink_inactive_list+0xl6c/Bx500
+shrink_lruvec+0x270/0x304
+
+WARN: soft lockup - CPU#32 stuck for 11s! [stress-ng:309915]
+watchdog_timer_fn+0x1ac/0x2d0
+__run_hrtimer+0x98/0x2a0
+__hrtimer_run_queues+0xb0/0x130
+hrtimer_interrupt+0x13c/0x3c0
+arch_timer_handler_virt+0x3c/0x50
+handle_percpu_devid_irq+0x90/0x1f4
+__handle_domain_irq+0x84/0x100
+gic_handle_irq+0x88/0x2b0
+el1_irq+0xb8/0x140
+get_swap_pages+0x1e8/0x440
+get_swap_page+0x1c8/0x2e0
+add_to_swap+0x20/0x9c
+shrink_page_list+0x5d0/0x152c
+reclaim_pages+0x160/0x310
+madvise_cold_or_pageout_pte_range+0x7bc/0xe3c
+walk_pmd_range.isra.0+0xac/0x22c
+walk_pud_range+0xfc/0x1c0
+walk_pgd_range+0x158/0x1b0
+__walk_page_range+0x64/0x100
+walk_page_range+0x104/0x150
+
+Link: https://lkml.kernel.org/r/20221118133850.3360369-1-chenwandun@huawei.com
+Fixes: 048c27fd7281 ("[PATCH] swap: scan_swap_map latency breaks")
+Signed-off-by: Chen Wandun <chenwandun@huawei.com>
+Reviewed-by: "Huang, Ying" <ying.huang@intel.com>
+Cc: Hugh Dickins <hugh@veritas.com>
+Cc: Kefeng Wang <wangkefeng.wang@huawei.com>
+Cc: Nanyong Sun <sunnanyong@huawei.com>
+Cc: <xialonglong1@huawei.com>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/swapfile.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/mm/swapfile.c b/mm/swapfile.c
+index 5fc1237a9f214..72e481aacd5df 100644
+--- a/mm/swapfile.c
++++ b/mm/swapfile.c
+@@ -973,23 +973,23 @@ done:
+ scan:
+ 	spin_unlock(&si->lock);
+ 	while (++offset <= READ_ONCE(si->highest_bit)) {
+-		if (swap_offset_available_and_locked(si, offset))
+-			goto checks;
+ 		if (unlikely(--latency_ration < 0)) {
+ 			cond_resched();
+ 			latency_ration = LATENCY_LIMIT;
+ 			scanned_many = true;
+ 		}
++		if (swap_offset_available_and_locked(si, offset))
++			goto checks;
+ 	}
+ 	offset = si->lowest_bit;
+ 	while (offset < scan_base) {
+-		if (swap_offset_available_and_locked(si, offset))
+-			goto checks;
+ 		if (unlikely(--latency_ration < 0)) {
+ 			cond_resched();
+ 			latency_ration = LATENCY_LIMIT;
+ 			scanned_many = true;
+ 		}
++		if (swap_offset_available_and_locked(si, offset))
++			goto checks;
+ 		offset++;
+ 	}
+ 	spin_lock(&si->lock);
+-- 
+cgit 
+
+
+From ea4452de2ae987342fadbdd2c044034e6480daad Mon Sep 17 00:00:00 2001
+From: Qi Zheng <zhengqi.arch@bytedance.com>
+Date: Fri, 18 Nov 2022 18:00:11 +0800
+Subject: mm: fix unexpected changes to {failslab|fail_page_alloc}.attr
+
+When we specify __GFP_NOWARN, we only expect that no warnings will be
+issued for current caller.  But in the __should_failslab() and
+__should_fail_alloc_page(), the local GFP flags alter the global
+{failslab|fail_page_alloc}.attr, which is persistent and shared by all
+tasks.  This is not what we expected, let's fix it.
+
+[akpm@linux-foundation.org: unexport should_fail_ex()]
+Link: https://lkml.kernel.org/r/20221118100011.2634-1-zhengqi.arch@bytedance.com
+Fixes: 3f913fc5f974 ("mm: fix missing handler for __GFP_NOWARN")
+Signed-off-by: Qi Zheng <zhengqi.arch@bytedance.com>
+Reported-by: Dmitry Vyukov <dvyukov@google.com>
+Reviewed-by: Akinobu Mita <akinobu.mita@gmail.com>
+Reviewed-by: Jason Gunthorpe <jgg@nvidia.com>
+Cc: Akinobu Mita <akinobu.mita@gmail.com>
+Cc: Matthew Wilcox <willy@infradead.org>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ include/linux/fault-inject.h |  7 +++++--
+ lib/fault-inject.c           | 13 ++++++++-----
+ mm/failslab.c                | 12 ++++++++++--
+ mm/page_alloc.c              |  7 +++++--
+ 4 files changed, 28 insertions(+), 11 deletions(-)
+
+diff --git a/include/linux/fault-inject.h b/include/linux/fault-inject.h
+index 9f6e25467844a..444236dadcf08 100644
+--- a/include/linux/fault-inject.h
++++ b/include/linux/fault-inject.h
+@@ -20,7 +20,6 @@ struct fault_attr {
+ 	atomic_t space;
+ 	unsigned long verbose;
+ 	bool task_filter;
+-	bool no_warn;
+ 	unsigned long stacktrace_depth;
+ 	unsigned long require_start;
+ 	unsigned long require_end;
+@@ -32,6 +31,10 @@ struct fault_attr {
+ 	struct dentry *dname;
+ };
+ 
++enum fault_flags {
++	FAULT_NOWARN =	1 << 0,
++};
++
+ #define FAULT_ATTR_INITIALIZER {					\
+ 		.interval = 1,						\
+ 		.times = ATOMIC_INIT(1),				\
+@@ -40,11 +43,11 @@ struct fault_attr {
+ 		.ratelimit_state = RATELIMIT_STATE_INIT_DISABLED,	\
+ 		.verbose = 2,						\
+ 		.dname = NULL,						\
+-		.no_warn = false,					\
+ 	}
+ 
+ #define DECLARE_FAULT_ATTR(name) struct fault_attr name = FAULT_ATTR_INITIALIZER
+ int setup_fault_attr(struct fault_attr *attr, char *str);
++bool should_fail_ex(struct fault_attr *attr, ssize_t size, int flags);
+ bool should_fail(struct fault_attr *attr, ssize_t size);
+ 
+ #ifdef CONFIG_FAULT_INJECTION_DEBUG_FS
+diff --git a/lib/fault-inject.c b/lib/fault-inject.c
+index 96e092de5b723..adb2f9355ee62 100644
+--- a/lib/fault-inject.c
++++ b/lib/fault-inject.c
+@@ -41,9 +41,6 @@ EXPORT_SYMBOL_GPL(setup_fault_attr);
+ 
+ static void fail_dump(struct fault_attr *attr)
+ {
+-	if (attr->no_warn)
+-		return;
+-
+ 	if (attr->verbose > 0 && __ratelimit(&attr->ratelimit_state)) {
+ 		printk(KERN_NOTICE "FAULT_INJECTION: forcing a failure.\n"
+ 		       "name %pd, interval %lu, probability %lu, "
+@@ -103,7 +100,7 @@ static inline bool fail_stacktrace(struct fault_attr *attr)
+  * http://www.nongnu.org/failmalloc/
+  */
+ 
+-bool should_fail(struct fault_attr *attr, ssize_t size)
++bool should_fail_ex(struct fault_attr *attr, ssize_t size, int flags)
+ {
+ 	if (in_task()) {
+ 		unsigned int fail_nth = READ_ONCE(current->fail_nth);
+@@ -146,13 +143,19 @@ bool should_fail(struct fault_attr *attr, ssize_t size)
+ 		return false;
+ 
+ fail:
+-	fail_dump(attr);
++	if (!(flags & FAULT_NOWARN))
++		fail_dump(attr);
+ 
+ 	if (atomic_read(&attr->times) != -1)
+ 		atomic_dec_not_zero(&attr->times);
+ 
+ 	return true;
+ }
++
++bool should_fail(struct fault_attr *attr, ssize_t size)
++{
++	return should_fail_ex(attr, size, 0);
++}
+ EXPORT_SYMBOL_GPL(should_fail);
+ 
+ #ifdef CONFIG_FAULT_INJECTION_DEBUG_FS
+diff --git a/mm/failslab.c b/mm/failslab.c
+index 58df9789f1d22..ffc420c0e767f 100644
+--- a/mm/failslab.c
++++ b/mm/failslab.c
+@@ -16,6 +16,8 @@ static struct {
+ 
+ bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
+ {
++	int flags = 0;
++
+ 	/* No fault-injection for bootstrap cache */
+ 	if (unlikely(s == kmem_cache))
+ 		return false;
+@@ -30,10 +32,16 @@ bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
+ 	if (failslab.cache_filter && !(s->flags & SLAB_FAILSLAB))
+ 		return false;
+ 
++	/*
++	 * In some cases, it expects to specify __GFP_NOWARN
++	 * to avoid printing any information(not just a warning),
++	 * thus avoiding deadlocks. See commit 6b9dbedbe349 for
++	 * details.
++	 */
+ 	if (gfpflags & __GFP_NOWARN)
+-		failslab.attr.no_warn = true;
++		flags |= FAULT_NOWARN;
+ 
+-	return should_fail(&failslab.attr, s->object_size);
++	return should_fail_ex(&failslab.attr, s->object_size, flags);
+ }
+ 
+ static int __init setup_failslab(char *str)
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 218b28ee49ed3..6e60657875d32 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -3887,6 +3887,8 @@ __setup("fail_page_alloc=", setup_fail_page_alloc);
+ 
+ static bool __should_fail_alloc_page(gfp_t gfp_mask, unsigned int order)
+ {
++	int flags = 0;
++
+ 	if (order < fail_page_alloc.min_order)
+ 		return false;
+ 	if (gfp_mask & __GFP_NOFAIL)
+@@ -3897,10 +3899,11 @@ static bool __should_fail_alloc_page(gfp_t gfp_mask, unsigned int order)
+ 			(gfp_mask & __GFP_DIRECT_RECLAIM))
+ 		return false;
+ 
++	/* See comment in __should_failslab() */
+ 	if (gfp_mask & __GFP_NOWARN)
+-		fail_page_alloc.attr.no_warn = true;
++		flags |= FAULT_NOWARN;
+ 
+-	return should_fail(&fail_page_alloc.attr, 1 << order);
++	return should_fail_ex(&fail_page_alloc.attr, 1 << order, flags);
+ }
+ 
+ #ifdef CONFIG_FAULT_INJECTION_DEBUG_FS
+-- 
+cgit 
+
+
+From 81a70c21d9170de67a45843bdd627f4cce9c4215 Mon Sep 17 00:00:00 2001
+From: "Aneesh Kumar K.V" <aneesh.kumar@linux.ibm.com>
+Date: Fri, 18 Nov 2022 12:36:03 +0530
+Subject: mm/cgroup/reclaim: fix dirty pages throttling on cgroup v1
+
+balance_dirty_pages doesn't do the required dirty throttling on cgroupv1.
+See commit 9badce000e2c ("cgroup, writeback: don't enable cgroup writeback
+on traditional hierarchies").  Instead, the kernel depends on writeback
+throttling in shrink_folio_list to achieve the same goal.  With large
+memory systems, the flusher may not be able to writeback quickly enough
+such that we will start finding pages in the shrink_folio_list already in
+writeback.  Hence for cgroupv1 let's do a reclaim throttle after waking up
+the flusher.
+
+The below test which used to fail on a 256GB system completes till the the
+file system is full with this change.
+
+root@lp2:/sys/fs/cgroup/memory# mkdir test
+root@lp2:/sys/fs/cgroup/memory# cd test/
+root@lp2:/sys/fs/cgroup/memory/test# echo 120M > memory.limit_in_bytes
+root@lp2:/sys/fs/cgroup/memory/test# echo $$ > tasks
+root@lp2:/sys/fs/cgroup/memory/test# dd if=/dev/zero of=/home/kvaneesh/test bs=1M
+Killed
+
+Link: https://lkml.kernel.org/r/20221118070603.84081-1-aneesh.kumar@linux.ibm.com
+Signed-off-by: Aneesh Kumar K.V <aneesh.kumar@linux.ibm.com>
+Suggested-by: Johannes Weiner <hannes@cmpxchg.org>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Cc: Tejun Heo <tj@kernel.org>
+Cc: zefan li <lizefan.x@bytedance.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/vmscan.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index e36666679e1c0..026199c047e0e 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -2514,8 +2514,20 @@ static unsigned long shrink_inactive_list(unsigned long nr_to_scan,
+ 	 * the flushers simply cannot keep up with the allocation
+ 	 * rate. Nudge the flusher threads in case they are asleep.
+ 	 */
+-	if (stat.nr_unqueued_dirty == nr_taken)
++	if (stat.nr_unqueued_dirty == nr_taken) {
+ 		wakeup_flusher_threads(WB_REASON_VMSCAN);
++		/*
++		 * For cgroupv1 dirty throttling is achieved by waking up
++		 * the kernel flusher here and later waiting on folios
++		 * which are in writeback to finish (see shrink_folio_list()).
++		 *
++		 * Flusher may not be able to issue writeback quickly
++		 * enough for cgroupv1 writeback throttling to work
++		 * on a large system.
++		 */
++		if (!writeback_throttling_sane(sc))
++			reclaim_throttle(pgdat, VMSCAN_THROTTLE_WRITEBACK);
++	}
+ 
+ 	sc->nr.dirty += stat.nr_dirty;
+ 	sc->nr.congested += stat.nr_congested;
+-- 
+cgit 
+
+
+From 512c5ca01a3610ab14ff6309db363de51f1c13a6 Mon Sep 17 00:00:00 2001
+From: Chen Zhongjin <chenzhongjin@huawei.com>
+Date: Fri, 18 Nov 2022 14:33:04 +0800
+Subject: nilfs2: fix nilfs_sufile_mark_dirty() not set segment usage as dirty
+
+When extending segments, nilfs_sufile_alloc() is called to get an
+unassigned segment, then mark it as dirty to avoid accidentally allocating
+the same segment in the future.
+
+But for some special cases such as a corrupted image it can be unreliable.
+If such corruption of the dirty state of the segment occurs, nilfs2 may
+reallocate a segment that is in use and pick the same segment for writing
+twice at the same time.
+
+This will cause the problem reported by syzkaller:
+https://syzkaller.appspot.com/bug?id=c7c4748e11ffcc367cef04f76e02e931833cbd24
+
+This case started with segbuf1.segnum = 3, nextnum = 4 when constructed.
+It supposed segment 4 has already been allocated and marked as dirty.
+
+However the dirty state was corrupted and segment 4 usage was not dirty.
+For the first time nilfs_segctor_extend_segments() segment 4 was allocated
+again, which made segbuf2 and next segbuf3 had same segment 4.
+
+sb_getblk() will get same bh for segbuf2 and segbuf3, and this bh is added
+to both buffer lists of two segbuf.  It makes the lists broken which
+causes NULL pointer dereference.
+
+Fix the problem by setting usage as dirty every time in
+nilfs_sufile_mark_dirty(), which is called during constructing current
+segment to be written out and before allocating next segment.
+
+[chenzhongjin@huawei.com: add lock protection per Ryusuke]
+  Link: https://lkml.kernel.org/r/20221121091141.214703-1-chenzhongjin@huawei.com
+Link: https://lkml.kernel.org/r/20221118063304.140187-1-chenzhongjin@huawei.com
+Fixes: 9ff05123e3bf ("nilfs2: segment constructor")
+Signed-off-by: Chen Zhongjin <chenzhongjin@huawei.com>
+Reported-by: <syzbot+77e4f0...@syzkaller.appspotmail.com>
+Reported-by: Liu Shixin <liushixin2@huawei.com>
+Acked-by: Ryusuke Konishi <konishi.ryusuke@gmail.com>
+Tested-by: Ryusuke Konishi <konishi.ryusuke@gmail.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ fs/nilfs2/sufile.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/fs/nilfs2/sufile.c b/fs/nilfs2/sufile.c
+index 77ff8e95421fa..dc359b56fdfac 100644
+--- a/fs/nilfs2/sufile.c
++++ b/fs/nilfs2/sufile.c
+@@ -495,14 +495,22 @@ void nilfs_sufile_do_free(struct inode *sufile, __u64 segnum,
+ int nilfs_sufile_mark_dirty(struct inode *sufile, __u64 segnum)
+ {
+ 	struct buffer_head *bh;
++	void *kaddr;
++	struct nilfs_segment_usage *su;
+ 	int ret;
+ 
++	down_write(&NILFS_MDT(sufile)->mi_sem);
+ 	ret = nilfs_sufile_get_segment_usage_block(sufile, segnum, 0, &bh);
+ 	if (!ret) {
+ 		mark_buffer_dirty(bh);
+ 		nilfs_mdt_mark_dirty(sufile);
++		kaddr = kmap_atomic(bh->b_page);
++		su = nilfs_sufile_block_get_segment_usage(sufile, segnum, bh, kaddr);
++		nilfs_segment_usage_set_dirty(su);
++		kunmap_atomic(kaddr);
+ 		brelse(bh);
+ 	}
++	up_write(&NILFS_MDT(sufile)->mi_sem);
+ 	return ret;
+ }
+ 
+-- 
+cgit 
+
+
+From de3db3f883a82c4800f4af0ae2cc3b96a408ee9b Mon Sep 17 00:00:00 2001
+From: Li Hua <hucool.lihua@huawei.com>
+Date: Mon, 21 Nov 2022 11:06:20 +0800
+Subject: test_kprobes: fix implicit declaration error of test_kprobes
+
+If KPROBES_SANITY_TEST and ARCH_CORRECT_STACKTRACE_ON_KRETPROBE is enabled, but
+STACKTRACE is not set. Build failed as below:
+
+lib/test_kprobes.c: In function `stacktrace_return_handler':
+lib/test_kprobes.c:228:8: error: implicit declaration of function `stack_trace_save'; did you mean `stacktrace_driver'? [-Werror=implicit-function-declaration]
+  ret = stack_trace_save(stack_buf, STACK_BUF_SIZE, 0);
+        ^~~~~~~~~~~~~~~~
+        stacktrace_driver
+cc1: all warnings being treated as errors
+scripts/Makefile.build:250: recipe for target 'lib/test_kprobes.o' failed
+make[2]: *** [lib/test_kprobes.o] Error 1
+
+To fix this error, Select STACKTRACE if ARCH_CORRECT_STACKTRACE_ON_KRETPROBE is enabled.
+
+Link: https://lkml.kernel.org/r/20221121030620.63181-1-hucool.lihua@huawei.com
+Fixes: 1f6d3a8f5e39 ("kprobes: Add a test case for stacktrace from kretprobe handler")
+Signed-off-by: Li Hua <hucool.lihua@huawei.com>
+Acked-by: Masami Hiramatsu (Google) <mhiramat@kernel.org>
+Cc: Steven Rostedt (VMware) <rostedt@goodmis.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ lib/Kconfig.debug | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/lib/Kconfig.debug b/lib/Kconfig.debug
+index c3c0b077ade33..a1005415f0f48 100644
+--- a/lib/Kconfig.debug
++++ b/lib/Kconfig.debug
+@@ -2107,6 +2107,7 @@ config KPROBES_SANITY_TEST
+ 	depends on DEBUG_KERNEL
+ 	depends on KPROBES
+ 	depends on KUNIT
++	select STACKTRACE if ARCH_CORRECT_STACKTRACE_ON_KRETPROBE
+ 	default KUNIT_ALL_TESTS
+ 	help
+ 	  This option provides for testing basic kprobes functionality on
+-- 
+cgit 
+
 
