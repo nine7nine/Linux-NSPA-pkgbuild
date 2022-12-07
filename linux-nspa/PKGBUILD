@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=32
+pkgrel=35
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -139,6 +139,9 @@ source=(
   "0051-workqueue-destroy_worker_vs_isolated_CPUs.patch"
   "0052-timers-Provide_timer_shutdown_sync.patch"
   "0053-sched-Fix-use-after-free_in_user_dup_user_cpus_ptr.patch"
+  "0054-sched-core-Fix_arch_scale_freq_tick_on_tickless_systems.patch"
+  "0055-Add_support_for_epoll_min_wait.patch"
+  "0056-mm-multi-gen-LRU-memcg-LRU.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -539,5 +542,8 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '6fde851ce77d776a6b3ebde6f7c242cf394d36f87c3954b0fd1ffdbaa86aeef0'
             '3e77a086f598ae68b8271aff793d6bc0c4734c62a7bd394e1942925065b406d6'
             '70ab013a3a3d771767ee9cdfd5de7c7bc1043ab70626068b01c1a516cfb074b9'
-            '870bd03dada88a2d2bca40600f8b36bf3a8a0aacce8d96f72a682a572a309de1')
+            '870bd03dada88a2d2bca40600f8b36bf3a8a0aacce8d96f72a682a572a309de1'
+            '86b19ca560760855d9d9c69266c3c93bc9f35cacabe57d8bb88284d846687edb'
+            '9fca36d6492c6ab4244f197f3cf5771d50b8bdad6061987a36bdc9a91cec0aa8'
+            '1fbba2faa29189509376e2892f0cc25cd7760f46029e8c4633af6ae537e4202b')
 
