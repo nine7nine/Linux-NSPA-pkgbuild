@@ -1,0 +1,165 @@
+Subject: [PATCH-tip] sched: Fix use-after-free bug in dup_user_cpus_ptr()
+
+Since commit 07ec77a1d4e8 ("sched: Allow task CPU affinity to be
+restricted on asymmetric systems"), the setting and clearing of
+user_cpus_ptr are done under pi_lock for arm64 architecture. However,
+dup_user_cpus_ptr() accesses user_cpus_ptr without any lock
+protection. When racing with the clearing of user_cpus_ptr in
+__set_cpus_allowed_ptr_locked(), it can lead to user-after-free and
+double-free in arm64 kernel.
+
+Commit 8f9ea86fdf99 ("sched: Always preserve the user requested
+cpumask") fixes this problem as user_cpus_ptr, once set, will never
+be cleared in a task's lifetime. However, this bug was re-introduced
+in commit 851a723e45d1 ("sched: Always clear user_cpus_ptr in
+do_set_cpus_allowed()") which allows the clearing of user_cpus_ptr in
+do_set_cpus_allowed(). This time, it will affect all arches.
+
+Fix this bug by always clearing the user_cpus_ptr of the newly
+cloned/forked task before the copying process starts and check the
+user_cpus_ptr state of the source task under pi_lock.
+
+Note to stable, this patch won't be applicable to stable releases.
+Just copy the new dup_user_cpus_ptr() function over.
+
+Fixes: 07ec77a1d4e8 ("sched: Allow task CPU affinity to be restricted on asymmetric systems")
+Fixes: 851a723e45d1 ("sched: Always clear user_cpus_ptr in do_set_cpus_allowed()")
+CC: stable@vger.kernel.org
+Reported-by: David Wang  <wangbiao3@xiaomi.com>
+Signed-off-by: Waiman Long <longman@redhat.com>
+---
+ kernel/sched/core.c | 32 ++++++++++++++++++++++++++++----
+ 1 file changed, 28 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 8df51b08bb38..f2b75faaf71a 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2624,19 +2624,43 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
+ int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
+ 		      int node)
+ {
++	cpumask_t *user_mask;
+ 	unsigned long flags;
+ 
++	/*
++	 * Always clear dst->user_cpus_ptr first as their user_cpus_ptr's
++	 * may differ by now due to racing.
++	 */
++	dst->user_cpus_ptr = NULL;
++
++	/*
++	 * This check is racy and losing the race is a valid situation.
++	 * It is not worth the extra overhead of taking the pi_lock on
++	 * every fork/clone.
++	 */
+ 	if (!src->user_cpus_ptr)
+ 		return 0;
+ 
+-	dst->user_cpus_ptr = kmalloc_node(cpumask_size(), GFP_KERNEL, node);
+-	if (!dst->user_cpus_ptr)
++	user_mask = kmalloc_node(cpumask_size(), GFP_KERNEL, node);
++	if (!user_mask)
+ 		return -ENOMEM;
+ 
+-	/* Use pi_lock to protect content of user_cpus_ptr */
++	/*
++	 * Use pi_lock to protect content of user_cpus_ptr
++	 *
++	 * Though unlikely, user_cpus_ptr can be reset to NULL by a concurrent
++	 * do_set_cpus_allowed().
++	 */
+ 	raw_spin_lock_irqsave(&src->pi_lock, flags);
+-	cpumask_copy(dst->user_cpus_ptr, src->user_cpus_ptr);
++	if (src->user_cpus_ptr) {
++		swap(dst->user_cpus_ptr, user_mask);
++		cpumask_copy(dst->user_cpus_ptr, src->user_cpus_ptr);
++	}
+ 	raw_spin_unlock_irqrestore(&src->pi_lock, flags);
++
++	if (unlikely(user_mask))
++		kfree(user_mask);
++
+ 	return 0;
+ }
+ 
+-- 
+2.31.1
+
+Subject: [PATCH-tip v2] sched: Use kfree_rcu() in do_set_cpus_allowed()
+Commit 851a723e45d1 ("sched: Always clear user_cpus_ptr in
+do_set_cpus_allowed()") may call kfree() if user_cpus_ptr was previously
+set. Unfortunately, some of the callers of do_set_cpus_allowed()
+may have pi_lock held when calling it. So the following splats may be
+printed especially when running with a PREEMPT_RT kernel:
+
+   WARNING: possible circular locking dependency detected
+   BUG: sleeping function called from invalid context
+
+To avoid these problems, kfree_rcu() is used instead. An internal
+cpumask_rcuhead union is created for the sole purpose of facilitating
+the use of kfree_rcu() to free the cpumask.
+
+Fixes: 851a723e45d1 ("sched: Always clear user_cpus_ptr in do_set_cpus_allowed()")
+Suggested-by: Peter Zijlstra <peterz@infradead.org>
+Signed-off-by: Waiman Long <longman@redhat.com>
+---
+ kernel/sched/core.c | 21 ++++++++++++++++++---
+ 1 file changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index f7c5253bfd21..bf9066b4f481 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2593,6 +2593,11 @@ __do_set_cpus_allowed(struct task_struct *p, struct affinity_context *ctx)
+ 		set_next_task(rq, p);
+ }
+ 
++union cpumask_rcuhead {
++	void *cpumask;
++	struct rcu_head rcu;
++};
++
+ /*
+  * Used for kthread_bind() and select_fallback_rq(), in both cases the user
+  * affinity (if any) should be destroyed too.
+@@ -2606,7 +2611,13 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
+ 	};
+ 
+ 	__do_set_cpus_allowed(p, &ac);
+-	kfree(ac.user_mask);
++
++	/*
++	 * Because this is called with p->pi_lock held, it is not possible
++	 * to use kfree() here (when PREEMPT_RT=y), therefore punt to using
++	 * kfree_rcu().
++	 */
++	kfree_rcu((union cpumask_rcuhead *)ac.user_mask, rcu);
+ }
+ 
+ int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
+@@ -8220,7 +8231,7 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
+ 	struct affinity_context ac;
+ 	struct cpumask *user_mask;
+ 	struct task_struct *p;
+-	int retval;
++	int retval, size;
+ 
+ 	rcu_read_lock();
+ 
+@@ -8253,7 +8264,11 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
+ 	if (retval)
+ 		goto out_put_task;
+ 
+-	user_mask = kmalloc(cpumask_size(), GFP_KERNEL);
++	/*
++	 * See do_set_cpus_allowed() for the rcu_head usage.
++	 */
++	size = max_t(int, cpumask_size(), sizeof(union cpumask_rcuhead));
++	user_mask = kmalloc(size, GFP_KERNEL);
+ 	if (!user_mask) {
+ 		retval = -ENOMEM;
+ 		goto out_put_task;
+-- 
+2.31.1
+

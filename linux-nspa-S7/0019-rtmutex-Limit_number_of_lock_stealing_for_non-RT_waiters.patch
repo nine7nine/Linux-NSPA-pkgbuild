@@ -1,0 +1,101 @@
+From: Waiman Long <longman@redhat.com>
+To: Peter Zijlstra <peterz@infradead.org>,
+	Ingo Molnar <mingo@redhat.com>, Will Deacon <will@kernel.org>,
+	Boqun Feng <boqun.feng@gmail.com>
+Cc: linux-kernel@vger.kernel.org,
+	Thomas Gleixner <tglx@linutronix.de>,
+	Sebastian Andrzej Siewior <bigeasy@linutronix.de>,
+	Juri Lelli <juri.lelli@redhat.com>,
+	Mike Stowell <mstowell@redhat.com>,
+	Waiman Long <longman@redhat.com>
+Subject: [PATCH v3] locking/rtmutex: Limit # of lock stealing for non-RT waiters
+Date: Wed,  6 Jul 2022 09:59:16 -0400	[thread overview]
+Message-ID: <20220706135916.980580-1-longman@redhat.com> (raw)
+
+Commit 48eb3f4fcfd3 ("locking/rtmutex: Implement equal priority lock
+stealing") allows unlimited number of lock stealing's for non-RT
+tasks. That can lead to lock starvation of non-RT top waiter tasks if
+there is a constant incoming stream of non-RT lockers. This can cause
+rcu_preempt self-detected stall or even task lockup in PREEMPT_RT kernel.
+For example,
+
+[77107.424943] rcu: INFO: rcu_preempt self-detected stall on CPU
+[ 1249.921363] INFO: task systemd:2178 blocked for more than 622 seconds.
+
+Avoiding this problem and ensuring forward progress by limiting the
+number of times that a lock can be stolen from each waiter. This patch
+sets a threshold of 32. That number is arbitrary and can be changed
+if needed.
+
+Fixes: 48eb3f4fcfd3 ("locking/rtmutex: Implement equal priority lock stealing")
+Signed-off-by: Waiman Long <longman@redhat.com>
+---
+ kernel/locking/rtmutex.c        | 9 ++++++---
+ kernel/locking/rtmutex_common.h | 8 ++++++++
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+ [v3: Increase threshold to 32 and add rcu_preempt self-detected stall]
+ 
+diff --git a/kernel/locking/rtmutex.c b/kernel/locking/rtmutex.c
+index 7779ee8abc2a..bdddb3dc36c2 100644
+--- a/kernel/locking/rtmutex.c
++++ b/kernel/locking/rtmutex.c
+@@ -359,10 +359,13 @@ static inline bool rt_mutex_steal(struct rt_mutex_waiter *waiter,
+ 	if (rt_prio(waiter->prio) || dl_prio(waiter->prio))
+ 		return false;
+ 
+-	return rt_mutex_waiter_equal(waiter, top_waiter);
+-#else
+-	return false;
++	if (rt_mutex_waiter_equal(waiter, top_waiter) &&
++	   (top_waiter->nr_steals < RT_MUTEX_LOCK_STEAL_MAX)) {
++		top_waiter->nr_steals++;
++		return true;
++	}
+ #endif
++	return false;
+ }
+ 
+ #define __node_2_waiter(node) \
+diff --git a/kernel/locking/rtmutex_common.h b/kernel/locking/rtmutex_common.h
+index c47e8361bfb5..d5eeba955f07 100644
+--- a/kernel/locking/rtmutex_common.h
++++ b/kernel/locking/rtmutex_common.h
+@@ -26,6 +26,7 @@
+  * @task:		task reference to the blocked task
+  * @lock:		Pointer to the rt_mutex on which the waiter blocks
+  * @wake_state:		Wakeup state to use (TASK_NORMAL or TASK_RTLOCK_WAIT)
++ * @nr_steals:		Number of times the lock is stolen
+  * @prio:		Priority of the waiter
+  * @deadline:		Deadline of the waiter if applicable
+  * @ww_ctx:		WW context pointer
+@@ -36,11 +37,17 @@ struct rt_mutex_waiter {
+ 	struct task_struct	*task;
+ 	struct rt_mutex_base	*lock;
+ 	unsigned int		wake_state;
++	unsigned int		nr_steals;
+ 	int			prio;
+ 	u64			deadline;
+ 	struct ww_acquire_ctx	*ww_ctx;
+ };
+ 
++/*
++ * The maximum number of times where lock can be stolen per waiter.
++ */
++#define	RT_MUTEX_LOCK_STEAL_MAX	64
++
+ /**
+  * rt_wake_q_head - Wrapper around regular wake_q_head to support
+  *		    "sleeping" spinlocks on RT
+@@ -194,6 +201,7 @@ static inline void rt_mutex_init_waiter(struct rt_mutex_waiter *waiter)
+ 	RB_CLEAR_NODE(&waiter->tree_entry);
+ 	waiter->wake_state = TASK_NORMAL;
+ 	waiter->task = NULL;
++	waiter->nr_steals = 0;
+ }
+ 
+ static inline void rt_mutex_init_rtlock_waiter(struct rt_mutex_waiter *waiter)
+-- 
+2.31.1
+
+

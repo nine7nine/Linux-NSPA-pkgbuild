@@ -1,0 +1,5109 @@
+From 740cf8a760b73e8375bfb4bedcbe9746183350f9 Mon Sep 17 00:00:00 2001
+From: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Date: Fri, 29 Jul 2022 13:13:03 +0200
+Subject: sched/core: Introduce sched_asym_cpucap_active()
+
+Create an inline helper for conditional code to be only executed on
+asymmetric CPU capacity systems. This makes these (currently ~10 and
+future) conditions a lot more readable.
+
+Signed-off-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lore.kernel.org/r/20220729111305.1275158-2-dietmar.eggemann@arm.com
+---
+ kernel/sched/cpudeadline.c | 2 +-
+ kernel/sched/deadline.c    | 4 ++--
+ kernel/sched/fair.c        | 8 ++++----
+ kernel/sched/rt.c          | 4 ++--
+ kernel/sched/sched.h       | 5 +++++
+ 5 files changed, 14 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/sched/cpudeadline.c b/kernel/sched/cpudeadline.c
+index 02d970a879edd..57c92d751bcd7 100644
+--- a/kernel/sched/cpudeadline.c
++++ b/kernel/sched/cpudeadline.c
+@@ -123,7 +123,7 @@ int cpudl_find(struct cpudl *cp, struct task_struct *p,
+ 		unsigned long cap, max_cap = 0;
+ 		int cpu, max_cpu = -1;
+ 
+-		if (!static_branch_unlikely(&sched_asym_cpucapacity))
++		if (!sched_asym_cpucap_active())
+ 			return 1;
+ 
+ 		/* Ensure the capacity of the CPUs fits the task. */
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 0ab79d819a0d6..8bebc36a1b71b 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -144,7 +144,7 @@ static inline unsigned long __dl_bw_capacity(int i)
+  */
+ static inline unsigned long dl_bw_capacity(int i)
+ {
+-	if (!static_branch_unlikely(&sched_asym_cpucapacity) &&
++	if (!sched_asym_cpucap_active() &&
+ 	    capacity_orig_of(i) == SCHED_CAPACITY_SCALE) {
+ 		return dl_bw_cpus(i) << SCHED_CAPACITY_SHIFT;
+ 	} else {
+@@ -1849,7 +1849,7 @@ select_task_rq_dl(struct task_struct *p, int cpu, int flags)
+ 	 * Take the capacity of the CPU into account to
+ 	 * ensure it fits the requirement of the task.
+ 	 */
+-	if (static_branch_unlikely(&sched_asym_cpucapacity))
++	if (sched_asym_cpucap_active())
+ 		select_rq |= !dl_task_fits_capacity(p, cpu);
+ 
+ 	if (select_rq) {
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 914096c5b1ae1..41486d9b09111 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -4262,7 +4262,7 @@ static inline int task_fits_capacity(struct task_struct *p,
+ 
+ static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
+ {
+-	if (!static_branch_unlikely(&sched_asym_cpucapacity))
++	if (!sched_asym_cpucap_active())
+ 		return;
+ 
+ 	if (!p || p->nr_cpus_allowed == 1) {
+@@ -6506,7 +6506,7 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
+ 
+ static inline bool asym_fits_capacity(unsigned long task_util, int cpu)
+ {
+-	if (static_branch_unlikely(&sched_asym_cpucapacity))
++	if (sched_asym_cpucap_active())
+ 		return fits_capacity(task_util, capacity_of(cpu));
+ 
+ 	return true;
+@@ -6526,7 +6526,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	 * On asymmetric system, update task utilization because we will check
+ 	 * that the task fits with cpu's capacity.
+ 	 */
+-	if (static_branch_unlikely(&sched_asym_cpucapacity)) {
++	if (sched_asym_cpucap_active()) {
+ 		sync_entity_load_avg(&p->se);
+ 		task_util = uclamp_task_util(p);
+ 	}
+@@ -6580,7 +6580,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	 * For asymmetric CPU capacity systems, our domain of interest is
+ 	 * sd_asym_cpucapacity rather than sd_llc.
+ 	 */
+-	if (static_branch_unlikely(&sched_asym_cpucapacity)) {
++	if (sched_asym_cpucap_active()) {
+ 		sd = rcu_dereference(per_cpu(sd_asym_cpucapacity, target));
+ 		/*
+ 		 * On an asymmetric CPU capacity system where an exclusive
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 55f39c8f42032..054b6711e9619 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -509,7 +509,7 @@ static inline bool rt_task_fits_capacity(struct task_struct *p, int cpu)
+ 	unsigned int cpu_cap;
+ 
+ 	/* Only heterogeneous systems can benefit from this check */
+-	if (!static_branch_unlikely(&sched_asym_cpucapacity))
++	if (!sched_asym_cpucap_active())
+ 		return true;
+ 
+ 	min_cap = uclamp_eff_value(p, UCLAMP_MIN);
+@@ -1897,7 +1897,7 @@ static int find_lowest_rq(struct task_struct *task)
+ 	 * If we're on asym system ensure we consider the different capacities
+ 	 * of the CPUs when searching for the lowest_mask.
+ 	 */
+-	if (static_branch_unlikely(&sched_asym_cpucapacity)) {
++	if (sched_asym_cpucap_active()) {
+ 
+ 		ret = cpupri_find_fitness(&task_rq(task)->rd->cpupri,
+ 					  task, lowest_mask,
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index aad7f5ee9666c..86fc36069f382 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1813,6 +1813,11 @@ DECLARE_PER_CPU(struct sched_domain __rcu *, sd_asym_packing);
+ DECLARE_PER_CPU(struct sched_domain __rcu *, sd_asym_cpucapacity);
+ extern struct static_key_false sched_asym_cpucapacity;
+ 
++static __always_inline bool sched_asym_cpucap_active(void)
++{
++	return static_branch_unlikely(&sched_asym_cpucapacity);
++}
++
+ struct sched_group_capacity {
+ 	atomic_t		ref;
+ 	/*
+-- 
+cgit 
+
+
+From 6092478bcbf4021d3c52144bd456378de043fe58 Mon Sep 17 00:00:00 2001
+From: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Date: Fri, 29 Jul 2022 13:13:04 +0200
+Subject: sched/deadline: Make dl_cpuset_cpumask_can_shrink() capacity-aware
+
+dl_cpuset_cpumask_can_shrink() is used to validate whether there is
+still enough CPU capacity for DL tasks in the reduced cpuset.
+
+Currently it still operates on `# remaining CPUs in the cpuset` (1).
+Change this to use the already capacity-aware DL admission control
+__dl_overflow() for the `cpumask can shrink` test.
+
+  dl_b->bw = sched_rt_period << BW_SHIFT / sched_rt_period
+
+  dl_b->bw * (1) >= currently allocated bandwidth in root_domain (rd)
+
+  Replace (1) w/ `\Sum CPU capacity in rd >> SCHED_CAPACITY_SHIFT`
+
+Adapt __dl_bw_capacity() to take a cpumask instead of a CPU number
+argument so that `rd->span` and `cpumask of the reduced cpuset` can
+be used here.
+
+Signed-off-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lore.kernel.org/r/20220729111305.1275158-3-dietmar.eggemann@arm.com
+---
+ kernel/sched/deadline.c | 24 +++++++++++-------------
+ 1 file changed, 11 insertions(+), 13 deletions(-)
+
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 8bebc36a1b71b..1d9c90958baa1 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -124,15 +124,12 @@ static inline int dl_bw_cpus(int i)
+ 	return cpus;
+ }
+ 
+-static inline unsigned long __dl_bw_capacity(int i)
++static inline unsigned long __dl_bw_capacity(const struct cpumask *mask)
+ {
+-	struct root_domain *rd = cpu_rq(i)->rd;
+ 	unsigned long cap = 0;
++	int i;
+ 
+-	RCU_LOCKDEP_WARN(!rcu_read_lock_sched_held(),
+-			 "sched RCU must be held");
+-
+-	for_each_cpu_and(i, rd->span, cpu_active_mask)
++	for_each_cpu_and(i, mask, cpu_active_mask)
+ 		cap += capacity_orig_of(i);
+ 
+ 	return cap;
+@@ -148,7 +145,10 @@ static inline unsigned long dl_bw_capacity(int i)
+ 	    capacity_orig_of(i) == SCHED_CAPACITY_SCALE) {
+ 		return dl_bw_cpus(i) << SCHED_CAPACITY_SHIFT;
+ 	} else {
+-		return __dl_bw_capacity(i);
++		RCU_LOCKDEP_WARN(!rcu_read_lock_sched_held(),
++				 "sched RCU must be held");
++
++		return __dl_bw_capacity(cpu_rq(i)->rd->span);
+ 	}
+ }
+ 
+@@ -3007,17 +3007,15 @@ bool dl_param_changed(struct task_struct *p, const struct sched_attr *attr)
+ int dl_cpuset_cpumask_can_shrink(const struct cpumask *cur,
+ 				 const struct cpumask *trial)
+ {
+-	int ret = 1, trial_cpus;
++	unsigned long flags, cap;
+ 	struct dl_bw *cur_dl_b;
+-	unsigned long flags;
++	int ret = 1;
+ 
+ 	rcu_read_lock_sched();
+ 	cur_dl_b = dl_bw_of(cpumask_any(cur));
+-	trial_cpus = cpumask_weight(trial);
+-
++	cap = __dl_bw_capacity(trial);
+ 	raw_spin_lock_irqsave(&cur_dl_b->lock, flags);
+-	if (cur_dl_b->bw != -1 &&
+-	    cur_dl_b->bw * trial_cpus < cur_dl_b->total_bw)
++	if (__dl_overflow(cur_dl_b, cap, 0, 0))
+ 		ret = 0;
+ 	raw_spin_unlock_irqrestore(&cur_dl_b->lock, flags);
+ 	rcu_read_unlock_sched();
+-- 
+cgit 
+
+
+From b3f53daacc74c0ca0922e14a8cb793cb2db4c6d1 Mon Sep 17 00:00:00 2001
+From: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Date: Fri, 29 Jul 2022 13:13:05 +0200
+Subject: sched/deadline: Use sched_dl_entity's dl_density in
+ dl_task_fits_capacity()
+
+Save a multiplication in dl_task_fits_capacity() by using already
+maintained per-sched_dl_entity (i.e. per-task) `dl_runtime/dl_deadline`
+(dl_density).
+
+  cap_scale(dl_deadline, cap) >= dl_runtime
+
+  dl_deadline * cap >> SCHED_CAPACITY_SHIFT >= dl_runtime
+
+  cap >= dl_runtime << SCHED_CAPACITY_SHIFT / dl_deadline
+
+  cap >= (dl_runtime << BW_SHIFT / dl_deadline) >>
+				BW_SHIFT - SCHED_CAPACITY_SHIFT
+
+  cap >= dl_density >> BW_SHIFT - SCHED_CAPACITY_SHIFT
+
+__sched_setscheduler()->__checkparam_dl() ensures that the 2 corner
+cases (if conditions) `runtime == RUNTIME_INF (-1)` and `period == 0`
+of to_ratio(deadline, runtime) are not met when setting dl_density in
+__sched_setscheduler()-> __setscheduler_params()->__setparam_dl().
+
+Signed-off-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lore.kernel.org/r/20220729111305.1275158-4-dietmar.eggemann@arm.com
+---
+ kernel/sched/sched.h | 30 +++++++++++++++---------------
+ 1 file changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 86fc36069f382..3ccd35c22f0fd 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -320,21 +320,6 @@ struct dl_bw {
+ 	u64			total_bw;
+ };
+ 
+-/*
+- * Verify the fitness of task @p to run on @cpu taking into account the
+- * CPU original capacity and the runtime/deadline ratio of the task.
+- *
+- * The function will return true if the CPU original capacity of the
+- * @cpu scaled by SCHED_CAPACITY_SCALE >= runtime/deadline ratio of the
+- * task and false otherwise.
+- */
+-static inline bool dl_task_fits_capacity(struct task_struct *p, int cpu)
+-{
+-	unsigned long cap = arch_scale_cpu_capacity(cpu);
+-
+-	return cap_scale(p->dl.dl_deadline, cap) >= p->dl.dl_runtime;
+-}
+-
+ extern void init_dl_bw(struct dl_bw *dl_b);
+ extern int  sched_dl_global_validate(void);
+ extern void sched_dl_do_global(void);
+@@ -2899,6 +2884,21 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
+ 				 enum cpu_util_type type,
+ 				 struct task_struct *p);
+ 
++/*
++ * Verify the fitness of task @p to run on @cpu taking into account the
++ * CPU original capacity and the runtime/deadline ratio of the task.
++ *
++ * The function will return true if the original capacity of @cpu is
++ * greater than or equal to task's deadline density right shifted by
++ * (BW_SHIFT - SCHED_CAPACITY_SHIFT) and false otherwise.
++ */
++static inline bool dl_task_fits_capacity(struct task_struct *p, int cpu)
++{
++	unsigned long cap = arch_scale_cpu_capacity(cpu);
++
++	return cap >= p->dl.dl_density >> (BW_SHIFT - SCHED_CAPACITY_SHIFT);
++}
++
+ static inline unsigned long cpu_bw_dl(struct rq *rq)
+ {
+ 	return (rq->dl.running_bw * SCHED_CAPACITY_SCALE) >> BW_SHIFT;
+-- 
+cgit 
+
+
+From 0f03d6805bfc454279169a1460abb3f6b3db317f Mon Sep 17 00:00:00 2001
+From: Zhen Lei <thunder.leizhen@huawei.com>
+Date: Wed, 27 Jul 2022 14:08:19 +0800
+Subject: sched/debug: Print each field value left-aligned in sched_show_task()
+
+Currently, the values of some fields are printed right-aligned, causing
+the field value to be next to the next field name rather than next to its
+own field name. So print each field value left-aligned, to make it more
+readable.
+
+ Before:
+	stack:    0 pid:  307 ppid:     2 flags:0x00000008
+ After:
+	stack:0     pid:308   ppid:2      flags:0x0000000a
+
+This also makes them print in the same style as the other two fields:
+
+	task:demo0           state:R  running task
+
+Signed-off-by: Zhen Lei <thunder.leizhen@huawei.com>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Reviewed-by: Valentin Schneider <vschneid@redhat.com>
+Link: https://lore.kernel.org/r/20220727060819.1085-1-thunder.leizhen@huawei.com
+---
+ kernel/sched/core.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 5555e49c4e120..6785e3be07692 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -8825,7 +8825,7 @@ void sched_show_task(struct task_struct *p)
+ 	if (pid_alive(p))
+ 		ppid = task_pid_nr(rcu_dereference(p->real_parent));
+ 	rcu_read_unlock();
+-	pr_cont(" stack:%5lu pid:%5d ppid:%6d flags:0x%08lx\n",
++	pr_cont(" stack:%-5lu pid:%-5d ppid:%-6d flags:0x%08lx\n",
+ 		free, task_pid_nr(p), ppid,
+ 		read_task_thread_flags(p));
+ 
+-- 
+cgit 
+
+
+From d985ee9f449aafe45397ae1cf8887e9ac91d2f95 Mon Sep 17 00:00:00 2001
+From: Hao Jia <jiahao.os@bytedance.com>
+Date: Wed, 3 Aug 2022 21:02:23 +0800
+Subject: sched/fair: Remove unused parameter idle of _nohz_idle_balance()
+
+After commit 7a82e5f52a35 ("sched/fair: Merge for each idle cpu loop of ILB"),
+_nohz_idle_balance()'s 'idle' parameter is not used anymore, so we can remove it.
+
+Signed-off-by: Hao Jia <jiahao.os@bytedance.com>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220803130223.70419-1-jiahao.os@bytedance.com
+---
+ kernel/sched/fair.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 41486d9b09111..d22c5e82d4a6c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -10916,8 +10916,7 @@ static bool update_nohz_stats(struct rq *rq)
+  * can be a simple update of blocked load or a complete load balance with
+  * tasks movement depending of flags.
+  */
+-static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
+-			       enum cpu_idle_type idle)
++static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags)
+ {
+ 	/* Earliest time when we have to do rebalance again */
+ 	unsigned long now = jiffies;
+@@ -11032,7 +11031,7 @@ static bool nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
+ 	if (idle != CPU_IDLE)
+ 		return false;
+ 
+-	_nohz_idle_balance(this_rq, flags, idle);
++	_nohz_idle_balance(this_rq, flags);
+ 
+ 	return true;
+ }
+@@ -11052,7 +11051,7 @@ void nohz_run_idle_balance(int cpu)
+ 	 * (ie NOHZ_STATS_KICK set) and will do the same.
+ 	 */
+ 	if ((flags == NOHZ_NEWILB_KICK) && !need_resched())
+-		_nohz_idle_balance(cpu_rq(cpu), NOHZ_STATS_KICK, CPU_IDLE);
++		_nohz_idle_balance(cpu_rq(cpu), NOHZ_STATS_KICK);
+ }
+ 
+ static void nohz_newidle_balance(struct rq *this_rq)
+-- 
+cgit 
+
+
+From 18c31c9711a90b48a77b78afb65012d9feec444c Mon Sep 17 00:00:00 2001
+From: Bing Huang <huangbing@kylinos.cn>
+Date: Sat, 23 Jul 2022 05:36:09 +0800
+Subject: sched/fair: Make per-cpu cpumasks static
+
+The load_balance_mask and select_rq_mask percpu variables are only used in
+kernel/sched/fair.c.
+
+Make them static and move their allocation into init_sched_fair_class().
+
+Replace kzalloc_node() with zalloc_cpumask_var_node() to get rid of the
+CONFIG_CPUMASK_OFFSTACK #ifdef and to align with per-cpu cpumask
+allocation for RT (local_cpu_mask in init_sched_rt_class()) and DL
+class (local_cpu_mask_dl in init_sched_dl_class()).
+
+[ mingo: Tidied up changelog & touched up the code. ]
+
+Signed-off-by: Bing Huang <huangbing@kylinos.cn>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220722213609.3901-1-huangbing775@126.com
+---
+ kernel/sched/core.c | 11 -----------
+ kernel/sched/fair.c | 11 +++++++++--
+ 2 files changed, 9 insertions(+), 13 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 6785e3be07692..64c08993221bc 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -9563,9 +9563,6 @@ LIST_HEAD(task_groups);
+ static struct kmem_cache *task_group_cache __read_mostly;
+ #endif
+ 
+-DECLARE_PER_CPU(cpumask_var_t, load_balance_mask);
+-DECLARE_PER_CPU(cpumask_var_t, select_rq_mask);
+-
+ void __init sched_init(void)
+ {
+ 	unsigned long ptr = 0;
+@@ -9609,14 +9606,6 @@ void __init sched_init(void)
+ 
+ #endif /* CONFIG_RT_GROUP_SCHED */
+ 	}
+-#ifdef CONFIG_CPUMASK_OFFSTACK
+-	for_each_possible_cpu(i) {
+-		per_cpu(load_balance_mask, i) = (cpumask_var_t)kzalloc_node(
+-			cpumask_size(), GFP_KERNEL, cpu_to_node(i));
+-		per_cpu(select_rq_mask, i) = (cpumask_var_t)kzalloc_node(
+-			cpumask_size(), GFP_KERNEL, cpu_to_node(i));
+-	}
+-#endif /* CONFIG_CPUMASK_OFFSTACK */
+ 
+ 	init_rt_bandwidth(&def_rt_bandwidth, global_rt_period(), global_rt_runtime());
+ 
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index d22c5e82d4a6c..da388657d5ac3 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -5893,8 +5893,8 @@ dequeue_throttle:
+ #ifdef CONFIG_SMP
+ 
+ /* Working cpumask for: load_balance, load_balance_newidle. */
+-DEFINE_PER_CPU(cpumask_var_t, load_balance_mask);
+-DEFINE_PER_CPU(cpumask_var_t, select_rq_mask);
++static DEFINE_PER_CPU(cpumask_var_t, load_balance_mask);
++static DEFINE_PER_CPU(cpumask_var_t, select_rq_mask);
+ 
+ #ifdef CONFIG_NO_HZ_COMMON
+ 
+@@ -12074,6 +12074,13 @@ void show_numa_stats(struct task_struct *p, struct seq_file *m)
+ __init void init_sched_fair_class(void)
+ {
+ #ifdef CONFIG_SMP
++	int i;
++
++	for_each_possible_cpu(i) {
++		zalloc_cpumask_var_node(&per_cpu(load_balance_mask, i), GFP_KERNEL, cpu_to_node(i));
++		zalloc_cpumask_var_node(&per_cpu(select_rq_mask,    i), GFP_KERNEL, cpu_to_node(i));
++	}
++
+ 	open_softirq(SCHED_SOFTIRQ, run_rebalance_domains);
+ 
+ #ifdef CONFIG_NO_HZ_COMMON
+-- 
+cgit 
+
+
+From 8648f92a66a323ed01903d2cbb248cdbe2f312d9 Mon Sep 17 00:00:00 2001
+From: Xin Gao <gaoxin@cdjrlc.com>
+Date: Tue, 19 Jul 2022 19:10:44 +0800
+Subject: sched/core: Remove superfluous semicolon
+
+Signed-off-by: Xin Gao <gaoxin@cdjrlc.com>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lore.kernel.org/r/20220719111044.7095-1-gaoxin@cdjrlc.com
+---
+ kernel/sched/core_sched.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/core_sched.c b/kernel/sched/core_sched.c
+index 93878cb2a46dc..1ec807fbde561 100644
+--- a/kernel/sched/core_sched.c
++++ b/kernel/sched/core_sched.c
+@@ -205,7 +205,7 @@ int sched_core_share_pid(unsigned int cmd, pid_t pid, enum pid_type type,
+ 	default:
+ 		err = -EINVAL;
+ 		goto out;
+-	};
++	}
+ 
+ 	if (type == PIDTYPE_PID) {
+ 		__sched_core_set(task, cookie);
+-- 
+cgit 
+
+
+From 09348d75a6ce60eec85c86dd0ab7babc4db3caf6 Mon Sep 17 00:00:00 2001
+From: Ingo Molnar <mingo@kernel.org>
+Date: Thu, 11 Aug 2022 08:54:52 +0200
+Subject: sched/all: Change all BUG_ON() instances in the scheduler to
+ WARN_ON_ONCE()
+
+There's no good reason to crash a user's system with a BUG_ON(),
+chances are high that they'll never even see the crash message on
+Xorg, and it won't make it into the syslog either.
+
+By using a WARN_ON_ONCE() we at least give the user a chance to report
+any bugs triggered here - instead of getting silent hangs.
+
+None of these WARN_ON_ONCE()s are supposed to trigger, ever - so we ignore
+cases where a NULL check is done via a BUG_ON() and we let a NULL
+pointer through after a WARN_ON_ONCE().
+
+There's one exception: WARN_ON_ONCE() arguments with side-effects,
+such as locking - in this case we use the return value of the
+WARN_ON_ONCE(), such as in:
+
+ -       BUG_ON(!lock_task_sighand(p, &flags));
+ +       if (WARN_ON_ONCE(!lock_task_sighand(p, &flags)))
+ +               return;
+
+Suggested-by: Linus Torvalds <torvalds@linux-foundation.org>
+Signed-off-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lore.kernel.org/r/YvSsKcAXISmshtHo@gmail.com
+---
+ kernel/sched/autogroup.c |  3 ++-
+ kernel/sched/core.c      |  2 +-
+ kernel/sched/cpupri.c    |  2 +-
+ kernel/sched/deadline.c  | 26 +++++++++++++-------------
+ kernel/sched/fair.c      | 10 +++++-----
+ kernel/sched/rt.c        |  2 +-
+ kernel/sched/sched.h     |  6 +++---
+ 7 files changed, 26 insertions(+), 25 deletions(-)
+
+diff --git a/kernel/sched/autogroup.c b/kernel/sched/autogroup.c
+index 4ebaf97f7bd85..991fc90025357 100644
+--- a/kernel/sched/autogroup.c
++++ b/kernel/sched/autogroup.c
+@@ -161,7 +161,8 @@ autogroup_move_group(struct task_struct *p, struct autogroup *ag)
+ 	struct task_struct *t;
+ 	unsigned long flags;
+ 
+-	BUG_ON(!lock_task_sighand(p, &flags));
++	if (WARN_ON_ONCE(!lock_task_sighand(p, &flags)))
++		return;
+ 
+ 	prev = p->signal->autogroup;
+ 	if (prev == ag) {
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index ee28253c9ac0c..813687a5f5cf2 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2328,7 +2328,7 @@ static struct rq *move_queued_task(struct rq *rq, struct rq_flags *rf,
+ 	rq = cpu_rq(new_cpu);
+ 
+ 	rq_lock(rq, rf);
+-	BUG_ON(task_cpu(p) != new_cpu);
++	WARN_ON_ONCE(task_cpu(p) != new_cpu);
+ 	activate_task(rq, p, 0);
+ 	check_preempt_curr(rq, p, 0);
+ 
+diff --git a/kernel/sched/cpupri.c b/kernel/sched/cpupri.c
+index fa9ce9d836839..a286e726eb4b8 100644
+--- a/kernel/sched/cpupri.c
++++ b/kernel/sched/cpupri.c
+@@ -147,7 +147,7 @@ int cpupri_find_fitness(struct cpupri *cp, struct task_struct *p,
+ 	int task_pri = convert_prio(p->prio);
+ 	int idx, cpu;
+ 
+-	BUG_ON(task_pri >= CPUPRI_NR_PRIORITIES);
++	WARN_ON_ONCE(task_pri >= CPUPRI_NR_PRIORITIES);
+ 
+ 	for (idx = 0; idx < task_pri; idx++) {
+ 
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 0ab79d819a0d6..962b169b05cf4 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -310,7 +310,7 @@ static void dl_change_utilization(struct task_struct *p, u64 new_bw)
+ {
+ 	struct rq *rq;
+ 
+-	BUG_ON(p->dl.flags & SCHED_FLAG_SUGOV);
++	WARN_ON_ONCE(p->dl.flags & SCHED_FLAG_SUGOV);
+ 
+ 	if (task_on_rq_queued(p))
+ 		return;
+@@ -607,7 +607,7 @@ static void enqueue_pushable_dl_task(struct rq *rq, struct task_struct *p)
+ {
+ 	struct rb_node *leftmost;
+ 
+-	BUG_ON(!RB_EMPTY_NODE(&p->pushable_dl_tasks));
++	WARN_ON_ONCE(!RB_EMPTY_NODE(&p->pushable_dl_tasks));
+ 
+ 	leftmost = rb_add_cached(&p->pushable_dl_tasks,
+ 				 &rq->dl.pushable_dl_tasks_root,
+@@ -684,7 +684,7 @@ static struct rq *dl_task_offline_migration(struct rq *rq, struct task_struct *p
+ 			 * Failed to find any suitable CPU.
+ 			 * The task will never come back!
+ 			 */
+-			BUG_ON(dl_bandwidth_enabled());
++			WARN_ON_ONCE(dl_bandwidth_enabled());
+ 
+ 			/*
+ 			 * If admission control is disabled we
+@@ -830,7 +830,7 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se)
+ 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
+ 	struct rq *rq = rq_of_dl_rq(dl_rq);
+ 
+-	BUG_ON(pi_of(dl_se)->dl_runtime <= 0);
++	WARN_ON_ONCE(pi_of(dl_se)->dl_runtime <= 0);
+ 
+ 	/*
+ 	 * This could be the case for a !-dl task that is boosted.
+@@ -1616,7 +1616,7 @@ static void __enqueue_dl_entity(struct sched_dl_entity *dl_se)
+ {
+ 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
+ 
+-	BUG_ON(!RB_EMPTY_NODE(&dl_se->rb_node));
++	WARN_ON_ONCE(!RB_EMPTY_NODE(&dl_se->rb_node));
+ 
+ 	rb_add_cached(&dl_se->rb_node, &dl_rq->root, __dl_less);
+ 
+@@ -1640,7 +1640,7 @@ static void __dequeue_dl_entity(struct sched_dl_entity *dl_se)
+ static void
+ enqueue_dl_entity(struct sched_dl_entity *dl_se, int flags)
+ {
+-	BUG_ON(on_dl_rq(dl_se));
++	WARN_ON_ONCE(on_dl_rq(dl_se));
+ 
+ 	update_stats_enqueue_dl(dl_rq_of_se(dl_se), dl_se, flags);
+ 
+@@ -2017,7 +2017,7 @@ static struct task_struct *pick_task_dl(struct rq *rq)
+ 		return NULL;
+ 
+ 	dl_se = pick_next_dl_entity(dl_rq);
+-	BUG_ON(!dl_se);
++	WARN_ON_ONCE(!dl_se);
+ 	p = dl_task_of(dl_se);
+ 
+ 	return p;
+@@ -2277,12 +2277,12 @@ static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
+ 
+ 	p = __node_2_pdl(rb_first_cached(&rq->dl.pushable_dl_tasks_root));
+ 
+-	BUG_ON(rq->cpu != task_cpu(p));
+-	BUG_ON(task_current(rq, p));
+-	BUG_ON(p->nr_cpus_allowed <= 1);
++	WARN_ON_ONCE(rq->cpu != task_cpu(p));
++	WARN_ON_ONCE(task_current(rq, p));
++	WARN_ON_ONCE(p->nr_cpus_allowed <= 1);
+ 
+-	BUG_ON(!task_on_rq_queued(p));
+-	BUG_ON(!dl_task(p));
++	WARN_ON_ONCE(!task_on_rq_queued(p));
++	WARN_ON_ONCE(!dl_task(p));
+ 
+ 	return p;
+ }
+@@ -2492,7 +2492,7 @@ static void set_cpus_allowed_dl(struct task_struct *p,
+ 	struct root_domain *src_rd;
+ 	struct rq *rq;
+ 
+-	BUG_ON(!dl_task(p));
++	WARN_ON_ONCE(!dl_task(p));
+ 
+ 	rq = task_rq(p);
+ 	src_rd = rq->rd;
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 914096c5b1ae1..28f10dccd1944 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -2600,7 +2600,7 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
+ 	if (!join)
+ 		return;
+ 
+-	BUG_ON(irqs_disabled());
++	WARN_ON_ONCE(irqs_disabled());
+ 	double_lock_irq(&my_grp->lock, &grp->lock);
+ 
+ 	for (i = 0; i < NR_NUMA_HINT_FAULT_STATS * nr_node_ids; i++) {
+@@ -7279,7 +7279,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+ 		return;
+ 
+ 	find_matching_se(&se, &pse);
+-	BUG_ON(!pse);
++	WARN_ON_ONCE(!pse);
+ 
+ 	cse_is_idle = se_is_idle(se);
+ 	pse_is_idle = se_is_idle(pse);
+@@ -8159,7 +8159,7 @@ static void attach_task(struct rq *rq, struct task_struct *p)
+ {
+ 	lockdep_assert_rq_held(rq);
+ 
+-	BUG_ON(task_rq(p) != rq);
++	WARN_ON_ONCE(task_rq(p) != rq);
+ 	activate_task(rq, p, ENQUEUE_NOCLOCK);
+ 	check_preempt_curr(rq, p, 0);
+ }
+@@ -10134,7 +10134,7 @@ redo:
+ 		goto out_balanced;
+ 	}
+ 
+-	BUG_ON(busiest == env.dst_rq);
++	WARN_ON_ONCE(busiest == env.dst_rq);
+ 
+ 	schedstat_add(sd->lb_imbalance[idle], env.imbalance);
+ 
+@@ -10430,7 +10430,7 @@ static int active_load_balance_cpu_stop(void *data)
+ 	 * we need to fix it. Originally reported by
+ 	 * Bjorn Helgaas on a 128-CPU setup.
+ 	 */
+-	BUG_ON(busiest_rq == target_rq);
++	WARN_ON_ONCE(busiest_rq == target_rq);
+ 
+ 	/* Search for an sd spanning us and the target CPU. */
+ 	rcu_read_lock();
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 55f39c8f42032..2936fe55cef79 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -843,7 +843,7 @@ static void __disable_runtime(struct rq *rq)
+ 		 * We cannot be left wanting - that would mean some runtime
+ 		 * leaked out of the system.
+ 		 */
+-		BUG_ON(want);
++		WARN_ON_ONCE(want);
+ balanced:
+ 		/*
+ 		 * Disable all the borrow logic by pretending we have inf
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index e26688d387aeb..7a44dceeb50a1 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2709,8 +2709,8 @@ static inline void double_rq_lock(struct rq *rq1, struct rq *rq2)
+ 	__acquires(rq1->lock)
+ 	__acquires(rq2->lock)
+ {
+-	BUG_ON(!irqs_disabled());
+-	BUG_ON(rq1 != rq2);
++	WARN_ON_ONCE(!irqs_disabled());
++	WARN_ON_ONCE(rq1 != rq2);
+ 	raw_spin_rq_lock(rq1);
+ 	__acquire(rq2->lock);	/* Fake it out ;) */
+ 	double_rq_clock_clear_update(rq1, rq2);
+@@ -2726,7 +2726,7 @@ static inline void double_rq_unlock(struct rq *rq1, struct rq *rq2)
+ 	__releases(rq1->lock)
+ 	__releases(rq2->lock)
+ {
+-	BUG_ON(rq1 != rq2);
++	WARN_ON_ONCE(rq1 != rq2);
+ 	raw_spin_rq_unlock(rq1);
+ 	__release(rq2->lock);
+ }
+-- 
+cgit 
+
+
+From 78b6b15770618efb60d84e2d605f6b93dc94051b Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:47:57 +0800
+Subject: sched/fair: Maintain task se depth in set_task_rq()
+
+Previously we only maintain task se depth in task_move_group_fair(),
+if a !fair task change task group, its se depth will not be updated,
+so commit eb7a59b2c888 ("sched/fair: Reset se-depth when task switched to FAIR")
+fix the problem by updating se depth in switched_to_fair() too.
+
+Then commit daa59407b558 ("sched/fair: Unify switched_{from,to}_fair()
+and task_move_group_fair()") unified these two functions, moved se.depth
+setting to attach_task_cfs_rq(), which further into attach_entity_cfs_rq()
+with commit df217913e72e ("sched/fair: Factorize attach/detach entity").
+
+This patch move task se depth maintenance from attach_entity_cfs_rq()
+to set_task_rq(), which will be called when CPU/cgroup change, so its
+depth will always be correct.
+
+This patch is preparation for the next patch.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-2-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c  | 8 --------
+ kernel/sched/sched.h | 1 +
+ 2 files changed, 1 insertion(+), 8 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index da388657d5ac3..a3b0f8b1029e9 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11562,14 +11562,6 @@ static void attach_entity_cfs_rq(struct sched_entity *se)
+ {
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+ 
+-#ifdef CONFIG_FAIR_GROUP_SCHED
+-	/*
+-	 * Since the real-depth could have been changed (only FAIR
+-	 * class maintain depth value), reset depth properly.
+-	 */
+-	se->depth = se->parent ? se->parent->depth + 1 : 0;
+-#endif
+-
+ 	/* Synchronize entity with its cfs_rq */
+ 	update_load_avg(cfs_rq, se, sched_feat(ATTACH_AGE_LOAD) ? 0 : SKIP_AGE_LOAD);
+ 	attach_entity_load_avg(cfs_rq, se);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 3ccd35c22f0fd..4c4822141026e 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1930,6 +1930,7 @@ static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
+ 	set_task_rq_fair(&p->se, p->se.cfs_rq, tg->cfs_rq[cpu]);
+ 	p->se.cfs_rq = tg->cfs_rq[cpu];
+ 	p->se.parent = tg->se[cpu];
++	p->se.depth = tg->se[cpu] ? tg->se[cpu]->depth + 1 : 0;
+ #endif
+ 
+ #ifdef CONFIG_RT_GROUP_SCHED
+-- 
+cgit 
+
+
+From 39c4261191bf05e7eb310f852980a6d0afe5582a Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:47:58 +0800
+Subject: sched/fair: Remove redundant cpu_cgrp_subsys->fork()
+
+We use cpu_cgrp_subsys->fork() to set task group for the new fair task
+in cgroup_post_fork().
+
+Since commit b1e8206582f9 ("sched: Fix yet more sched_fork() races")
+has already set_task_rq() for the new fair task in sched_cgroup_fork(),
+so cpu_cgrp_subsys->fork() can be removed.
+
+  cgroup_can_fork()	--> pin parent's sched_task_group
+  sched_cgroup_fork()
+    __set_task_cpu()
+      set_task_rq()
+  cgroup_post_fork()
+    ss->fork() := cpu_cgroup_fork()
+      sched_change_group(..., TASK_SET_GROUP)
+        task_set_group_fair()
+          set_task_rq()  --> can be removed
+
+After this patch's change, task_change_group_fair() only need to
+care about task cgroup migration, make the code much simplier.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Link: https://lore.kernel.org/r/20220818124805.601-3-zhouchengming@bytedance.com
+---
+ kernel/sched/core.c  | 27 ++++-----------------------
+ kernel/sched/fair.c  | 23 +----------------------
+ kernel/sched/sched.h |  5 +----
+ 3 files changed, 6 insertions(+), 49 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 64c08993221bc..e74e79f783afa 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -481,8 +481,7 @@ sched_core_dequeue(struct rq *rq, struct task_struct *p, int flags) { }
+  *				p->se.load, p->rt_priority,
+  *				p->dl.dl_{runtime, deadline, period, flags, bw, density}
+  *  - sched_setnuma():		p->numa_preferred_nid
+- *  - sched_move_task()/
+- *    cpu_cgroup_fork():	p->sched_task_group
++ *  - sched_move_task():	p->sched_task_group
+  *  - uclamp_update_active()	p->uclamp*
+  *
+  * p->state <- TASK_*:
+@@ -10114,7 +10113,7 @@ void sched_release_group(struct task_group *tg)
+ 	spin_unlock_irqrestore(&task_group_lock, flags);
+ }
+ 
+-static void sched_change_group(struct task_struct *tsk, int type)
++static void sched_change_group(struct task_struct *tsk)
+ {
+ 	struct task_group *tg;
+ 
+@@ -10130,7 +10129,7 @@ static void sched_change_group(struct task_struct *tsk, int type)
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	if (tsk->sched_class->task_change_group)
+-		tsk->sched_class->task_change_group(tsk, type);
++		tsk->sched_class->task_change_group(tsk);
+ 	else
+ #endif
+ 		set_task_rq(tsk, task_cpu(tsk));
+@@ -10161,7 +10160,7 @@ void sched_move_task(struct task_struct *tsk)
+ 	if (running)
+ 		put_prev_task(rq, tsk);
+ 
+-	sched_change_group(tsk, TASK_MOVE_GROUP);
++	sched_change_group(tsk);
+ 
+ 	if (queued)
+ 		enqueue_task(rq, tsk, queue_flags);
+@@ -10239,23 +10238,6 @@ static void cpu_cgroup_css_free(struct cgroup_subsys_state *css)
+ 	sched_unregister_group(tg);
+ }
+ 
+-/*
+- * This is called before wake_up_new_task(), therefore we really only
+- * have to set its group bits, all the other stuff does not apply.
+- */
+-static void cpu_cgroup_fork(struct task_struct *task)
+-{
+-	struct rq_flags rf;
+-	struct rq *rq;
+-
+-	rq = task_rq_lock(task, &rf);
+-
+-	update_rq_clock(rq);
+-	sched_change_group(task, TASK_SET_GROUP);
+-
+-	task_rq_unlock(rq, task, &rf);
+-}
+-
+ static int cpu_cgroup_can_attach(struct cgroup_taskset *tset)
+ {
+ 	struct task_struct *task;
+@@ -11121,7 +11103,6 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 	.css_released	= cpu_cgroup_css_released,
+ 	.css_free	= cpu_cgroup_css_free,
+ 	.css_extra_stat_show = cpu_extra_stat_show,
+-	.fork		= cpu_cgroup_fork,
+ 	.can_attach	= cpu_cgroup_can_attach,
+ 	.attach		= cpu_cgroup_attach,
+ 	.legacy_cftypes	= cpu_legacy_files,
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index a3b0f8b1029e9..2c0eb2a4e3415 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11657,15 +11657,7 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ }
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+-static void task_set_group_fair(struct task_struct *p)
+-{
+-	struct sched_entity *se = &p->se;
+-
+-	set_task_rq(p, task_cpu(p));
+-	se->depth = se->parent ? se->parent->depth + 1 : 0;
+-}
+-
+-static void task_move_group_fair(struct task_struct *p)
++static void task_change_group_fair(struct task_struct *p)
+ {
+ 	detach_task_cfs_rq(p);
+ 	set_task_rq(p, task_cpu(p));
+@@ -11677,19 +11669,6 @@ static void task_move_group_fair(struct task_struct *p)
+ 	attach_task_cfs_rq(p);
+ }
+ 
+-static void task_change_group_fair(struct task_struct *p, int type)
+-{
+-	switch (type) {
+-	case TASK_SET_GROUP:
+-		task_set_group_fair(p);
+-		break;
+-
+-	case TASK_MOVE_GROUP:
+-		task_move_group_fair(p);
+-		break;
+-	}
+-}
+-
+ void free_fair_sched_group(struct task_group *tg)
+ {
+ 	int i;
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 4c4822141026e..74130a69d365b 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2193,11 +2193,8 @@ struct sched_class {
+ 
+ 	void (*update_curr)(struct rq *rq);
+ 
+-#define TASK_SET_GROUP		0
+-#define TASK_MOVE_GROUP		1
+-
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+-	void (*task_change_group)(struct task_struct *p, int type);
++	void (*task_change_group)(struct task_struct *p);
+ #endif
+ };
+ 
+-- 
+cgit 
+
+
+From 5d6da83c44af70ede7bfd0fd6d1ef8a3b3e0402c Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:47:59 +0800
+Subject: sched/fair: Reset sched_avg last_update_time before set_task_rq()
+
+set_task_rq() -> set_task_rq_fair() will try to synchronize the blocked
+task's sched_avg when migrate, which is not needed for already detached
+task.
+
+task_change_group_fair() will detached the task sched_avg from prev cfs_rq
+first, so reset sched_avg last_update_time before set_task_rq() to avoid that.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Dietmar Eggemann <dietmar.eggemann@arm.com>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-4-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 2c0eb2a4e3415..e4c0929a6e718 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11660,12 +11660,12 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ static void task_change_group_fair(struct task_struct *p)
+ {
+ 	detach_task_cfs_rq(p);
+-	set_task_rq(p, task_cpu(p));
+ 
+ #ifdef CONFIG_SMP
+ 	/* Tell se's cfs_rq has been changed -- migrated */
+ 	p->se.avg.last_update_time = 0;
+ #endif
++	set_task_rq(p, task_cpu(p));
+ 	attach_task_cfs_rq(p);
+ }
+ 
+-- 
+cgit 
+
+
+From 859f206290f345c151a6005de639ba9677bf3e18 Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:48:00 +0800
+Subject: sched/fair: Update comments in enqueue/dequeue_entity()
+
+When reading the sched_avg related code, I found the comments in
+enqueue/dequeue_entity() are not updated with the current code.
+
+We don't add/subtract entity's runnable_avg from cfs_rq->runnable_avg
+during enqueue/dequeue_entity(), those are done only for attach/detach.
+
+This patch updates the comments to reflect the current code working.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-5-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e4c0929a6e718..52de8302b3369 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -4434,7 +4434,8 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	/*
+ 	 * When enqueuing a sched_entity, we must:
+ 	 *   - Update loads to have both entity and cfs_rq synced with now.
+-	 *   - Add its load to cfs_rq->runnable_avg
++	 *   - For group_entity, update its runnable_weight to reflect the new
++	 *     h_nr_running of its group cfs_rq.
+ 	 *   - For group_entity, update its weight to reflect the new share of
+ 	 *     its group cfs_rq
+ 	 *   - Add its new weight to cfs_rq->load.weight
+@@ -4519,7 +4520,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	/*
+ 	 * When dequeuing a sched_entity, we must:
+ 	 *   - Update loads to have both entity and cfs_rq synced with now.
+-	 *   - Subtract its load from the cfs_rq->runnable_avg.
++	 *   - For group_entity, update its runnable_weight to reflect the new
++	 *     h_nr_running of its group cfs_rq.
+ 	 *   - Subtract its previous weight from cfs_rq->load.weight.
+ 	 *   - For group entity, update its weight to reflect the new share
+ 	 *     of its group cfs_rq.
+-- 
+cgit 
+
+
+From e1f078f50478a51849453341e7356cb298df00cf Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:48:01 +0800
+Subject: sched/fair: Combine detach into dequeue when migrating task
+
+When we are migrating task out of the CPU, we can combine detach and
+propagation into dequeue_entity() to save the detach_entity_cfs_rq()
+in migrate_task_rq_fair().
+
+This optimization is like combining DO_ATTACH in the enqueue_entity()
+when migrating task to the CPU. So we don't have to traverse the CFS tree
+extra time to do the detach_entity_cfs_rq() -> propagate_entity_cfs_rq(),
+which wouldn't be called anymore with this patch's change.
+
+detach_task()
+  deactivate_task()
+    dequeue_task_fair()
+      for_each_sched_entity(se)
+        dequeue_entity()
+          update_load_avg() /* (1) */
+            detach_entity_load_avg()
+
+  set_task_cpu()
+    migrate_task_rq_fair()
+      detach_entity_cfs_rq() /* (2) */
+        update_load_avg();
+        detach_entity_load_avg();
+        propagate_entity_cfs_rq();
+          for_each_sched_entity()
+            update_load_avg()
+
+This patch save the detach_entity_cfs_rq() called in (2) by doing
+the detach_entity_load_avg() for a CPU migrating task inside (1)
+(the task being the first se in the loop)
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-6-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 28 ++++++++++++++++------------
+ 1 file changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 52de8302b3369..f52e7dc7f22d6 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -4003,6 +4003,7 @@ static void detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
+ #define UPDATE_TG	0x1
+ #define SKIP_AGE_LOAD	0x2
+ #define DO_ATTACH	0x4
++#define DO_DETACH	0x8
+ 
+ /* Update task and its cfs_rq load average */
+ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -4032,6 +4033,13 @@ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
+ 		attach_entity_load_avg(cfs_rq, se);
+ 		update_tg_load_avg(cfs_rq);
+ 
++	} else if (flags & DO_DETACH) {
++		/*
++		 * DO_DETACH means we're here from dequeue_entity()
++		 * and we are migrating task out of the CPU.
++		 */
++		detach_entity_load_avg(cfs_rq, se);
++		update_tg_load_avg(cfs_rq);
+ 	} else if (decayed) {
+ 		cfs_rq_util_change(cfs_rq, 0);
+ 
+@@ -4292,6 +4300,7 @@ static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
+ #define UPDATE_TG	0x0
+ #define SKIP_AGE_LOAD	0x0
+ #define DO_ATTACH	0x0
++#define DO_DETACH	0x0
+ 
+ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se, int not_used1)
+ {
+@@ -4512,6 +4521,11 @@ static __always_inline void return_cfs_rq_runtime(struct cfs_rq *cfs_rq);
+ static void
+ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ {
++	int action = UPDATE_TG;
++
++	if (entity_is_task(se) && task_on_rq_migrating(task_of(se)))
++		action |= DO_DETACH;
++
+ 	/*
+ 	 * Update run-time statistics of the 'current'.
+ 	 */
+@@ -4526,7 +4540,7 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+ 	 *   - For group entity, update its weight to reflect the new share
+ 	 *     of its group cfs_rq.
+ 	 */
+-	update_load_avg(cfs_rq, se, UPDATE_TG);
++	update_load_avg(cfs_rq, se, action);
+ 	se_update_runnable(se);
+ 
+ 	update_stats_dequeue_fair(cfs_rq, se, flags);
+@@ -7078,8 +7092,6 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
+ 	return new_cpu;
+ }
+ 
+-static void detach_entity_cfs_rq(struct sched_entity *se);
+-
+ /*
+  * Called immediately before a task is migrated to a new CPU; task_cpu(p) and
+  * cfs_rq_of(p) references at time of call are still valid and identify the
+@@ -7101,15 +7113,7 @@ static void migrate_task_rq_fair(struct task_struct *p, int new_cpu)
+ 		se->vruntime -= u64_u32_load(cfs_rq->min_vruntime);
+ 	}
+ 
+-	if (p->on_rq == TASK_ON_RQ_MIGRATING) {
+-		/*
+-		 * In case of TASK_ON_RQ_MIGRATING we in fact hold the 'old'
+-		 * rq->lock and can modify state directly.
+-		 */
+-		lockdep_assert_rq_held(task_rq(p));
+-		detach_entity_cfs_rq(se);
+-
+-	} else {
++	if (!task_on_rq_migrating(p)) {
+ 		remove_entity_load_avg(se);
+ 
+ 		/*
+-- 
+cgit 
+
+
+From 7e2edaf61814fb6aa363989d718950c023b882d4 Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:48:02 +0800
+Subject: sched/fair: Fix another detach on unattached task corner case
+
+commit 7dc603c9028e ("sched/fair: Fix PELT integrity for new tasks")
+fixed two load tracking problems for new task, including detach on
+unattached new task problem.
+
+There still left another detach on unattached task problem for the task
+which has been woken up by try_to_wake_up() and waiting for actually
+being woken up by sched_ttwu_pending().
+
+try_to_wake_up(p)
+  cpu = select_task_rq(p)
+  if (task_cpu(p) != cpu)
+    set_task_cpu(p, cpu)
+      migrate_task_rq_fair()
+        remove_entity_load_avg()       --> unattached
+        se->avg.last_update_time = 0;
+      __set_task_cpu()
+  ttwu_queue(p, cpu)
+    ttwu_queue_wakelist()
+      __ttwu_queue_wakelist()
+
+task_change_group_fair()
+  detach_task_cfs_rq()
+    detach_entity_cfs_rq()
+      detach_entity_load_avg()   --> detach on unattached task
+  set_task_rq()
+  attach_task_cfs_rq()
+    attach_entity_cfs_rq()
+      attach_entity_load_avg()
+
+The reason of this problem is similar, we should check in detach_entity_cfs_rq()
+that se->avg.last_update_time != 0, before do detach_entity_load_avg().
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-7-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index f52e7dc7f22d6..e92bc053aff60 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11557,6 +11557,17 @@ static void detach_entity_cfs_rq(struct sched_entity *se)
+ {
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+ 
++#ifdef CONFIG_SMP
++	/*
++	 * In case the task sched_avg hasn't been attached:
++	 * - A forked task which hasn't been woken up by wake_up_new_task().
++	 * - A task which has been woken up by try_to_wake_up() but is
++	 *   waiting for actually being woken up by sched_ttwu_pending().
++	 */
++	if (!se->avg.last_update_time)
++		return;
++#endif
++
+ 	/* Catch up with the cfs_rq and remove our load when we leave */
+ 	update_load_avg(cfs_rq, se, 0);
+ 	detach_entity_load_avg(cfs_rq, se);
+-- 
+cgit 
+
+
+From df16b71c686cb096774e30153c9ce6756450796c Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:48:03 +0800
+Subject: sched/fair: Allow changing cgroup of new forked task
+
+commit 7dc603c9028e ("sched/fair: Fix PELT integrity for new tasks")
+introduce a TASK_NEW state and an unnessary limitation that would fail
+when changing cgroup of new forked task.
+
+Because at that time, we can't handle task_change_group_fair() for new
+forked fair task which hasn't been woken up by wake_up_new_task(),
+which will cause detach on an unattached task sched_avg problem.
+
+This patch delete this unnessary limitation by adding check before do
+detach or attach in task_change_group_fair().
+
+So cpu_cgrp_subsys.can_attach() has nothing to do for fair tasks,
+only define it in #ifdef CONFIG_RT_GROUP_SCHED.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-8-zhouchengming@bytedance.com
+---
+ kernel/sched/core.c | 25 +++++--------------------
+ kernel/sched/fair.c |  7 +++++++
+ 2 files changed, 12 insertions(+), 20 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index e74e79f783afa..603a80ec9b0eb 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -10238,36 +10238,19 @@ static void cpu_cgroup_css_free(struct cgroup_subsys_state *css)
+ 	sched_unregister_group(tg);
+ }
+ 
++#ifdef CONFIG_RT_GROUP_SCHED
+ static int cpu_cgroup_can_attach(struct cgroup_taskset *tset)
+ {
+ 	struct task_struct *task;
+ 	struct cgroup_subsys_state *css;
+-	int ret = 0;
+ 
+ 	cgroup_taskset_for_each(task, css, tset) {
+-#ifdef CONFIG_RT_GROUP_SCHED
+ 		if (!sched_rt_can_attach(css_tg(css), task))
+ 			return -EINVAL;
+-#endif
+-		/*
+-		 * Serialize against wake_up_new_task() such that if it's
+-		 * running, we're sure to observe its full state.
+-		 */
+-		raw_spin_lock_irq(&task->pi_lock);
+-		/*
+-		 * Avoid calling sched_move_task() before wake_up_new_task()
+-		 * has happened. This would lead to problems with PELT, due to
+-		 * move wanting to detach+attach while we're not attached yet.
+-		 */
+-		if (READ_ONCE(task->__state) == TASK_NEW)
+-			ret = -EINVAL;
+-		raw_spin_unlock_irq(&task->pi_lock);
+-
+-		if (ret)
+-			break;
+ 	}
+-	return ret;
++	return 0;
+ }
++#endif
+ 
+ static void cpu_cgroup_attach(struct cgroup_taskset *tset)
+ {
+@@ -11103,7 +11086,9 @@ struct cgroup_subsys cpu_cgrp_subsys = {
+ 	.css_released	= cpu_cgroup_css_released,
+ 	.css_free	= cpu_cgroup_css_free,
+ 	.css_extra_stat_show = cpu_extra_stat_show,
++#ifdef CONFIG_RT_GROUP_SCHED
+ 	.can_attach	= cpu_cgroup_can_attach,
++#endif
+ 	.attach		= cpu_cgroup_attach,
+ 	.legacy_cftypes	= cpu_legacy_files,
+ 	.dfl_cftypes	= cpu_files,
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e92bc053aff60..fd1aa4c92b2db 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11676,6 +11676,13 @@ void init_cfs_rq(struct cfs_rq *cfs_rq)
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ static void task_change_group_fair(struct task_struct *p)
+ {
++	/*
++	 * We couldn't detach or attach a forked task which
++	 * hasn't been woken up by wake_up_new_task().
++	 */
++	if (READ_ONCE(p->__state) == TASK_NEW)
++		return;
++
+ 	detach_task_cfs_rq(p);
+ 
+ #ifdef CONFIG_SMP
+-- 
+cgit 
+
+
+From d6531ab6e50149ab2a144b0f4787cb9277d0893f Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:48:04 +0800
+Subject: sched/fair: Move task sched_avg attach to enqueue_task_fair()
+
+When wake_up_new_task(), we use post_init_entity_util_avg() to init
+util_avg/runnable_avg based on cpu's util_avg at that time, and
+attach task sched_avg to cfs_rq.
+
+Since enqueue_task_fair() -> enqueue_entity() -> update_load_avg()
+loop will do attach, we can move this work to update_load_avg().
+
+wake_up_new_task(p)
+  post_init_entity_util_avg(p)
+    attach_entity_cfs_rq()  --> (1)
+  activate_task(rq, p)
+    enqueue_task() := enqueue_task_fair()
+      enqueue_entity() loop
+        update_load_avg(cfs_rq, se, UPDATE_TG | DO_ATTACH)
+          if (!se->avg.last_update_time && (flags & DO_ATTACH))
+            attach_entity_load_avg()  --> (2)
+
+This patch move attach from (1) to (2), update related comments too.
+
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-9-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 11 +++--------
+ 1 file changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index fd1aa4c92b2db..ef325b561df4c 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -799,8 +799,6 @@ void init_entity_runnable_average(struct sched_entity *se)
+ 	/* when this task enqueue'ed, it will contribute to its cfs_rq's load_avg */
+ }
+ 
+-static void attach_entity_cfs_rq(struct sched_entity *se);
+-
+ /*
+  * With new tasks being created, their initial util_avgs are extrapolated
+  * based on the cfs_rq's current util_avg:
+@@ -863,8 +861,6 @@ void post_init_entity_util_avg(struct task_struct *p)
+ 		se->avg.last_update_time = cfs_rq_clock_pelt(cfs_rq);
+ 		return;
+ 	}
+-
+-	attach_entity_cfs_rq(se);
+ }
+ 
+ #else /* !CONFIG_SMP */
+@@ -3838,8 +3834,7 @@ static void migrate_se_pelt_lag(struct sched_entity *se) {}
+  * @cfs_rq: cfs_rq to update
+  *
+  * The cfs_rq avg is the direct sum of all its entities (blocked and runnable)
+- * avg. The immediate corollary is that all (fair) tasks must be attached, see
+- * post_init_entity_util_avg().
++ * avg. The immediate corollary is that all (fair) tasks must be attached.
+  *
+  * cfs_rq->avg is used for task_h_load() and update_cfs_share() for example.
+  *
+@@ -4072,8 +4067,8 @@ static void remove_entity_load_avg(struct sched_entity *se)
+ 
+ 	/*
+ 	 * tasks cannot exit without having gone through wake_up_new_task() ->
+-	 * post_init_entity_util_avg() which will have added things to the
+-	 * cfs_rq, so we can remove unconditionally.
++	 * enqueue_task_fair() which will have added things to the cfs_rq,
++	 * so we can remove unconditionally.
+ 	 */
+ 
+ 	sync_entity_load_avg(se);
+-- 
+cgit 
+
+
+From e4fe074d6c359c19b74564fa1364fe48343cfa5d Mon Sep 17 00:00:00 2001
+From: Chengming Zhou <zhouchengming@bytedance.com>
+Date: Thu, 18 Aug 2022 20:48:05 +0800
+Subject: sched/fair: Don't init util/runnable_avg for !fair task
+
+post_init_entity_util_avg() init task util_avg according to the cpu util_avg
+at the time of fork, which will decay when switched_to_fair() some time later,
+we'd better to not set them at all in the case of !fair task.
+
+Suggested-by: Vincent Guittot <vincent.guittot@linaro.org>
+Signed-off-by: Chengming Zhou <zhouchengming@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Vincent Guittot <vincent.guittot@linaro.org>
+Link: https://lore.kernel.org/r/20220818124805.601-10-zhouchengming@bytedance.com
+---
+ kernel/sched/fair.c | 28 ++++++++++++++--------------
+ 1 file changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ef325b561df4c..e8c1b889dcbbe 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -833,20 +833,6 @@ void post_init_entity_util_avg(struct task_struct *p)
+ 	long cpu_scale = arch_scale_cpu_capacity(cpu_of(rq_of(cfs_rq)));
+ 	long cap = (long)(cpu_scale - cfs_rq->avg.util_avg) / 2;
+ 
+-	if (cap > 0) {
+-		if (cfs_rq->avg.util_avg != 0) {
+-			sa->util_avg  = cfs_rq->avg.util_avg * se->load.weight;
+-			sa->util_avg /= (cfs_rq->avg.load_avg + 1);
+-
+-			if (sa->util_avg > cap)
+-				sa->util_avg = cap;
+-		} else {
+-			sa->util_avg = cap;
+-		}
+-	}
+-
+-	sa->runnable_avg = sa->util_avg;
+-
+ 	if (p->sched_class != &fair_sched_class) {
+ 		/*
+ 		 * For !fair tasks do:
+@@ -861,6 +847,20 @@ void post_init_entity_util_avg(struct task_struct *p)
+ 		se->avg.last_update_time = cfs_rq_clock_pelt(cfs_rq);
+ 		return;
+ 	}
++
++	if (cap > 0) {
++		if (cfs_rq->avg.util_avg != 0) {
++			sa->util_avg  = cfs_rq->avg.util_avg * se->load.weight;
++			sa->util_avg /= (cfs_rq->avg.load_avg + 1);
++
++			if (sa->util_avg > cap)
++				sa->util_avg = cap;
++		} else {
++			sa->util_avg = cap;
++		}
++	}
++
++	sa->runnable_avg = sa->util_avg;
+ }
+ 
+ #else /* !CONFIG_SMP */
+-- 
+cgit 
+
+
+From 5531ecffa4b923bc7739e9ea73c552d80af602dc Mon Sep 17 00:00:00 2001
+From: Shang XiaoJing <shangxiaojing@huawei.com>
+Date: Wed, 24 Aug 2022 16:28:56 +0800
+Subject: sched: Add update_current_exec_runtime helper
+
+Wrap repeated code in helper function update_current_exec_runtime for
+update the exec time of the current.
+
+Signed-off-by: Shang XiaoJing <shangxiaojing@huawei.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220824082856.15674-1-shangxiaojing@huawei.com
+---
+ kernel/sched/deadline.c  |  6 +-----
+ kernel/sched/rt.c        |  6 +-----
+ kernel/sched/sched.h     | 10 ++++++++++
+ kernel/sched/stop_task.c | 11 ++++-------
+ 4 files changed, 16 insertions(+), 17 deletions(-)
+
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 1d9c90958baa1..4cbdc0c560daf 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -1333,11 +1333,7 @@ static void update_curr_dl(struct rq *rq)
+ 
+ 	trace_sched_stat_runtime(curr, delta_exec, 0);
+ 
+-	curr->se.sum_exec_runtime += delta_exec;
+-	account_group_exec_runtime(curr, delta_exec);
+-
+-	curr->se.exec_start = now;
+-	cgroup_account_cputime(curr, delta_exec);
++	update_current_exec_runtime(curr, now, delta_exec);
+ 
+ 	if (dl_entity_is_special(dl_se))
+ 		return;
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 054b6711e9619..4bc84a1135dbc 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -1062,11 +1062,7 @@ static void update_curr_rt(struct rq *rq)
+ 
+ 	trace_sched_stat_runtime(curr, delta_exec, 0);
+ 
+-	curr->se.sum_exec_runtime += delta_exec;
+-	account_group_exec_runtime(curr, delta_exec);
+-
+-	curr->se.exec_start = now;
+-	cgroup_account_cputime(curr, delta_exec);
++	update_current_exec_runtime(curr, now, delta_exec);
+ 
+ 	if (!rt_bandwidth_enabled())
+ 		return;
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 74130a69d365b..da17be6f27fdf 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -3158,4 +3158,14 @@ extern int sched_dynamic_mode(const char *str);
+ extern void sched_dynamic_update(int mode);
+ #endif
+ 
++static inline void update_current_exec_runtime(struct task_struct *curr,
++						u64 now, u64 delta_exec)
++{
++	curr->se.sum_exec_runtime += delta_exec;
++	account_group_exec_runtime(curr, delta_exec);
++
++	curr->se.exec_start = now;
++	cgroup_account_cputime(curr, delta_exec);
++}
++
+ #endif /* _KERNEL_SCHED_SCHED_H */
+diff --git a/kernel/sched/stop_task.c b/kernel/sched/stop_task.c
+index d04073a93eb4d..85590599b4d60 100644
+--- a/kernel/sched/stop_task.c
++++ b/kernel/sched/stop_task.c
+@@ -71,20 +71,17 @@ static void yield_task_stop(struct rq *rq)
+ static void put_prev_task_stop(struct rq *rq, struct task_struct *prev)
+ {
+ 	struct task_struct *curr = rq->curr;
+-	u64 delta_exec;
++	u64 now, delta_exec;
+ 
+-	delta_exec = rq_clock_task(rq) - curr->se.exec_start;
++	now = rq_clock_task(rq);
++	delta_exec = now - curr->se.exec_start;
+ 	if (unlikely((s64)delta_exec < 0))
+ 		delta_exec = 0;
+ 
+ 	schedstat_set(curr->stats.exec_max,
+ 		      max(curr->stats.exec_max, delta_exec));
+ 
+-	curr->se.sum_exec_runtime += delta_exec;
+-	account_group_exec_runtime(curr, delta_exec);
+-
+-	curr->se.exec_start = rq_clock_task(rq);
+-	cgroup_account_cputime(curr, delta_exec);
++	update_current_exec_runtime(curr, now, delta_exec);
+ }
+ 
+ /*
+-- 
+cgit 
+
+
+From 973bee493a1f75c6c0752a74fb9396cbc34f026e Mon Sep 17 00:00:00 2001
+From: Shang XiaoJing <shangxiaojing@huawei.com>
+Date: Fri, 26 Aug 2022 16:34:53 +0800
+Subject: sched/deadline: Add dl_task_is_earliest_deadline helper
+
+Wrap repeated code in helper function dl_task_is_earliest_deadline, which
+return true if there is no deadline task on the rq at all, or task's
+deadline earlier than the whole rq.
+
+Signed-off-by: Shang XiaoJing <shangxiaojing@huawei.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Daniel Bristot de Oliveira <bristot@kernel.org>
+Link: https://lore.kernel.org/r/20220826083453.698-1-shangxiaojing@huawei.com
+---
+ kernel/sched/deadline.c | 24 ++++++++++++------------
+ 1 file changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index d116d2b9d2f93..34271aff47126 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -1810,6 +1810,14 @@ static void yield_task_dl(struct rq *rq)
+ 
+ #ifdef CONFIG_SMP
+ 
++static inline bool dl_task_is_earliest_deadline(struct task_struct *p,
++						 struct rq *rq)
++{
++	return (!rq->dl.dl_nr_running ||
++		dl_time_before(p->dl.deadline,
++			       rq->dl.earliest_dl.curr));
++}
++
+ static int find_later_rq(struct task_struct *task);
+ 
+ static int
+@@ -1852,9 +1860,7 @@ select_task_rq_dl(struct task_struct *p, int cpu, int flags)
+ 		int target = find_later_rq(p);
+ 
+ 		if (target != -1 &&
+-				(dl_time_before(p->dl.deadline,
+-					cpu_rq(target)->dl.earliest_dl.curr) ||
+-				(cpu_rq(target)->dl.dl_nr_running == 0)))
++		    dl_task_is_earliest_deadline(p, cpu_rq(target)))
+ 			cpu = target;
+ 	}
+ 	rcu_read_unlock();
+@@ -2221,9 +2227,7 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
+ 
+ 		later_rq = cpu_rq(cpu);
+ 
+-		if (later_rq->dl.dl_nr_running &&
+-		    !dl_time_before(task->dl.deadline,
+-					later_rq->dl.earliest_dl.curr)) {
++		if (!dl_task_is_earliest_deadline(task, later_rq)) {
+ 			/*
+ 			 * Target rq has tasks of equal or earlier deadline,
+ 			 * retrying does not release any lock and is unlikely
+@@ -2251,9 +2255,7 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
+ 		 * its earliest one has a later deadline than our
+ 		 * task, the rq is a good one.
+ 		 */
+-		if (!later_rq->dl.dl_nr_running ||
+-		    dl_time_before(task->dl.deadline,
+-				   later_rq->dl.earliest_dl.curr))
++		if (dl_task_is_earliest_deadline(task, later_rq))
+ 			break;
+ 
+ 		/* Otherwise we try again. */
+@@ -2424,9 +2426,7 @@ static void pull_dl_task(struct rq *this_rq)
+ 		 *  - it will preempt the last one we pulled (if any).
+ 		 */
+ 		if (p && dl_time_before(p->dl.deadline, dmin) &&
+-		    (!this_rq->dl.dl_nr_running ||
+-		     dl_time_before(p->dl.deadline,
+-				    this_rq->dl.earliest_dl.curr))) {
++		    dl_task_is_earliest_deadline(p, this_rq)) {
+ 			WARN_ON(p == src_rq->curr);
+ 			WARN_ON(!task_on_rq_queued(p));
+ 
+-- 
+cgit 
+
+
+From 96458e7f7dc5ad14bd7577cbf1638e1504ad79dd Mon Sep 17 00:00:00 2001
+From: Shang XiaoJing <shangxiaojing@huawei.com>
+Date: Fri, 26 Aug 2022 18:00:37 +0800
+Subject: sched/deadline: Add replenish_dl_new_period helper
+
+Wrap repeated code in helper function replenish_dl_new_period, which set
+the deadline and runtime of input dl_se based on pi_of(dl_se). Note that
+setup_new_dl_entity originally set the deadline and runtime base on
+dl_se, which should equals to pi_of(dl_se) for non-boosted task.
+
+Signed-off-by: Shang XiaoJing <shangxiaojing@huawei.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Daniel Bristot de Oliveira <bristot@kernel.org>
+Link: https://lore.kernel.org/r/20220826100037.12146-1-shangxiaojing@huawei.com
+---
+ kernel/sched/deadline.c | 23 +++++++++++++----------
+ 1 file changed, 13 insertions(+), 10 deletions(-)
+
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 34271aff47126..3bf4b12ec5b7f 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -770,6 +770,14 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags);
+ static void __dequeue_task_dl(struct rq *rq, struct task_struct *p, int flags);
+ static void check_preempt_curr_dl(struct rq *rq, struct task_struct *p, int flags);
+ 
++static inline void replenish_dl_new_period(struct sched_dl_entity *dl_se,
++					    struct rq *rq)
++{
++	/* for non-boosted task, pi_of(dl_se) == dl_se */
++	dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
++	dl_se->runtime = pi_of(dl_se)->dl_runtime;
++}
++
+ /*
+  * We are being explicitly informed that a new instance is starting,
+  * and this means that:
+@@ -803,8 +811,7 @@ static inline void setup_new_dl_entity(struct sched_dl_entity *dl_se)
+ 	 * future; in fact, we must consider execution overheads (time
+ 	 * spent on hardirq context, etc.).
+ 	 */
+-	dl_se->deadline = rq_clock(rq) + dl_se->dl_deadline;
+-	dl_se->runtime = dl_se->dl_runtime;
++	replenish_dl_new_period(dl_se, rq);
+ }
+ 
+ /*
+@@ -836,10 +843,8 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se)
+ 	 * This could be the case for a !-dl task that is boosted.
+ 	 * Just go with full inherited parameters.
+ 	 */
+-	if (dl_se->dl_deadline == 0) {
+-		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
+-		dl_se->runtime = pi_of(dl_se)->dl_runtime;
+-	}
++	if (dl_se->dl_deadline == 0)
++		replenish_dl_new_period(dl_se, rq);
+ 
+ 	if (dl_se->dl_yielded && dl_se->runtime > 0)
+ 		dl_se->runtime = 0;
+@@ -866,8 +871,7 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se)
+ 	 */
+ 	if (dl_time_before(dl_se->deadline, rq_clock(rq))) {
+ 		printk_deferred_once("sched: DL replenish lagged too much\n");
+-		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
+-		dl_se->runtime = pi_of(dl_se)->dl_runtime;
++		replenish_dl_new_period(dl_se, rq);
+ 	}
+ 
+ 	if (dl_se->dl_yielded)
+@@ -1024,8 +1028,7 @@ static void update_dl_entity(struct sched_dl_entity *dl_se)
+ 			return;
+ 		}
+ 
+-		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
+-		dl_se->runtime = pi_of(dl_se)->dl_runtime;
++		replenish_dl_new_period(dl_se, rq);
+ 	}
+ }
+ 
+-- 
+cgit 
+
+
+From 33f93525799fa3c841b2ba93a56b2bb32ab11dc9 Mon Sep 17 00:00:00 2001
+From: Shang XiaoJing <shangxiaojing@huawei.com>
+Date: Sat, 27 Aug 2022 10:09:11 +0800
+Subject: sched/deadline: Move __dl_clear_params out of dl_bw lock
+
+As members in sched_dl_entity are independent with dl_bw, move
+__dl_clear_params out of dl_bw lock.
+
+Signed-off-by: Shang XiaoJing <shangxiaojing@huawei.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Daniel Bristot de Oliveira <bristot@kernel.org>
+Link: https://lore.kernel.org/r/20220827020911.30641-1-shangxiaojing@huawei.com
+---
+ kernel/sched/deadline.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 3bf4b12ec5b7f..d0fe6a20a9c9d 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -431,8 +431,8 @@ static void task_non_contending(struct task_struct *p)
+ 				sub_rq_bw(&p->dl, &rq->dl);
+ 			raw_spin_lock(&dl_b->lock);
+ 			__dl_sub(dl_b, p->dl.dl_bw, dl_bw_cpus(task_cpu(p)));
+-			__dl_clear_params(p);
+ 			raw_spin_unlock(&dl_b->lock);
++			__dl_clear_params(p);
+ 		}
+ 
+ 		return;
+-- 
+cgit 
+
+
+From 3e6efe87cd5ccabf0f1d4e3ef25881ca0fd337e7 Mon Sep 17 00:00:00 2001
+From: Abel Wu <wuyun.abel@bytedance.com>
+Date: Wed, 7 Sep 2022 19:19:56 +0800
+Subject: sched/fair: Remove redundant check in select_idle_smt()
+
+If two cpus share LLC cache, then the two cores they belong to
+are also in the same LLC domain.
+
+Signed-off-by: Abel Wu <wuyun.abel@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Josh Don <joshdon@google.com>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Link: https://lore.kernel.org/r/20220907112000.1854-2-wuyun.abel@bytedance.com
+---
+ kernel/sched/fair.c | 11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index efceb670e755b..9657c7de5f576 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6350,14 +6350,11 @@ static int select_idle_core(struct task_struct *p, int core, struct cpumask *cpu
+ /*
+  * Scan the local SMT mask for idle CPUs.
+  */
+-static int select_idle_smt(struct task_struct *p, struct sched_domain *sd, int target)
++static int select_idle_smt(struct task_struct *p, int target)
+ {
+ 	int cpu;
+ 
+-	for_each_cpu(cpu, cpu_smt_mask(target)) {
+-		if (!cpumask_test_cpu(cpu, p->cpus_ptr) ||
+-		    !cpumask_test_cpu(cpu, sched_domain_span(sd)))
+-			continue;
++	for_each_cpu_and(cpu, cpu_smt_mask(target), p->cpus_ptr) {
+ 		if (available_idle_cpu(cpu) || sched_idle_cpu(cpu))
+ 			return cpu;
+ 	}
+@@ -6381,7 +6378,7 @@ static inline int select_idle_core(struct task_struct *p, int core, struct cpuma
+ 	return __select_idle_cpu(core, p);
+ }
+ 
+-static inline int select_idle_smt(struct task_struct *p, struct sched_domain *sd, int target)
++static inline int select_idle_smt(struct task_struct *p, int target)
+ {
+ 	return -1;
+ }
+@@ -6615,7 +6612,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 		has_idle_core = test_idle_cores(target, false);
+ 
+ 		if (!has_idle_core && cpus_share_cache(prev, target)) {
+-			i = select_idle_smt(p, sd, prev);
++			i = select_idle_smt(p, prev);
+ 			if ((unsigned int)i < nr_cpumask_bits)
+ 				return i;
+ 		}
+-- 
+cgit 
+
+
+From b9bae70440d21e106fbc098803b5a190df65f2e0 Mon Sep 17 00:00:00 2001
+From: Abel Wu <wuyun.abel@bytedance.com>
+Date: Wed, 7 Sep 2022 19:19:57 +0800
+Subject: sched/fair: Avoid double search on same cpu
+
+The prev cpu is checked at the beginning of SIS, and it's unlikely
+to be idle before the second check in select_idle_smt(). So we'd
+better focus on its SMT siblings.
+
+Signed-off-by: Abel Wu <wuyun.abel@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Josh Don <joshdon@google.com>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Link: https://lore.kernel.org/r/20220907112000.1854-3-wuyun.abel@bytedance.com
+---
+ kernel/sched/fair.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 9657c7de5f576..1ad79aaaaf936 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6355,6 +6355,8 @@ static int select_idle_smt(struct task_struct *p, int target)
+ 	int cpu;
+ 
+ 	for_each_cpu_and(cpu, cpu_smt_mask(target), p->cpus_ptr) {
++		if (cpu == target)
++			continue;
+ 		if (available_idle_cpu(cpu) || sched_idle_cpu(cpu))
+ 			return cpu;
+ 	}
+-- 
+cgit 
+
+
+From 8eeeed9c4a791f0d1f2ea830eb75a4246c117ae2 Mon Sep 17 00:00:00 2001
+From: Abel Wu <wuyun.abel@bytedance.com>
+Date: Wed, 7 Sep 2022 19:19:58 +0800
+Subject: sched/fair: Remove useless check in select_idle_core()
+
+The function select_idle_core() only gets called when has_idle_cores
+is true which can be possible only when sched_smt_present is enabled.
+
+This change also aligns select_idle_core() with select_idle_smt() in
+the way that the caller do the check if necessary.
+
+Signed-off-by: Abel Wu <wuyun.abel@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Link: https://lore.kernel.org/r/20220907112000.1854-4-wuyun.abel@bytedance.com
+---
+ kernel/sched/fair.c | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 1ad79aaaaf936..03ce65068333d 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6321,9 +6321,6 @@ static int select_idle_core(struct task_struct *p, int core, struct cpumask *cpu
+ 	bool idle = true;
+ 	int cpu;
+ 
+-	if (!static_branch_likely(&sched_smt_present))
+-		return __select_idle_cpu(core, p);
+-
+ 	for_each_cpu(cpu, cpu_smt_mask(core)) {
+ 		if (!available_idle_cpu(cpu)) {
+ 			idle = false;
+-- 
+cgit 
+
+
+From 398ba2b0cc0a43964fe3d2dd19cb2a478f1f220b Mon Sep 17 00:00:00 2001
+From: Abel Wu <wuyun.abel@bytedance.com>
+Date: Wed, 7 Sep 2022 19:19:59 +0800
+Subject: sched/fair: Default to false in test_idle_cores()
+
+It's uncertain whether idle cores exist or not if shared sched-
+domains are not ready, so returning "no idle cores" usually
+makes sense.
+
+While __update_idle_core() is an exception, it checks status
+of this core and set hint to shared sched-domain if necessary.
+So the whole logic of this function depends on the existence
+of shared sched-domain, and can certainly bail out early if
+it is not available.
+
+It's somehow a little tricky, and as Josh suggested that it
+should be transient while the domain isn't ready. So remove
+the self-defined default value to make things more clearer.
+
+Signed-off-by: Abel Wu <wuyun.abel@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Josh Don <joshdon@google.com>
+Acked-by: Mel Gorman <mgorman@techsingularity.net>
+Link: https://lore.kernel.org/r/20220907112000.1854-5-wuyun.abel@bytedance.com
+---
+ kernel/sched/fair.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 03ce65068333d..23b020c3d3a03 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1588,11 +1588,11 @@ numa_type numa_classify(unsigned int imbalance_pct,
+ 
+ #ifdef CONFIG_SCHED_SMT
+ /* Forward declarations of select_idle_sibling helpers */
+-static inline bool test_idle_cores(int cpu, bool def);
++static inline bool test_idle_cores(int cpu);
+ static inline int numa_idle_core(int idle_core, int cpu)
+ {
+ 	if (!static_branch_likely(&sched_smt_present) ||
+-	    idle_core >= 0 || !test_idle_cores(cpu, false))
++	    idle_core >= 0 || !test_idle_cores(cpu))
+ 		return idle_core;
+ 
+ 	/*
+@@ -6271,7 +6271,7 @@ static inline void set_idle_cores(int cpu, int val)
+ 		WRITE_ONCE(sds->has_idle_cores, val);
+ }
+ 
+-static inline bool test_idle_cores(int cpu, bool def)
++static inline bool test_idle_cores(int cpu)
+ {
+ 	struct sched_domain_shared *sds;
+ 
+@@ -6279,7 +6279,7 @@ static inline bool test_idle_cores(int cpu, bool def)
+ 	if (sds)
+ 		return READ_ONCE(sds->has_idle_cores);
+ 
+-	return def;
++	return false;
+ }
+ 
+ /*
+@@ -6295,7 +6295,7 @@ void __update_idle_core(struct rq *rq)
+ 	int cpu;
+ 
+ 	rcu_read_lock();
+-	if (test_idle_cores(core, true))
++	if (test_idle_cores(core))
+ 		goto unlock;
+ 
+ 	for_each_cpu(cpu, cpu_smt_mask(core)) {
+@@ -6367,9 +6367,9 @@ static inline void set_idle_cores(int cpu, int val)
+ {
+ }
+ 
+-static inline bool test_idle_cores(int cpu, bool def)
++static inline bool test_idle_cores(int cpu)
+ {
+-	return def;
++	return false;
+ }
+ 
+ static inline int select_idle_core(struct task_struct *p, int core, struct cpumask *cpus, int *idle_cpu)
+@@ -6608,7 +6608,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 		return target;
+ 
+ 	if (sched_smt_active()) {
+-		has_idle_core = test_idle_cores(target, false);
++		has_idle_core = test_idle_cores(target);
+ 
+ 		if (!has_idle_core && cpus_share_cache(prev, target)) {
+ 			i = select_idle_smt(p, prev);
+-- 
+cgit 
+
+
+From 96c1c0cfe493a7ed549169a6f044bbb83e490fb5 Mon Sep 17 00:00:00 2001
+From: Abel Wu <wuyun.abel@bytedance.com>
+Date: Wed, 7 Sep 2022 19:20:00 +0800
+Subject: sched/fair: Cleanup for SIS_PROP
+
+The sched-domain of this cpu is only used for some heuristics when
+SIS_PROP is enabled, and it should be irrelevant whether the local
+sd_llc is valid or not, since all we care about is target sd_llc
+if !SIS_PROP.
+
+Access the local domain only when there is a need.
+
+Signed-off-by: Abel Wu <wuyun.abel@bytedance.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Mel Gorman <mgorman@suse.de>
+Link: https://lore.kernel.org/r/20220907112000.1854-6-wuyun.abel@bytedance.com
+---
+ kernel/sched/fair.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 23b020c3d3a03..7bad641faef9e 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -6396,19 +6396,19 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool
+ 	struct sched_domain_shared *sd_share;
+ 	struct rq *this_rq = this_rq();
+ 	int this = smp_processor_id();
+-	struct sched_domain *this_sd;
++	struct sched_domain *this_sd = NULL;
+ 	u64 time = 0;
+ 
+-	this_sd = rcu_dereference(*this_cpu_ptr(&sd_llc));
+-	if (!this_sd)
+-		return -1;
+-
+ 	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
+ 
+ 	if (sched_feat(SIS_PROP) && !has_idle_core) {
+ 		u64 avg_cost, avg_idle, span_avg;
+ 		unsigned long now = jiffies;
+ 
++		this_sd = rcu_dereference(*this_cpu_ptr(&sd_llc));
++		if (!this_sd)
++			return -1;
++
+ 		/*
+ 		 * If we're busy, the assumption that the last idle period
+ 		 * predicts the future is flawed; age away the remaining
+@@ -6462,7 +6462,7 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool
+ 	if (has_idle_core)
+ 		set_idle_cores(target, false);
+ 
+-	if (sched_feat(SIS_PROP) && !has_idle_core) {
++	if (sched_feat(SIS_PROP) && this_sd && !has_idle_core) {
+ 		time = cpu_clock(this) - time;
+ 
+ 		/*
+-- 
+cgit 
+
+
+From b0defa7ae03ecf91b8bfd10ede430cff12fcbd06 Mon Sep 17 00:00:00 2001
+From: Vincent Guittot <vincent.guittot@linaro.org>
+Date: Thu, 25 Aug 2022 14:27:23 +0200
+Subject: sched/fair: Make sure to try to detach at least one movable task
+
+During load balance, we try at most env->loop_max time to move a task.
+But it can happen that the loop_max LRU tasks (ie tail of
+the cfs_tasks list) can't be moved to dst_cpu because of affinity.
+In this case, loop in the list until we found at least one.
+
+The maximum of detached tasks remained the same as before.
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220825122726.20819-2-vincent.guittot@linaro.org
+---
+ kernel/sched/fair.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 4e5b171b11718..dae3bfae1bc0e 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8049,8 +8049,12 @@ static int detach_tasks(struct lb_env *env)
+ 		p = list_last_entry(tasks, struct task_struct, se.group_node);
+ 
+ 		env->loop++;
+-		/* We've more or less seen every task there is, call it quits */
+-		if (env->loop > env->loop_max)
++		/*
++		 * We've more or less seen every task there is, call it quits
++		 * unless we haven't found any movable task yet.
++		 */
++		if (env->loop > env->loop_max &&
++		    !(env->flags & LBF_ALL_PINNED))
+ 			break;
+ 
+ 		/* take a breather every nr_migrate tasks */
+@@ -10179,7 +10183,9 @@ more_balance:
+ 
+ 		if (env.flags & LBF_NEED_BREAK) {
+ 			env.flags &= ~LBF_NEED_BREAK;
+-			goto more_balance;
++			/* Stop if we tried all running tasks */
++			if (env.loop < busiest->nr_running)
++				goto more_balance;
+ 		}
+ 
+ 		/*
+-- 
+cgit 
+
+
+From c59862f8265f8060b6650ee1dc12159fe5c89779 Mon Sep 17 00:00:00 2001
+From: Vincent Guittot <vincent.guittot@linaro.org>
+Date: Thu, 25 Aug 2022 14:27:24 +0200
+Subject: sched/fair: Cleanup loop_max and loop_break
+
+sched_nr_migrate_break is set to a fix value and never changes so we can
+replace it by a define SCHED_NR_MIGRATE_BREAK.
+
+Also, we adjust SCHED_NR_MIGRATE_BREAK to be aligned with the init value
+of sysctl_sched_nr_migrate which can be init to different values.
+
+Then, use SCHED_NR_MIGRATE_BREAK to init sysctl_sched_nr_migrate.
+
+The behavior stays unchanged unless you modify sysctl_sched_nr_migrate
+trough debugfs.
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220825122726.20819-3-vincent.guittot@linaro.org
+---
+ kernel/sched/core.c  |  6 +-----
+ kernel/sched/fair.c  | 11 ++++-------
+ kernel/sched/sched.h |  6 ++++++
+ 3 files changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 2b85d1b5fe0c1..4fa4a3ddb4f4f 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -142,11 +142,7 @@ __read_mostly int sysctl_resched_latency_warn_once = 1;
+  * Number of tasks to iterate in a single balance run.
+  * Limited because this is done with IRQs disabled.
+  */
+-#ifdef CONFIG_PREEMPT_RT
+-const_debug unsigned int sysctl_sched_nr_migrate = 8;
+-#else
+-const_debug unsigned int sysctl_sched_nr_migrate = 32;
+-#endif
++const_debug unsigned int sysctl_sched_nr_migrate = SCHED_NR_MIGRATE_BREAK;
+ 
+ __read_mostly int scheduler_running;
+ 
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index dae3bfae1bc0e..7b3a58fcb4368 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8009,8 +8009,6 @@ static struct task_struct *detach_one_task(struct lb_env *env)
+ 	return NULL;
+ }
+ 
+-static const unsigned int sched_nr_migrate_break = 32;
+-
+ /*
+  * detach_tasks() -- tries to detach up to imbalance load/util/tasks from
+  * busiest_rq, as part of a balancing operation within domain "sd".
+@@ -8059,7 +8057,7 @@ static int detach_tasks(struct lb_env *env)
+ 
+ 		/* take a breather every nr_migrate tasks */
+ 		if (env->loop > env->loop_break) {
+-			env->loop_break += sched_nr_migrate_break;
++			env->loop_break += SCHED_NR_MIGRATE_BREAK;
+ 			env->flags |= LBF_NEED_BREAK;
+ 			break;
+ 		}
+@@ -10100,14 +10098,13 @@ static int load_balance(int this_cpu, struct rq *this_rq,
+ 	struct rq *busiest;
+ 	struct rq_flags rf;
+ 	struct cpumask *cpus = this_cpu_cpumask_var_ptr(load_balance_mask);
+-
+ 	struct lb_env env = {
+ 		.sd		= sd,
+ 		.dst_cpu	= this_cpu,
+ 		.dst_rq		= this_rq,
+ 		.dst_grpmask    = sched_group_span(sd->groups),
+ 		.idle		= idle,
+-		.loop_break	= sched_nr_migrate_break,
++		.loop_break	= SCHED_NR_MIGRATE_BREAK,
+ 		.cpus		= cpus,
+ 		.fbq_type	= all,
+ 		.tasks		= LIST_HEAD_INIT(env.tasks),
+@@ -10216,7 +10213,7 @@ more_balance:
+ 			env.dst_cpu	 = env.new_dst_cpu;
+ 			env.flags	&= ~LBF_DST_PINNED;
+ 			env.loop	 = 0;
+-			env.loop_break	 = sched_nr_migrate_break;
++			env.loop_break	 = SCHED_NR_MIGRATE_BREAK;
+ 
+ 			/*
+ 			 * Go back to "more_balance" rather than "redo" since we
+@@ -10248,7 +10245,7 @@ more_balance:
+ 			 */
+ 			if (!cpumask_subset(cpus, env.dst_grpmask)) {
+ 				env.loop = 0;
+-				env.loop_break = sched_nr_migrate_break;
++				env.loop_break = SCHED_NR_MIGRATE_BREAK;
+ 				goto redo;
+ 			}
+ 			goto out_all_pinned;
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 91b2c7ec53bdc..1fc198be1ffd0 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2423,6 +2423,12 @@ extern void deactivate_task(struct rq *rq, struct task_struct *p, int flags);
+ 
+ extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
+ 
++#ifdef CONFIG_PREEMPT_RT
++#define SCHED_NR_MIGRATE_BREAK 8
++#else
++#define SCHED_NR_MIGRATE_BREAK 32
++#endif
++
+ extern const_debug unsigned int sysctl_sched_nr_migrate;
+ extern const_debug unsigned int sysctl_sched_migration_cost;
+ 
+-- 
+cgit 
+
+
+From 7e9518baed4cef76dbfa07cbffbae1e6dbc87be6 Mon Sep 17 00:00:00 2001
+From: Vincent Guittot <vincent.guittot@linaro.org>
+Date: Thu, 25 Aug 2022 14:27:25 +0200
+Subject: sched/fair: Move call to list_last_entry() in detach_tasks
+
+Move the call to list_last_entry() in detach_tasks() after testing
+loop_max and loop_break.
+
+Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/20220825122726.20819-4-vincent.guittot@linaro.org
+---
+ kernel/sched/fair.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 7b3a58fcb4368..5ffec43706023 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8044,8 +8044,6 @@ static int detach_tasks(struct lb_env *env)
+ 		if (env->idle != CPU_NOT_IDLE && env->src_rq->nr_running <= 1)
+ 			break;
+ 
+-		p = list_last_entry(tasks, struct task_struct, se.group_node);
+-
+ 		env->loop++;
+ 		/*
+ 		 * We've more or less seen every task there is, call it quits
+@@ -8062,6 +8060,8 @@ static int detach_tasks(struct lb_env *env)
+ 			break;
+ 		}
+ 
++		p = list_last_entry(tasks, struct task_struct, se.group_node);
++
+ 		if (!can_migrate_task(p, env))
+ 			goto next;
+ 
+-- 
+cgit 
+
+From 5aec788aeb8eb74282b75ac1b317beb0fbb69a42 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Tue, 27 Sep 2022 21:02:34 +0200
+Subject: sched: Fix TASK_state comparisons
+
+Task state is fundamentally a bitmask; direct comparisons are probably
+not working as intended. Specifically the normal wait-state have
+a number of possible modifiers:
+
+  TASK_UNINTERRUPTIBLE:	TASK_WAKEKILL, TASK_NOLOAD, TASK_FREEZABLE
+  TASK_INTERRUPTIBLE:   TASK_FREEZABLE
+
+Specifically, the addition of TASK_FREEZABLE wrecked
+__wait_is_interruptible(). This however led to an audit of direct
+comparisons yielding the rest of the changes.
+
+Fixes: f5d39b020809 ("freezer,sched: Rewrite core freezer logic")
+Reported-by: Christian Borntraeger <borntraeger@linux.ibm.com>
+Debugged-by: Christian Borntraeger <borntraeger@linux.ibm.com>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: Christian Borntraeger <borntraeger@linux.ibm.com>
+---
+ include/linux/wait.h | 2 +-
+ kernel/hung_task.c   | 8 ++++++--
+ kernel/sched/core.c  | 2 +-
+ 3 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/wait.h b/include/linux/wait.h
+index 14ad8a0e9fac6..7f5a51aae0a73 100644
+--- a/include/linux/wait.h
++++ b/include/linux/wait.h
+@@ -281,7 +281,7 @@ static inline void wake_up_pollfree(struct wait_queue_head *wq_head)
+ 
+ #define ___wait_is_interruptible(state)						\
+ 	(!__builtin_constant_p(state) ||					\
+-		state == TASK_INTERRUPTIBLE || state == TASK_KILLABLE)		\
++	 (state & (TASK_INTERRUPTIBLE | TASK_WAKEKILL)))
+ 
+ extern void init_wait_entry(struct wait_queue_entry *wq_entry, int flags);
+ 
+diff --git a/kernel/hung_task.c b/kernel/hung_task.c
+index f1321c03c32af..3a15169ba2f88 100644
+--- a/kernel/hung_task.c
++++ b/kernel/hung_task.c
+@@ -191,6 +191,8 @@ static void check_hung_uninterruptible_tasks(unsigned long timeout)
+ 	hung_task_show_lock = false;
+ 	rcu_read_lock();
+ 	for_each_process_thread(g, t) {
++		unsigned int state;
++
+ 		if (!max_count--)
+ 			goto unlock;
+ 		if (time_after(jiffies, last_break + HUNG_TASK_LOCK_BREAK)) {
+@@ -198,8 +200,10 @@ static void check_hung_uninterruptible_tasks(unsigned long timeout)
+ 				goto unlock;
+ 			last_break = jiffies;
+ 		}
+-		/* use "==" to skip the TASK_KILLABLE tasks waiting on NFS */
+-		if (READ_ONCE(t->__state) == TASK_UNINTERRUPTIBLE)
++		/* skip the TASK_KILLABLE tasks -- these can be killed */
++		state = READ_ONCE(t->__state);
++		if ((state & TASK_UNINTERRUPTIBLE) &&
++		    !(state & TASK_WAKEKILL))
+ 			check_hung_task(t, timeout);
+ 	}
+  unlock:
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 4fa4a3ddb4f4f..02dc1b8e3cb6b 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -8884,7 +8884,7 @@ state_filter_match(unsigned long state_filter, struct task_struct *p)
+ 	 * When looking for TASK_UNINTERRUPTIBLE skip TASK_IDLE (allows
+ 	 * TASK_KILLABLE).
+ 	 */
+-	if (state_filter == TASK_UNINTERRUPTIBLE && state == TASK_IDLE)
++	if (state_filter == TASK_UNINTERRUPTIBLE && (state & TASK_NOLOAD))
+ 		return false;
+ 
+ 	return true;
+-- 
+cgit 
+
+From fdf756f7127185eeffe00e918e66dfee797f3625 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Fri, 30 Sep 2022 16:39:46 +0200
+Subject: sched: Fix more TASK_state comparisons
+
+Boris reported hung_task splats after commit 5aec788aeb8e ("sched: Fix
+TASK_state comparisons"). Upon closer consideration of that change it
+doesn't only exclude TASK_KILLABLE, but also TASK_IDLE.
+
+Update the comment to reflect this fact and add an additional
+TASK_NOLOAD test to exclude them.
+
+Additionally, remove the TASK_FREEZABLE early exit from
+check_hung_task(), a freezable task is not a frozen task.
+
+Fixes: 5aec788aeb8e ("sched: Fix TASK_state comparisons")
+Reported-by: Borislav Petkov <bp@alien8.de>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Tested-by: Borislav Petkov <bp@alien8.de>
+---
+ kernel/hung_task.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/hung_task.c b/kernel/hung_task.c
+index 3a15169ba2f88..c71889f3f3fc2 100644
+--- a/kernel/hung_task.c
++++ b/kernel/hung_task.c
+@@ -200,10 +200,14 @@ static void check_hung_uninterruptible_tasks(unsigned long timeout)
+ 				goto unlock;
+ 			last_break = jiffies;
+ 		}
+-		/* skip the TASK_KILLABLE tasks -- these can be killed */
++		/*
++		 * skip the TASK_KILLABLE tasks -- these can be killed
++		 * skip the TASK_IDLE tasks -- those are genuinely idle
++		 */
+ 		state = READ_ONCE(t->__state);
+ 		if ((state & TASK_UNINTERRUPTIBLE) &&
+-		    !(state & TASK_WAKEKILL))
++		    !(state & TASK_WAKEKILL) &&
++		    !(state & TASK_NOLOAD))
+ 			check_hung_task(t, timeout);
+ 	}
+  unlock:
+-- 
+cgit 
+
+From 5950e5d574c636a07dd21a872c2f8b41f6d20c55 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Mon, 22 Aug 2022 13:18:17 +0200
+Subject: freezer: Have {,un}lock_system_sleep() save/restore flags
+
+Rafael explained that the reason for having both PF_NOFREEZE and
+PF_FREEZER_SKIP is that {,un}lock_system_sleep() is callable from
+kthread context that has previously called set_freezable().
+
+In preparation of merging the flags, have {,un}lock_system_slee() save
+and restore current->flags.
+
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://lore.kernel.org/r/20220822114648.725003428@infradead.org
+---
+ drivers/acpi/x86/s2idle.c         | 12 ++++++++----
+ drivers/scsi/scsi_transport_spi.c |  7 ++++---
+ include/linux/suspend.h           |  8 ++++----
+ kernel/power/hibernate.c          | 35 ++++++++++++++++++++++-------------
+ kernel/power/main.c               | 16 ++++++++++------
+ kernel/power/suspend.c            | 12 ++++++++----
+ kernel/power/user.c               | 24 ++++++++++++++----------
+ 7 files changed, 70 insertions(+), 44 deletions(-)
+
+diff --git a/drivers/acpi/x86/s2idle.c b/drivers/acpi/x86/s2idle.c
+index f9ac12b778e6a..1d1d6c80f6a84 100644
+--- a/drivers/acpi/x86/s2idle.c
++++ b/drivers/acpi/x86/s2idle.c
+@@ -541,12 +541,14 @@ void acpi_s2idle_setup(void)
+ 
+ int acpi_register_lps0_dev(struct acpi_s2idle_dev_ops *arg)
+ {
++	unsigned int sleep_flags;
++
+ 	if (!lps0_device_handle || sleep_no_lps0)
+ 		return -ENODEV;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 	list_add(&arg->list_node, &lps0_s2idle_devops_head);
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 
+ 	return 0;
+ }
+@@ -554,12 +556,14 @@ EXPORT_SYMBOL_GPL(acpi_register_lps0_dev);
+ 
+ void acpi_unregister_lps0_dev(struct acpi_s2idle_dev_ops *arg)
+ {
++	unsigned int sleep_flags;
++
+ 	if (!lps0_device_handle || sleep_no_lps0)
+ 		return;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 	list_del(&arg->list_node);
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ }
+ EXPORT_SYMBOL_GPL(acpi_unregister_lps0_dev);
+ 
+diff --git a/drivers/scsi/scsi_transport_spi.c b/drivers/scsi/scsi_transport_spi.c
+index bd72c38d7bfc4..f569cf0095c28 100644
+--- a/drivers/scsi/scsi_transport_spi.c
++++ b/drivers/scsi/scsi_transport_spi.c
+@@ -998,8 +998,9 @@ void
+ spi_dv_device(struct scsi_device *sdev)
+ {
+ 	struct scsi_target *starget = sdev->sdev_target;
+-	u8 *buffer;
+ 	const int len = SPI_MAX_ECHO_BUFFER_SIZE*2;
++	unsigned int sleep_flags;
++	u8 *buffer;
+ 
+ 	/*
+ 	 * Because this function and the power management code both call
+@@ -1007,7 +1008,7 @@ spi_dv_device(struct scsi_device *sdev)
+ 	 * while suspend or resume is in progress. Hence the
+ 	 * lock/unlock_system_sleep() calls.
+ 	 */
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 
+ 	if (scsi_autopm_get_device(sdev))
+ 		goto unlock_system_sleep;
+@@ -1058,7 +1059,7 @@ put_autopm:
+ 	scsi_autopm_put_device(sdev);
+ 
+ unlock_system_sleep:
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ }
+ EXPORT_SYMBOL(spi_dv_device);
+ 
+diff --git a/include/linux/suspend.h b/include/linux/suspend.h
+index 70f2921e2e703..34fb72c0db857 100644
+--- a/include/linux/suspend.h
++++ b/include/linux/suspend.h
+@@ -510,8 +510,8 @@ extern bool pm_save_wakeup_count(unsigned int count);
+ extern void pm_wakep_autosleep_enabled(bool set);
+ extern void pm_print_active_wakeup_sources(void);
+ 
+-extern void lock_system_sleep(void);
+-extern void unlock_system_sleep(void);
++extern unsigned int lock_system_sleep(void);
++extern void unlock_system_sleep(unsigned int);
+ 
+ #else /* !CONFIG_PM_SLEEP */
+ 
+@@ -534,8 +534,8 @@ static inline void pm_system_wakeup(void) {}
+ static inline void pm_wakeup_clear(bool reset) {}
+ static inline void pm_system_irq_wakeup(unsigned int irq_number) {}
+ 
+-static inline void lock_system_sleep(void) {}
+-static inline void unlock_system_sleep(void) {}
++static inline unsigned int lock_system_sleep(void) { return 0; }
++static inline void unlock_system_sleep(unsigned int flags) {}
+ 
+ #endif /* !CONFIG_PM_SLEEP */
+ 
+diff --git a/kernel/power/hibernate.c b/kernel/power/hibernate.c
+index 89c71fce225dd..f58a0aa92310c 100644
+--- a/kernel/power/hibernate.c
++++ b/kernel/power/hibernate.c
+@@ -92,20 +92,24 @@ bool hibernation_available(void)
+  */
+ void hibernation_set_ops(const struct platform_hibernation_ops *ops)
+ {
++	unsigned int sleep_flags;
++
+ 	if (ops && !(ops->begin && ops->end &&  ops->pre_snapshot
+ 	    && ops->prepare && ops->finish && ops->enter && ops->pre_restore
+ 	    && ops->restore_cleanup && ops->leave)) {
+ 		WARN_ON(1);
+ 		return;
+ 	}
+-	lock_system_sleep();
++
++	sleep_flags = lock_system_sleep();
++
+ 	hibernation_ops = ops;
+ 	if (ops)
+ 		hibernation_mode = HIBERNATION_PLATFORM;
+ 	else if (hibernation_mode == HIBERNATION_PLATFORM)
+ 		hibernation_mode = HIBERNATION_SHUTDOWN;
+ 
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ }
+ EXPORT_SYMBOL_GPL(hibernation_set_ops);
+ 
+@@ -713,6 +717,7 @@ static int load_image_and_restore(void)
+ int hibernate(void)
+ {
+ 	bool snapshot_test = false;
++	unsigned int sleep_flags;
+ 	int error;
+ 
+ 	if (!hibernation_available()) {
+@@ -720,7 +725,7 @@ int hibernate(void)
+ 		return -EPERM;
+ 	}
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 	/* The snapshot device should not be opened while we're running */
+ 	if (!hibernate_acquire()) {
+ 		error = -EBUSY;
+@@ -794,7 +799,7 @@ int hibernate(void)
+ 	pm_restore_console();
+ 	hibernate_release();
+  Unlock:
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 	pr_info("hibernation exit\n");
+ 
+ 	return error;
+@@ -809,9 +814,10 @@ int hibernate(void)
+  */
+ int hibernate_quiet_exec(int (*func)(void *data), void *data)
+ {
++	unsigned int sleep_flags;
+ 	int error;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 
+ 	if (!hibernate_acquire()) {
+ 		error = -EBUSY;
+@@ -891,7 +897,7 @@ restore:
+ 	hibernate_release();
+ 
+ unlock:
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 
+ 	return error;
+ }
+@@ -1100,11 +1106,12 @@ static ssize_t disk_show(struct kobject *kobj, struct kobj_attribute *attr,
+ static ssize_t disk_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 			  const char *buf, size_t n)
+ {
++	int mode = HIBERNATION_INVALID;
++	unsigned int sleep_flags;
+ 	int error = 0;
+-	int i;
+ 	int len;
+ 	char *p;
+-	int mode = HIBERNATION_INVALID;
++	int i;
+ 
+ 	if (!hibernation_available())
+ 		return -EPERM;
+@@ -1112,7 +1119,7 @@ static ssize_t disk_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 	p = memchr(buf, '\n', n);
+ 	len = p ? p - buf : n;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 	for (i = HIBERNATION_FIRST; i <= HIBERNATION_MAX; i++) {
+ 		if (len == strlen(hibernation_modes[i])
+ 		    && !strncmp(buf, hibernation_modes[i], len)) {
+@@ -1142,7 +1149,7 @@ static ssize_t disk_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 	if (!error)
+ 		pm_pr_dbg("Hibernation mode set to '%s'\n",
+ 			       hibernation_modes[mode]);
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 	return error ? error : n;
+ }
+ 
+@@ -1158,9 +1165,10 @@ static ssize_t resume_show(struct kobject *kobj, struct kobj_attribute *attr,
+ static ssize_t resume_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 			    const char *buf, size_t n)
+ {
+-	dev_t res;
++	unsigned int sleep_flags;
+ 	int len = n;
+ 	char *name;
++	dev_t res;
+ 
+ 	if (len && buf[len-1] == '\n')
+ 		len--;
+@@ -1173,9 +1181,10 @@ static ssize_t resume_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 	if (!res)
+ 		return -EINVAL;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 	swsusp_resume_device = res;
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
++
+ 	pm_pr_dbg("Configured hibernation resume from disk to %u\n",
+ 		  swsusp_resume_device);
+ 	noresume = 0;
+diff --git a/kernel/power/main.c b/kernel/power/main.c
+index e3694034b7536..dae3d17919e6f 100644
+--- a/kernel/power/main.c
++++ b/kernel/power/main.c
+@@ -21,14 +21,16 @@
+ 
+ #ifdef CONFIG_PM_SLEEP
+ 
+-void lock_system_sleep(void)
++unsigned int lock_system_sleep(void)
+ {
++	unsigned int flags = current->flags;
+ 	current->flags |= PF_FREEZER_SKIP;
+ 	mutex_lock(&system_transition_mutex);
++	return flags;
+ }
+ EXPORT_SYMBOL_GPL(lock_system_sleep);
+ 
+-void unlock_system_sleep(void)
++void unlock_system_sleep(unsigned int flags)
+ {
+ 	/*
+ 	 * Don't use freezer_count() because we don't want the call to
+@@ -46,7 +48,8 @@ void unlock_system_sleep(void)
+ 	 * Which means, if we use try_to_freeze() here, it would make them
+ 	 * enter the refrigerator, thus causing hibernation to lockup.
+ 	 */
+-	current->flags &= ~PF_FREEZER_SKIP;
++	if (!(flags & PF_FREEZER_SKIP))
++		current->flags &= ~PF_FREEZER_SKIP;
+ 	mutex_unlock(&system_transition_mutex);
+ }
+ EXPORT_SYMBOL_GPL(unlock_system_sleep);
+@@ -263,16 +266,17 @@ static ssize_t pm_test_show(struct kobject *kobj, struct kobj_attribute *attr,
+ static ssize_t pm_test_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 				const char *buf, size_t n)
+ {
++	unsigned int sleep_flags;
+ 	const char * const *s;
++	int error = -EINVAL;
+ 	int level;
+ 	char *p;
+ 	int len;
+-	int error = -EINVAL;
+ 
+ 	p = memchr(buf, '\n', n);
+ 	len = p ? p - buf : n;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 
+ 	level = TEST_FIRST;
+ 	for (s = &pm_tests[level]; level <= TEST_MAX; s++, level++)
+@@ -282,7 +286,7 @@ static ssize_t pm_test_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 			break;
+ 		}
+ 
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 
+ 	return error ? error : n;
+ }
+diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
+index 827075944d283..0d5f1fde6a3aa 100644
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -75,9 +75,11 @@ EXPORT_SYMBOL_GPL(pm_suspend_default_s2idle);
+ 
+ void s2idle_set_ops(const struct platform_s2idle_ops *ops)
+ {
+-	lock_system_sleep();
++	unsigned int sleep_flags;
++
++	sleep_flags = lock_system_sleep();
+ 	s2idle_ops = ops;
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ }
+ 
+ static void s2idle_begin(void)
+@@ -200,7 +202,9 @@ __setup("mem_sleep_default=", mem_sleep_default_setup);
+  */
+ void suspend_set_ops(const struct platform_suspend_ops *ops)
+ {
+-	lock_system_sleep();
++	unsigned int sleep_flags;
++
++	sleep_flags = lock_system_sleep();
+ 
+ 	suspend_ops = ops;
+ 
+@@ -216,7 +220,7 @@ void suspend_set_ops(const struct platform_suspend_ops *ops)
+ 			mem_sleep_current = PM_SUSPEND_MEM;
+ 	}
+ 
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ }
+ EXPORT_SYMBOL_GPL(suspend_set_ops);
+ 
+diff --git a/kernel/power/user.c b/kernel/power/user.c
+index d43c2aa583b26..3a4e70366f354 100644
+--- a/kernel/power/user.c
++++ b/kernel/power/user.c
+@@ -47,12 +47,13 @@ int is_hibernate_resume_dev(dev_t dev)
+ static int snapshot_open(struct inode *inode, struct file *filp)
+ {
+ 	struct snapshot_data *data;
++	unsigned int sleep_flags;
+ 	int error;
+ 
+ 	if (!hibernation_available())
+ 		return -EPERM;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 
+ 	if (!hibernate_acquire()) {
+ 		error = -EBUSY;
+@@ -98,7 +99,7 @@ static int snapshot_open(struct inode *inode, struct file *filp)
+ 	data->dev = 0;
+ 
+  Unlock:
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 
+ 	return error;
+ }
+@@ -106,8 +107,9 @@ static int snapshot_open(struct inode *inode, struct file *filp)
+ static int snapshot_release(struct inode *inode, struct file *filp)
+ {
+ 	struct snapshot_data *data;
++	unsigned int sleep_flags;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 
+ 	swsusp_free();
+ 	data = filp->private_data;
+@@ -124,7 +126,7 @@ static int snapshot_release(struct inode *inode, struct file *filp)
+ 			PM_POST_HIBERNATION : PM_POST_RESTORE);
+ 	hibernate_release();
+ 
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 
+ 	return 0;
+ }
+@@ -132,11 +134,12 @@ static int snapshot_release(struct inode *inode, struct file *filp)
+ static ssize_t snapshot_read(struct file *filp, char __user *buf,
+                              size_t count, loff_t *offp)
+ {
++	loff_t pg_offp = *offp & ~PAGE_MASK;
+ 	struct snapshot_data *data;
++	unsigned int sleep_flags;
+ 	ssize_t res;
+-	loff_t pg_offp = *offp & ~PAGE_MASK;
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 
+ 	data = filp->private_data;
+ 	if (!data->ready) {
+@@ -157,7 +160,7 @@ static ssize_t snapshot_read(struct file *filp, char __user *buf,
+ 		*offp += res;
+ 
+  Unlock:
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 
+ 	return res;
+ }
+@@ -165,16 +168,17 @@ static ssize_t snapshot_read(struct file *filp, char __user *buf,
+ static ssize_t snapshot_write(struct file *filp, const char __user *buf,
+                               size_t count, loff_t *offp)
+ {
++	loff_t pg_offp = *offp & ~PAGE_MASK;
+ 	struct snapshot_data *data;
++	unsigned long sleep_flags;
+ 	ssize_t res;
+-	loff_t pg_offp = *offp & ~PAGE_MASK;
+ 
+ 	if (need_wait) {
+ 		wait_for_device_probe();
+ 		need_wait = false;
+ 	}
+ 
+-	lock_system_sleep();
++	sleep_flags = lock_system_sleep();
+ 
+ 	data = filp->private_data;
+ 
+@@ -196,7 +200,7 @@ static ssize_t snapshot_write(struct file *filp, const char __user *buf,
+ 	if (res > 0)
+ 		*offp += res;
+ unlock:
+-	unlock_system_sleep();
++	unlock_system_sleep(sleep_flags);
+ 
+ 	return res;
+ }
+-- 
+cgit 
+
+
+From 1fbcaa923ce2d7e6de17abd74fa076dc1e0be1a2 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Mon, 22 Aug 2022 13:18:18 +0200
+Subject: freezer,umh: Clean up freezer/initrd interaction
+
+handle_initrd() marks itself as PF_FREEZER_SKIP in order to ensure
+that the UMH, which is going to freeze the system, doesn't
+indefinitely wait for it's caller.
+
+Rework things by adding UMH_FREEZABLE to indicate the completion is
+freezable.
+
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Acked-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://lore.kernel.org/r/20220822114648.791019324@infradead.org
+---
+ include/linux/umh.h     |  9 +++++----
+ init/do_mounts_initrd.c | 10 +---------
+ kernel/umh.c            |  8 ++++++++
+ 3 files changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/include/linux/umh.h b/include/linux/umh.h
+index 244aff6382208..5d1f6129b8470 100644
+--- a/include/linux/umh.h
++++ b/include/linux/umh.h
+@@ -11,10 +11,11 @@
+ struct cred;
+ struct file;
+ 
+-#define UMH_NO_WAIT	0	/* don't wait at all */
+-#define UMH_WAIT_EXEC	1	/* wait for the exec, but not the process */
+-#define UMH_WAIT_PROC	2	/* wait for the process to complete */
+-#define UMH_KILLABLE	4	/* wait for EXEC/PROC killable */
++#define UMH_NO_WAIT	0x00	/* don't wait at all */
++#define UMH_WAIT_EXEC	0x01	/* wait for the exec, but not the process */
++#define UMH_WAIT_PROC	0x02	/* wait for the process to complete */
++#define UMH_KILLABLE	0x04	/* wait for EXEC/PROC killable */
++#define UMH_FREEZABLE	0x08	/* wait for EXEC/PROC freezable */
+ 
+ struct subprocess_info {
+ 	struct work_struct work;
+diff --git a/init/do_mounts_initrd.c b/init/do_mounts_initrd.c
+index 327962ea354c0..34731241377d3 100644
+--- a/init/do_mounts_initrd.c
++++ b/init/do_mounts_initrd.c
+@@ -99,19 +99,11 @@ static void __init handle_initrd(void)
+ 	init_mkdir("/old", 0700);
+ 	init_chdir("/old");
+ 
+-	/*
+-	 * In case that a resume from disk is carried out by linuxrc or one of
+-	 * its children, we need to tell the freezer not to wait for us.
+-	 */
+-	current->flags |= PF_FREEZER_SKIP;
+-
+ 	info = call_usermodehelper_setup("/linuxrc", argv, envp_init,
+ 					 GFP_KERNEL, init_linuxrc, NULL, NULL);
+ 	if (!info)
+ 		return;
+-	call_usermodehelper_exec(info, UMH_WAIT_PROC);
+-
+-	current->flags &= ~PF_FREEZER_SKIP;
++	call_usermodehelper_exec(info, UMH_WAIT_PROC|UMH_FREEZABLE);
+ 
+ 	/* move initrd to rootfs' /old */
+ 	init_mount("..", ".", NULL, MS_MOVE, NULL);
+diff --git a/kernel/umh.c b/kernel/umh.c
+index b989736e87074..8945eaf4c6717 100644
+--- a/kernel/umh.c
++++ b/kernel/umh.c
+@@ -28,6 +28,7 @@
+ #include <linux/async.h>
+ #include <linux/uaccess.h>
+ #include <linux/initrd.h>
++#include <linux/freezer.h>
+ 
+ #include <trace/events/module.h>
+ 
+@@ -436,6 +437,9 @@ int call_usermodehelper_exec(struct subprocess_info *sub_info, int wait)
+ 	if (wait == UMH_NO_WAIT)	/* task has freed sub_info */
+ 		goto unlock;
+ 
++	if (wait & UMH_FREEZABLE)
++		freezer_do_not_count();
++
+ 	if (wait & UMH_KILLABLE) {
+ 		retval = wait_for_completion_killable(&done);
+ 		if (!retval)
+@@ -448,6 +452,10 @@ int call_usermodehelper_exec(struct subprocess_info *sub_info, int wait)
+ 	}
+ 
+ 	wait_for_completion(&done);
++
++	if (wait & UMH_FREEZABLE)
++		freezer_count();
++
+ wait_done:
+ 	retval = sub_info->retval;
+ out:
+-- 
+cgit 
+
+
+From f9fc8cad9728124cefe8844fb53d1814c92c6bfc Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Tue, 6 Sep 2022 12:39:55 +0200
+Subject: sched: Add TASK_ANY for wait_task_inactive()
+
+Now that wait_task_inactive()'s @match_state argument is a mask (like
+ttwu()) it is possible to replace the special !match_state case with
+an 'all-states' value such that any blocked state will match.
+
+Suggested-by: Ingo Molnar (mingo@kernel.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Link: https://lkml.kernel.org/r/YxhkzfuFTvRnpUaH@hirez.programming.kicks-ass.net
+---
+ drivers/powercap/idle_inject.c |  2 +-
+ fs/coredump.c                  |  2 +-
+ include/linux/sched.h          |  2 ++
+ kernel/sched/core.c            | 16 ++++++++--------
+ 4 files changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/powercap/idle_inject.c b/drivers/powercap/idle_inject.c
+index a20bf12f3ce31..999e218d77939 100644
+--- a/drivers/powercap/idle_inject.c
++++ b/drivers/powercap/idle_inject.c
+@@ -254,7 +254,7 @@ void idle_inject_stop(struct idle_inject_device *ii_dev)
+ 		iit = per_cpu_ptr(&idle_inject_thread, cpu);
+ 		iit->should_run = 0;
+ 
+-		wait_task_inactive(iit->tsk, 0);
++		wait_task_inactive(iit->tsk, TASK_ANY);
+ 	}
+ 
+ 	cpu_hotplug_enable();
+diff --git a/fs/coredump.c b/fs/coredump.c
+index 9f4aae2021093..3d9054c49a119 100644
+--- a/fs/coredump.c
++++ b/fs/coredump.c
+@@ -412,7 +412,7 @@ static int coredump_wait(int exit_code, struct core_state *core_state)
+ 		 */
+ 		ptr = core_state->dumper.next;
+ 		while (ptr != NULL) {
+-			wait_task_inactive(ptr->task, 0);
++			wait_task_inactive(ptr->task, TASK_ANY);
+ 			ptr = ptr->next;
+ 		}
+ 	}
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index e7b2f8a5c711c..0facaadbae712 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -101,6 +101,8 @@ struct task_group;
+ #define TASK_RTLOCK_WAIT		0x1000
+ #define TASK_STATE_MAX			0x2000
+ 
++#define TASK_ANY			(TASK_STATE_MAX-1)
++
+ /* Convenience macros for the sake of set_current_state: */
+ #define TASK_KILLABLE			(TASK_WAKEKILL | TASK_UNINTERRUPTIBLE)
+ #define TASK_STOPPED			(TASK_WAKEKILL | __TASK_STOPPED)
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 43d71c6961254..ea26526b45bbf 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -3253,12 +3253,12 @@ out:
+ /*
+  * wait_task_inactive - wait for a thread to unschedule.
+  *
+- * If @match_state is nonzero, it's the @p->state value just checked and
+- * not expected to change.  If it changes, i.e. @p might have woken up,
+- * then return zero.  When we succeed in waiting for @p to be off its CPU,
+- * we return a positive number (its total switch count).  If a second call
+- * a short while later returns the same number, the caller can be sure that
+- * @p has remained unscheduled the whole time.
++ * Wait for the thread to block in any of the states set in @match_state.
++ * If it changes, i.e. @p might have woken up, then return zero.  When we
++ * succeed in waiting for @p to be off its CPU, we return a positive number
++ * (its total switch count).  If a second call a short while later returns the
++ * same number, the caller can be sure that @p has remained unscheduled the
++ * whole time.
+  *
+  * The caller must ensure that the task *will* unschedule sometime soon,
+  * else this function might spin for a *long* time. This function can't
+-- 
+cgit 
+
+
+From 929659acea03db6411a32de9037abab9f856f586 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Mon, 22 Aug 2022 13:18:20 +0200
+Subject: sched/completion: Add wait_for_completion_state()
+
+Allows waiting with a custom @state.
+
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lore.kernel.org/r/20220822114648.922711674@infradead.org
+---
+ include/linux/completion.h |  1 +
+ kernel/sched/completion.c  | 12 ++++++++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/include/linux/completion.h b/include/linux/completion.h
+index 51d9ab079629b..62b32b19e0a86 100644
+--- a/include/linux/completion.h
++++ b/include/linux/completion.h
+@@ -103,6 +103,7 @@ extern void wait_for_completion(struct completion *);
+ extern void wait_for_completion_io(struct completion *);
+ extern int wait_for_completion_interruptible(struct completion *x);
+ extern int wait_for_completion_killable(struct completion *x);
++extern int wait_for_completion_state(struct completion *x, unsigned int state);
+ extern unsigned long wait_for_completion_timeout(struct completion *x,
+ 						   unsigned long timeout);
+ extern unsigned long wait_for_completion_io_timeout(struct completion *x,
+diff --git a/kernel/sched/completion.c b/kernel/sched/completion.c
+index 35f15c26ed54d..d57a5c1c1cd97 100644
+--- a/kernel/sched/completion.c
++++ b/kernel/sched/completion.c
+@@ -204,6 +204,7 @@ EXPORT_SYMBOL(wait_for_completion_io_timeout);
+ int __sched wait_for_completion_interruptible(struct completion *x)
+ {
+ 	long t = wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_INTERRUPTIBLE);
++
+ 	if (t == -ERESTARTSYS)
+ 		return t;
+ 	return 0;
+@@ -241,12 +242,23 @@ EXPORT_SYMBOL(wait_for_completion_interruptible_timeout);
+ int __sched wait_for_completion_killable(struct completion *x)
+ {
+ 	long t = wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_KILLABLE);
++
+ 	if (t == -ERESTARTSYS)
+ 		return t;
+ 	return 0;
+ }
+ EXPORT_SYMBOL(wait_for_completion_killable);
+ 
++int __sched wait_for_completion_state(struct completion *x, unsigned int state)
++{
++	long t = wait_for_common(x, MAX_SCHEDULE_TIMEOUT, state);
++
++	if (t == -ERESTARTSYS)
++		return t;
++	return 0;
++}
++EXPORT_SYMBOL(wait_for_completion_state);
++
+ /**
+  * wait_for_completion_killable_timeout: - waits for completion of a task (w/(to,killable))
+  * @x:  holds the state of this particular completion
+-- 
+cgit 
+
+
+From 3f884a10ab41efe2d495bf8ec8d443d70c500a60 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Mon, 22 Aug 2022 13:18:21 +0200
+Subject: sched/wait: Add wait_event_state()
+
+Allows waiting with a custom @state.
+
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lore.kernel.org/r/20220822114648.989212021@infradead.org
+---
+ include/linux/wait.h | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/include/linux/wait.h b/include/linux/wait.h
+index 58cfbf81447cc..b926eb9f3e266 100644
+--- a/include/linux/wait.h
++++ b/include/linux/wait.h
+@@ -932,6 +932,34 @@ extern int do_wait_intr_irq(wait_queue_head_t *, wait_queue_entry_t *);
+ 	__ret;									\
+ })
+ 
++#define __wait_event_state(wq, condition, state)				\
++	___wait_event(wq, condition, state, 0, 0, schedule())
++
++/**
++ * wait_event_state - sleep until a condition gets true
++ * @wq_head: the waitqueue to wait on
++ * @condition: a C expression for the event to wait for
++ * @state: state to sleep in
++ *
++ * The process is put to sleep (@state) until the @condition evaluates to true
++ * or a signal is received (when allowed by @state).  The @condition is checked
++ * each time the waitqueue @wq_head is woken up.
++ *
++ * wake_up() has to be called after changing any variable that could
++ * change the result of the wait condition.
++ *
++ * The function will return -ERESTARTSYS if it was interrupted by a signal
++ * (when allowed by @state) and 0 if @condition evaluated to true.
++ */
++#define wait_event_state(wq_head, condition, state)				\
++({										\
++	int __ret = 0;								\
++	might_sleep();								\
++	if (!(condition))							\
++		__ret = __wait_event_state(wq_head, condition, state);		\
++	__ret;									\
++})
++
+ #define __wait_event_killable_timeout(wq_head, condition, timeout)		\
+ 	___wait_event(wq_head, ___wait_cond_timeout(condition),			\
+ 		      TASK_KILLABLE, 0, timeout,				\
+-- 
+cgit 
+
+
+From 9963e444f71e671bcbc30d61cf23a2c686ac7d05 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Tue, 6 Sep 2022 13:11:38 +0200
+Subject: sched: Widen TAKS_state literals
+
+In preparation of adding more states, add a few 0s to the literals as
+we've just about ran out.
+
+Suggested-by: Ingo Molnar <mingo@kernel.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+---
+ include/linux/sched.h | 30 +++++++++++++++---------------
+ 1 file changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 0facaadbae712..9fc23a2d98132 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -81,25 +81,25 @@ struct task_group;
+  */
+ 
+ /* Used in tsk->state: */
+-#define TASK_RUNNING			0x0000
+-#define TASK_INTERRUPTIBLE		0x0001
+-#define TASK_UNINTERRUPTIBLE		0x0002
+-#define __TASK_STOPPED			0x0004
+-#define __TASK_TRACED			0x0008
++#define TASK_RUNNING			0x00000000
++#define TASK_INTERRUPTIBLE		0x00000001
++#define TASK_UNINTERRUPTIBLE		0x00000002
++#define __TASK_STOPPED			0x00000004
++#define __TASK_TRACED			0x00000008
+ /* Used in tsk->exit_state: */
+-#define EXIT_DEAD			0x0010
+-#define EXIT_ZOMBIE			0x0020
++#define EXIT_DEAD			0x00000010
++#define EXIT_ZOMBIE			0x00000020
+ #define EXIT_TRACE			(EXIT_ZOMBIE | EXIT_DEAD)
+ /* Used in tsk->state again: */
+-#define TASK_PARKED			0x0040
+-#define TASK_DEAD			0x0080
+-#define TASK_WAKEKILL			0x0100
+-#define TASK_WAKING			0x0200
+-#define TASK_NOLOAD			0x0400
+-#define TASK_NEW			0x0800
++#define TASK_PARKED			0x00000040
++#define TASK_DEAD			0x00000080
++#define TASK_WAKEKILL			0x00000100
++#define TASK_WAKING			0x00000200
++#define TASK_NOLOAD			0x00000400
++#define TASK_NEW			0x00000800
+ /* RT specific auxilliary flag to mark RT lock waiters */
+-#define TASK_RTLOCK_WAIT		0x1000
+-#define TASK_STATE_MAX			0x2000
++#define TASK_RTLOCK_WAIT		0x00001000
++#define TASK_STATE_MAX			0x00002000
+ 
+ #define TASK_ANY			(TASK_STATE_MAX-1)
+ 
+-- 
+cgit 
+
+
+From f5d39b020809146cc28e6e73369bf8065e0310aa Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Mon, 22 Aug 2022 13:18:22 +0200
+Subject: freezer,sched: Rewrite core freezer logic
+
+Rewrite the core freezer to behave better wrt thawing and be simpler
+in general.
+
+By replacing PF_FROZEN with TASK_FROZEN, a special block state, it is
+ensured frozen tasks stay frozen until thawed and don't randomly wake
+up early, as is currently possible.
+
+As such, it does away with PF_FROZEN and PF_FREEZER_SKIP, freeing up
+two PF_flags (yay!).
+
+Specifically; the current scheme works a little like:
+
+	freezer_do_not_count();
+	schedule();
+	freezer_count();
+
+And either the task is blocked, or it lands in try_to_freezer()
+through freezer_count(). Now, when it is blocked, the freezer
+considers it frozen and continues.
+
+However, on thawing, once pm_freezing is cleared, freezer_count()
+stops working, and any random/spurious wakeup will let a task run
+before its time.
+
+That is, thawing tries to thaw things in explicit order; kernel
+threads and workqueues before doing bringing SMP back before userspace
+etc.. However due to the above mentioned races it is entirely possible
+for userspace tasks to thaw (by accident) before SMP is back.
+
+This can be a fatal problem in asymmetric ISA architectures (eg ARMv9)
+where the userspace task requires a special CPU to run.
+
+As said; replace this with a special task state TASK_FROZEN and add
+the following state transitions:
+
+	TASK_FREEZABLE	-> TASK_FROZEN
+	__TASK_STOPPED	-> TASK_FROZEN
+	__TASK_TRACED	-> TASK_FROZEN
+
+The new TASK_FREEZABLE can be set on any state part of TASK_NORMAL
+(IOW. TASK_INTERRUPTIBLE and TASK_UNINTERRUPTIBLE) -- any such state
+is already required to deal with spurious wakeups and the freezer
+causes one such when thawing the task (since the original state is
+lost).
+
+The special __TASK_{STOPPED,TRACED} states *can* be restored since
+their canonical state is in ->jobctl.
+
+With this, frozen tasks need an explicit TASK_FROZEN wakeup and are
+free of undue (early / spurious) wakeups.
+
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Ingo Molnar <mingo@kernel.org>
+Acked-by: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+Link: https://lore.kernel.org/r/20220822114649.055452969@infradead.org
+---
+ drivers/android/binder.c       |   4 +-
+ drivers/media/pci/pt3/pt3.c    |   4 +-
+ fs/cifs/inode.c                |   4 +-
+ fs/cifs/transport.c            |   5 +-
+ fs/coredump.c                  |   5 +-
+ fs/nfs/file.c                  |   3 +-
+ fs/nfs/inode.c                 |  12 +-
+ fs/nfs/nfs3proc.c              |   3 +-
+ fs/nfs/nfs4proc.c              |  14 +--
+ fs/nfs/nfs4state.c             |   3 +-
+ fs/nfs/pnfs.c                  |   4 +-
+ fs/xfs/xfs_trans_ail.c         |   8 +-
+ include/linux/freezer.h        | 245 ++---------------------------------------
+ include/linux/sched.h          |  13 ++-
+ include/linux/sunrpc/sched.h   |   7 +-
+ include/linux/wait.h           |  12 +-
+ kernel/cgroup/legacy_freezer.c |  23 ++--
+ kernel/exit.c                  |   4 +-
+ kernel/fork.c                  |   5 +-
+ kernel/freezer.c               | 133 +++++++++++++++-------
+ kernel/futex/waitwake.c        |   8 +-
+ kernel/hung_task.c             |   4 +-
+ kernel/power/main.c            |   6 +-
+ kernel/power/process.c         |  10 +-
+ kernel/ptrace.c                |   2 +-
+ kernel/sched/core.c            |   2 +-
+ kernel/signal.c                |  14 +--
+ kernel/time/hrtimer.c          |   4 +-
+ kernel/umh.c                   |  20 ++--
+ mm/khugepaged.c                |   4 +-
+ net/sunrpc/sched.c             |  12 +-
+ net/unix/af_unix.c             |   8 +-
+ 32 files changed, 210 insertions(+), 395 deletions(-)
+
+diff --git a/drivers/android/binder.c b/drivers/android/binder.c
+index c964d7c8c3841..50197ef4b787a 100644
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -4247,10 +4247,9 @@ static int binder_wait_for_work(struct binder_thread *thread,
+ 	struct binder_proc *proc = thread->proc;
+ 	int ret = 0;
+ 
+-	freezer_do_not_count();
+ 	binder_inner_proc_lock(proc);
+ 	for (;;) {
+-		prepare_to_wait(&thread->wait, &wait, TASK_INTERRUPTIBLE);
++		prepare_to_wait(&thread->wait, &wait, TASK_INTERRUPTIBLE|TASK_FREEZABLE);
+ 		if (binder_has_work_ilocked(thread, do_proc_work))
+ 			break;
+ 		if (do_proc_work)
+@@ -4267,7 +4266,6 @@ static int binder_wait_for_work(struct binder_thread *thread,
+ 	}
+ 	finish_wait(&thread->wait, &wait);
+ 	binder_inner_proc_unlock(proc);
+-	freezer_count();
+ 
+ 	return ret;
+ }
+diff --git a/drivers/media/pci/pt3/pt3.c b/drivers/media/pci/pt3/pt3.c
+index 0d51bdf01f432..f6deac85962e4 100644
+--- a/drivers/media/pci/pt3/pt3.c
++++ b/drivers/media/pci/pt3/pt3.c
+@@ -445,8 +445,8 @@ static int pt3_fetch_thread(void *data)
+ 		pt3_proc_dma(adap);
+ 
+ 		delay = ktime_set(0, PT3_FETCH_DELAY * NSEC_PER_MSEC);
+-		set_current_state(TASK_UNINTERRUPTIBLE);
+-		freezable_schedule_hrtimeout_range(&delay,
++		set_current_state(TASK_UNINTERRUPTIBLE|TASK_FREEZABLE);
++		schedule_hrtimeout_range(&delay,
+ 					PT3_FETCH_DELAY_DELTA * NSEC_PER_MSEC,
+ 					HRTIMER_MODE_REL);
+ 	}
+diff --git a/fs/cifs/inode.c b/fs/cifs/inode.c
+index eeeaba3dec053..54e6bfc6a5a64 100644
+--- a/fs/cifs/inode.c
++++ b/fs/cifs/inode.c
+@@ -2326,7 +2326,7 @@ cifs_invalidate_mapping(struct inode *inode)
+ static int
+ cifs_wait_bit_killable(struct wait_bit_key *key, int mode)
+ {
+-	freezable_schedule_unsafe();
++	schedule();
+ 	if (signal_pending_state(mode, current))
+ 		return -ERESTARTSYS;
+ 	return 0;
+@@ -2344,7 +2344,7 @@ cifs_revalidate_mapping(struct inode *inode)
+ 		return 0;
+ 
+ 	rc = wait_on_bit_lock_action(flags, CIFS_INO_LOCK, cifs_wait_bit_killable,
+-				     TASK_KILLABLE);
++				     TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+ 	if (rc)
+ 		return rc;
+ 
+diff --git a/fs/cifs/transport.c b/fs/cifs/transport.c
+index de7aeced7e16b..eda09fba1550a 100644
+--- a/fs/cifs/transport.c
++++ b/fs/cifs/transport.c
+@@ -757,8 +757,9 @@ wait_for_response(struct TCP_Server_Info *server, struct mid_q_entry *midQ)
+ {
+ 	int error;
+ 
+-	error = wait_event_freezekillable_unsafe(server->response_q,
+-				    midQ->mid_state != MID_REQUEST_SUBMITTED);
++	error = wait_event_state(server->response_q,
++				 midQ->mid_state != MID_REQUEST_SUBMITTED,
++				 (TASK_KILLABLE|TASK_FREEZABLE_UNSAFE));
+ 	if (error < 0)
+ 		return -ERESTARTSYS;
+ 
+diff --git a/fs/coredump.c b/fs/coredump.c
+index 3d9054c49a119..9ce59f212a4a0 100644
+--- a/fs/coredump.c
++++ b/fs/coredump.c
+@@ -402,9 +402,8 @@ static int coredump_wait(int exit_code, struct core_state *core_state)
+ 	if (core_waiters > 0) {
+ 		struct core_thread *ptr;
+ 
+-		freezer_do_not_count();
+-		wait_for_completion(&core_state->startup);
+-		freezer_count();
++		wait_for_completion_state(&core_state->startup,
++					  TASK_UNINTERRUPTIBLE|TASK_FREEZABLE);
+ 		/*
+ 		 * Wait for all the threads to become inactive, so that
+ 		 * all the thread context (extended register state, like
+diff --git a/fs/nfs/file.c b/fs/nfs/file.c
+index d2bcd4834c0e6..e8301a3727380 100644
+--- a/fs/nfs/file.c
++++ b/fs/nfs/file.c
+@@ -570,7 +570,8 @@ static vm_fault_t nfs_vm_page_mkwrite(struct vm_fault *vmf)
+ 	}
+ 
+ 	wait_on_bit_action(&NFS_I(inode)->flags, NFS_INO_INVALIDATING,
+-			nfs_wait_bit_killable, TASK_KILLABLE);
++			   nfs_wait_bit_killable,
++			   TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+ 
+ 	lock_page(page);
+ 	mapping = page_file_mapping(page);
+diff --git a/fs/nfs/inode.c b/fs/nfs/inode.c
+index b4e46b0ffa2dc..a6058f5787a59 100644
+--- a/fs/nfs/inode.c
++++ b/fs/nfs/inode.c
+@@ -72,18 +72,13 @@ nfs_fattr_to_ino_t(struct nfs_fattr *fattr)
+ 	return nfs_fileid_to_ino_t(fattr->fileid);
+ }
+ 
+-static int nfs_wait_killable(int mode)
++int nfs_wait_bit_killable(struct wait_bit_key *key, int mode)
+ {
+-	freezable_schedule_unsafe();
++	schedule();
+ 	if (signal_pending_state(mode, current))
+ 		return -ERESTARTSYS;
+ 	return 0;
+ }
+-
+-int nfs_wait_bit_killable(struct wait_bit_key *key, int mode)
+-{
+-	return nfs_wait_killable(mode);
+-}
+ EXPORT_SYMBOL_GPL(nfs_wait_bit_killable);
+ 
+ /**
+@@ -1331,7 +1326,8 @@ int nfs_clear_invalid_mapping(struct address_space *mapping)
+ 	 */
+ 	for (;;) {
+ 		ret = wait_on_bit_action(bitlock, NFS_INO_INVALIDATING,
+-					 nfs_wait_bit_killable, TASK_KILLABLE);
++					 nfs_wait_bit_killable,
++					 TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+ 		if (ret)
+ 			goto out;
+ 		spin_lock(&inode->i_lock);
+diff --git a/fs/nfs/nfs3proc.c b/fs/nfs/nfs3proc.c
+index 1597eef40d54f..2e7579626cf01 100644
+--- a/fs/nfs/nfs3proc.c
++++ b/fs/nfs/nfs3proc.c
+@@ -36,7 +36,8 @@ nfs3_rpc_wrapper(struct rpc_clnt *clnt, struct rpc_message *msg, int flags)
+ 		res = rpc_call_sync(clnt, msg, flags);
+ 		if (res != -EJUKEBOX)
+ 			break;
+-		freezable_schedule_timeout_killable_unsafe(NFS_JUKEBOX_RETRY_TIME);
++		__set_current_state(TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
++		schedule_timeout(NFS_JUKEBOX_RETRY_TIME);
+ 		res = -ERESTARTSYS;
+ 	} while (!fatal_signal_pending(current));
+ 	return res;
+diff --git a/fs/nfs/nfs4proc.c b/fs/nfs/nfs4proc.c
+index 3ed14a2a84a44..4553803538e5f 100644
+--- a/fs/nfs/nfs4proc.c
++++ b/fs/nfs/nfs4proc.c
+@@ -416,8 +416,8 @@ static int nfs4_delay_killable(long *timeout)
+ {
+ 	might_sleep();
+ 
+-	freezable_schedule_timeout_killable_unsafe(
+-		nfs4_update_delay(timeout));
++	__set_current_state(TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
++	schedule_timeout(nfs4_update_delay(timeout));
+ 	if (!__fatal_signal_pending(current))
+ 		return 0;
+ 	return -EINTR;
+@@ -427,7 +427,8 @@ static int nfs4_delay_interruptible(long *timeout)
+ {
+ 	might_sleep();
+ 
+-	freezable_schedule_timeout_interruptible_unsafe(nfs4_update_delay(timeout));
++	__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE_UNSAFE);
++	schedule_timeout(nfs4_update_delay(timeout));
+ 	if (!signal_pending(current))
+ 		return 0;
+ 	return __fatal_signal_pending(current) ? -EINTR :-ERESTARTSYS;
+@@ -7406,7 +7407,8 @@ nfs4_retry_setlk_simple(struct nfs4_state *state, int cmd,
+ 		status = nfs4_proc_setlk(state, cmd, request);
+ 		if ((status != -EAGAIN) || IS_SETLK(cmd))
+ 			break;
+-		freezable_schedule_timeout_interruptible(timeout);
++		__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
++		schedule_timeout(timeout);
+ 		timeout *= 2;
+ 		timeout = min_t(unsigned long, NFS4_LOCK_MAXTIMEOUT, timeout);
+ 		status = -ERESTARTSYS;
+@@ -7474,10 +7476,8 @@ nfs4_retry_setlk(struct nfs4_state *state, int cmd, struct file_lock *request)
+ 			break;
+ 
+ 		status = -ERESTARTSYS;
+-		freezer_do_not_count();
+-		wait_woken(&waiter.wait, TASK_INTERRUPTIBLE,
++		wait_woken(&waiter.wait, TASK_INTERRUPTIBLE|TASK_FREEZABLE,
+ 			   NFS4_LOCK_MAXTIMEOUT);
+-		freezer_count();
+ 	} while (!signalled());
+ 
+ 	remove_wait_queue(q, &waiter.wait);
+diff --git a/fs/nfs/nfs4state.c b/fs/nfs/nfs4state.c
+index 9bab3e9c702a4..7e185f7eb2608 100644
+--- a/fs/nfs/nfs4state.c
++++ b/fs/nfs/nfs4state.c
+@@ -1314,7 +1314,8 @@ int nfs4_wait_clnt_recover(struct nfs_client *clp)
+ 
+ 	refcount_inc(&clp->cl_count);
+ 	res = wait_on_bit_action(&clp->cl_state, NFS4CLNT_MANAGER_RUNNING,
+-				 nfs_wait_bit_killable, TASK_KILLABLE);
++				 nfs_wait_bit_killable,
++				 TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+ 	if (res)
+ 		goto out;
+ 	if (clp->cl_cons_state < 0)
+diff --git a/fs/nfs/pnfs.c b/fs/nfs/pnfs.c
+index 41a9b6b58fb9f..70706db317f38 100644
+--- a/fs/nfs/pnfs.c
++++ b/fs/nfs/pnfs.c
+@@ -1908,7 +1908,7 @@ static int pnfs_prepare_to_retry_layoutget(struct pnfs_layout_hdr *lo)
+ 	pnfs_layoutcommit_inode(lo->plh_inode, false);
+ 	return wait_on_bit_action(&lo->plh_flags, NFS_LAYOUT_RETURN,
+ 				   nfs_wait_bit_killable,
+-				   TASK_KILLABLE);
++				   TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+ }
+ 
+ static void nfs_layoutget_begin(struct pnfs_layout_hdr *lo)
+@@ -3193,7 +3193,7 @@ pnfs_layoutcommit_inode(struct inode *inode, bool sync)
+ 		status = wait_on_bit_lock_action(&nfsi->flags,
+ 				NFS_INO_LAYOUTCOMMITTING,
+ 				nfs_wait_bit_killable,
+-				TASK_KILLABLE);
++				TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+ 		if (status)
+ 			goto out;
+ 	}
+diff --git a/fs/xfs/xfs_trans_ail.c b/fs/xfs/xfs_trans_ail.c
+index d3a97a0285606..16fbf2a1144c1 100644
+--- a/fs/xfs/xfs_trans_ail.c
++++ b/fs/xfs/xfs_trans_ail.c
+@@ -602,9 +602,9 @@ xfsaild(
+ 
+ 	while (1) {
+ 		if (tout && tout <= 20)
+-			set_current_state(TASK_KILLABLE);
++			set_current_state(TASK_KILLABLE|TASK_FREEZABLE);
+ 		else
+-			set_current_state(TASK_INTERRUPTIBLE);
++			set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
+ 
+ 		/*
+ 		 * Check kthread_should_stop() after we set the task state to
+@@ -653,14 +653,14 @@ xfsaild(
+ 		    ailp->ail_target == ailp->ail_target_prev &&
+ 		    list_empty(&ailp->ail_buf_list)) {
+ 			spin_unlock(&ailp->ail_lock);
+-			freezable_schedule();
++			schedule();
+ 			tout = 0;
+ 			continue;
+ 		}
+ 		spin_unlock(&ailp->ail_lock);
+ 
+ 		if (tout)
+-			freezable_schedule_timeout(msecs_to_jiffies(tout));
++			schedule_timeout(msecs_to_jiffies(tout));
+ 
+ 		__set_current_state(TASK_RUNNING);
+ 
+diff --git a/include/linux/freezer.h b/include/linux/freezer.h
+index 0621c5f86c397..b303472255be4 100644
+--- a/include/linux/freezer.h
++++ b/include/linux/freezer.h
+@@ -8,9 +8,11 @@
+ #include <linux/sched.h>
+ #include <linux/wait.h>
+ #include <linux/atomic.h>
++#include <linux/jump_label.h>
+ 
+ #ifdef CONFIG_FREEZER
+-extern atomic_t system_freezing_cnt;	/* nr of freezing conds in effect */
++DECLARE_STATIC_KEY_FALSE(freezer_active);
++
+ extern bool pm_freezing;		/* PM freezing in effect */
+ extern bool pm_nosig_freezing;		/* PM nosig freezing in effect */
+ 
+@@ -22,10 +24,7 @@ extern unsigned int freeze_timeout_msecs;
+ /*
+  * Check if a process has been frozen
+  */
+-static inline bool frozen(struct task_struct *p)
+-{
+-	return p->flags & PF_FROZEN;
+-}
++extern bool frozen(struct task_struct *p);
+ 
+ extern bool freezing_slow_path(struct task_struct *p);
+ 
+@@ -34,9 +33,10 @@ extern bool freezing_slow_path(struct task_struct *p);
+  */
+ static inline bool freezing(struct task_struct *p)
+ {
+-	if (likely(!atomic_read(&system_freezing_cnt)))
+-		return false;
+-	return freezing_slow_path(p);
++	if (static_branch_unlikely(&freezer_active))
++		return freezing_slow_path(p);
++
++	return false;
+ }
+ 
+ /* Takes and releases task alloc lock using task_lock() */
+@@ -48,23 +48,14 @@ extern int freeze_kernel_threads(void);
+ extern void thaw_processes(void);
+ extern void thaw_kernel_threads(void);
+ 
+-/*
+- * DO NOT ADD ANY NEW CALLERS OF THIS FUNCTION
+- * If try_to_freeze causes a lockdep warning it means the caller may deadlock
+- */
+-static inline bool try_to_freeze_unsafe(void)
++static inline bool try_to_freeze(void)
+ {
+ 	might_sleep();
+ 	if (likely(!freezing(current)))
+ 		return false;
+-	return __refrigerator(false);
+-}
+-
+-static inline bool try_to_freeze(void)
+-{
+ 	if (!(current->flags & PF_NOFREEZE))
+ 		debug_check_no_locks_held();
+-	return try_to_freeze_unsafe();
++	return __refrigerator(false);
+ }
+ 
+ extern bool freeze_task(struct task_struct *p);
+@@ -79,195 +70,6 @@ static inline bool cgroup_freezing(struct task_struct *task)
+ }
+ #endif /* !CONFIG_CGROUP_FREEZER */
+ 
+-/*
+- * The PF_FREEZER_SKIP flag should be set by a vfork parent right before it
+- * calls wait_for_completion(&vfork) and reset right after it returns from this
+- * function.  Next, the parent should call try_to_freeze() to freeze itself
+- * appropriately in case the child has exited before the freezing of tasks is
+- * complete.  However, we don't want kernel threads to be frozen in unexpected
+- * places, so we allow them to block freeze_processes() instead or to set
+- * PF_NOFREEZE if needed. Fortunately, in the ____call_usermodehelper() case the
+- * parent won't really block freeze_processes(), since ____call_usermodehelper()
+- * (the child) does a little before exec/exit and it can't be frozen before
+- * waking up the parent.
+- */
+-
+-
+-/**
+- * freezer_do_not_count - tell freezer to ignore %current
+- *
+- * Tell freezers to ignore the current task when determining whether the
+- * target frozen state is reached.  IOW, the current task will be
+- * considered frozen enough by freezers.
+- *
+- * The caller shouldn't do anything which isn't allowed for a frozen task
+- * until freezer_cont() is called.  Usually, freezer[_do_not]_count() pair
+- * wrap a scheduling operation and nothing much else.
+- */
+-static inline void freezer_do_not_count(void)
+-{
+-	current->flags |= PF_FREEZER_SKIP;
+-}
+-
+-/**
+- * freezer_count - tell freezer to stop ignoring %current
+- *
+- * Undo freezer_do_not_count().  It tells freezers that %current should be
+- * considered again and tries to freeze if freezing condition is already in
+- * effect.
+- */
+-static inline void freezer_count(void)
+-{
+-	current->flags &= ~PF_FREEZER_SKIP;
+-	/*
+-	 * If freezing is in progress, the following paired with smp_mb()
+-	 * in freezer_should_skip() ensures that either we see %true
+-	 * freezing() or freezer_should_skip() sees !PF_FREEZER_SKIP.
+-	 */
+-	smp_mb();
+-	try_to_freeze();
+-}
+-
+-/* DO NOT ADD ANY NEW CALLERS OF THIS FUNCTION */
+-static inline void freezer_count_unsafe(void)
+-{
+-	current->flags &= ~PF_FREEZER_SKIP;
+-	smp_mb();
+-	try_to_freeze_unsafe();
+-}
+-
+-/**
+- * freezer_should_skip - whether to skip a task when determining frozen
+- *			 state is reached
+- * @p: task in quesion
+- *
+- * This function is used by freezers after establishing %true freezing() to
+- * test whether a task should be skipped when determining the target frozen
+- * state is reached.  IOW, if this function returns %true, @p is considered
+- * frozen enough.
+- */
+-static inline bool freezer_should_skip(struct task_struct *p)
+-{
+-	/*
+-	 * The following smp_mb() paired with the one in freezer_count()
+-	 * ensures that either freezer_count() sees %true freezing() or we
+-	 * see cleared %PF_FREEZER_SKIP and return %false.  This makes it
+-	 * impossible for a task to slip frozen state testing after
+-	 * clearing %PF_FREEZER_SKIP.
+-	 */
+-	smp_mb();
+-	return p->flags & PF_FREEZER_SKIP;
+-}
+-
+-/*
+- * These functions are intended to be used whenever you want allow a sleeping
+- * task to be frozen. Note that neither return any clear indication of
+- * whether a freeze event happened while in this function.
+- */
+-
+-/* Like schedule(), but should not block the freezer. */
+-static inline void freezable_schedule(void)
+-{
+-	freezer_do_not_count();
+-	schedule();
+-	freezer_count();
+-}
+-
+-/* DO NOT ADD ANY NEW CALLERS OF THIS FUNCTION */
+-static inline void freezable_schedule_unsafe(void)
+-{
+-	freezer_do_not_count();
+-	schedule();
+-	freezer_count_unsafe();
+-}
+-
+-/*
+- * Like schedule_timeout(), but should not block the freezer.  Do not
+- * call this with locks held.
+- */
+-static inline long freezable_schedule_timeout(long timeout)
+-{
+-	long __retval;
+-	freezer_do_not_count();
+-	__retval = schedule_timeout(timeout);
+-	freezer_count();
+-	return __retval;
+-}
+-
+-/*
+- * Like schedule_timeout_interruptible(), but should not block the freezer.  Do not
+- * call this with locks held.
+- */
+-static inline long freezable_schedule_timeout_interruptible(long timeout)
+-{
+-	long __retval;
+-	freezer_do_not_count();
+-	__retval = schedule_timeout_interruptible(timeout);
+-	freezer_count();
+-	return __retval;
+-}
+-
+-/* DO NOT ADD ANY NEW CALLERS OF THIS FUNCTION */
+-static inline long freezable_schedule_timeout_interruptible_unsafe(long timeout)
+-{
+-	long __retval;
+-
+-	freezer_do_not_count();
+-	__retval = schedule_timeout_interruptible(timeout);
+-	freezer_count_unsafe();
+-	return __retval;
+-}
+-
+-/* Like schedule_timeout_killable(), but should not block the freezer. */
+-static inline long freezable_schedule_timeout_killable(long timeout)
+-{
+-	long __retval;
+-	freezer_do_not_count();
+-	__retval = schedule_timeout_killable(timeout);
+-	freezer_count();
+-	return __retval;
+-}
+-
+-/* DO NOT ADD ANY NEW CALLERS OF THIS FUNCTION */
+-static inline long freezable_schedule_timeout_killable_unsafe(long timeout)
+-{
+-	long __retval;
+-	freezer_do_not_count();
+-	__retval = schedule_timeout_killable(timeout);
+-	freezer_count_unsafe();
+-	return __retval;
+-}
+-
+-/*
+- * Like schedule_hrtimeout_range(), but should not block the freezer.  Do not
+- * call this with locks held.
+- */
+-static inline int freezable_schedule_hrtimeout_range(ktime_t *expires,
+-		u64 delta, const enum hrtimer_mode mode)
+-{
+-	int __retval;
+-	freezer_do_not_count();
+-	__retval = schedule_hrtimeout_range(expires, delta, mode);
+-	freezer_count();
+-	return __retval;
+-}
+-
+-/*
+- * Freezer-friendly wrappers around wait_event_interruptible(),
+- * wait_event_killable() and wait_event_interruptible_timeout(), originally
+- * defined in <linux/wait.h>
+- */
+-
+-/* DO NOT ADD ANY NEW CALLERS OF THIS FUNCTION */
+-#define wait_event_freezekillable_unsafe(wq, condition)			\
+-({									\
+-	int __retval;							\
+-	freezer_do_not_count();						\
+-	__retval = wait_event_killable(wq, (condition));		\
+-	freezer_count_unsafe();						\
+-	__retval;							\
+-})
+-
+ #else /* !CONFIG_FREEZER */
+ static inline bool frozen(struct task_struct *p) { return false; }
+ static inline bool freezing(struct task_struct *p) { return false; }
+@@ -281,35 +83,8 @@ static inline void thaw_kernel_threads(void) {}
+ 
+ static inline bool try_to_freeze(void) { return false; }
+ 
+-static inline void freezer_do_not_count(void) {}
+-static inline void freezer_count(void) {}
+-static inline int freezer_should_skip(struct task_struct *p) { return 0; }
+ static inline void set_freezable(void) {}
+ 
+-#define freezable_schedule()  schedule()
+-
+-#define freezable_schedule_unsafe()  schedule()
+-
+-#define freezable_schedule_timeout(timeout)  schedule_timeout(timeout)
+-
+-#define freezable_schedule_timeout_interruptible(timeout)		\
+-	schedule_timeout_interruptible(timeout)
+-
+-#define freezable_schedule_timeout_interruptible_unsafe(timeout)	\
+-	schedule_timeout_interruptible(timeout)
+-
+-#define freezable_schedule_timeout_killable(timeout)			\
+-	schedule_timeout_killable(timeout)
+-
+-#define freezable_schedule_timeout_killable_unsafe(timeout)		\
+-	schedule_timeout_killable(timeout)
+-
+-#define freezable_schedule_hrtimeout_range(expires, delta, mode)	\
+-	schedule_hrtimeout_range(expires, delta, mode)
+-
+-#define wait_event_freezekillable_unsafe(wq, condition)			\
+-		wait_event_killable(wq, condition)
+-
+ #endif /* !CONFIG_FREEZER */
+ 
+ #endif	/* FREEZER_H_INCLUDED */
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 9fc23a2d98132..4c91efd6df821 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -97,12 +97,19 @@ struct task_group;
+ #define TASK_WAKING			0x00000200
+ #define TASK_NOLOAD			0x00000400
+ #define TASK_NEW			0x00000800
+-/* RT specific auxilliary flag to mark RT lock waiters */
+ #define TASK_RTLOCK_WAIT		0x00001000
+-#define TASK_STATE_MAX			0x00002000
++#define TASK_FREEZABLE			0x00002000
++#define __TASK_FREEZABLE_UNSAFE	       (0x00004000 * IS_ENABLED(CONFIG_LOCKDEP))
++#define TASK_FROZEN			0x00008000
++#define TASK_STATE_MAX			0x00010000
+ 
+ #define TASK_ANY			(TASK_STATE_MAX-1)
+ 
++/*
++ * DO NOT ADD ANY NEW USERS !
++ */
++#define TASK_FREEZABLE_UNSAFE		(TASK_FREEZABLE | __TASK_FREEZABLE_UNSAFE)
++
+ /* Convenience macros for the sake of set_current_state: */
+ #define TASK_KILLABLE			(TASK_WAKEKILL | TASK_UNINTERRUPTIBLE)
+ #define TASK_STOPPED			(TASK_WAKEKILL | __TASK_STOPPED)
+@@ -1716,7 +1723,6 @@ extern struct pid *cad_pid;
+ #define PF_NPROC_EXCEEDED	0x00001000	/* set_user() noticed that RLIMIT_NPROC was exceeded */
+ #define PF_USED_MATH		0x00002000	/* If unset the fpu must be initialized before use */
+ #define PF_NOFREEZE		0x00008000	/* This thread should not be frozen */
+-#define PF_FROZEN		0x00010000	/* Frozen for system suspend */
+ #define PF_KSWAPD		0x00020000	/* I am kswapd */
+ #define PF_MEMALLOC_NOFS	0x00040000	/* All allocation requests will inherit GFP_NOFS */
+ #define PF_MEMALLOC_NOIO	0x00080000	/* All allocation requests will inherit GFP_NOIO */
+@@ -1727,7 +1733,6 @@ extern struct pid *cad_pid;
+ #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_mask */
+ #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
+ #define PF_MEMALLOC_PIN		0x10000000	/* Allocation context constrained to zones which allow long term pinning. */
+-#define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
+ #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+ 
+ /*
+diff --git a/include/linux/sunrpc/sched.h b/include/linux/sunrpc/sched.h
+index acc62647317c6..baeca2f564dce 100644
+--- a/include/linux/sunrpc/sched.h
++++ b/include/linux/sunrpc/sched.h
+@@ -252,7 +252,7 @@ int		rpc_malloc(struct rpc_task *);
+ void		rpc_free(struct rpc_task *);
+ int		rpciod_up(void);
+ void		rpciod_down(void);
+-int		__rpc_wait_for_completion_task(struct rpc_task *task, wait_bit_action_f *);
++int		rpc_wait_for_completion_task(struct rpc_task *task);
+ #if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
+ struct net;
+ void		rpc_show_tasks(struct net *);
+@@ -264,11 +264,6 @@ extern struct workqueue_struct *xprtiod_workqueue;
+ void		rpc_prepare_task(struct rpc_task *task);
+ gfp_t		rpc_task_gfp_mask(void);
+ 
+-static inline int rpc_wait_for_completion_task(struct rpc_task *task)
+-{
+-	return __rpc_wait_for_completion_task(task, NULL);
+-}
+-
+ #if IS_ENABLED(CONFIG_SUNRPC_DEBUG) || IS_ENABLED(CONFIG_TRACEPOINTS)
+ static inline const char * rpc_qname(const struct rpc_wait_queue *q)
+ {
+diff --git a/include/linux/wait.h b/include/linux/wait.h
+index b926eb9f3e266..14ad8a0e9fac6 100644
+--- a/include/linux/wait.h
++++ b/include/linux/wait.h
+@@ -361,8 +361,8 @@ do {										\
+ } while (0)
+ 
+ #define __wait_event_freezable(wq_head, condition)				\
+-	___wait_event(wq_head, condition, TASK_INTERRUPTIBLE, 0, 0,		\
+-			    freezable_schedule())
++	___wait_event(wq_head, condition, (TASK_INTERRUPTIBLE|TASK_FREEZABLE),	\
++			0, 0, schedule())
+ 
+ /**
+  * wait_event_freezable - sleep (or freeze) until a condition gets true
+@@ -420,8 +420,8 @@ do {										\
+ 
+ #define __wait_event_freezable_timeout(wq_head, condition, timeout)		\
+ 	___wait_event(wq_head, ___wait_cond_timeout(condition),			\
+-		      TASK_INTERRUPTIBLE, 0, timeout,				\
+-		      __ret = freezable_schedule_timeout(__ret))
++		      (TASK_INTERRUPTIBLE|TASK_FREEZABLE), 0, timeout,		\
++		      __ret = schedule_timeout(__ret))
+ 
+ /*
+  * like wait_event_timeout() -- except it uses TASK_INTERRUPTIBLE to avoid
+@@ -642,8 +642,8 @@ do {										\
+ 
+ 
+ #define __wait_event_freezable_exclusive(wq, condition)				\
+-	___wait_event(wq, condition, TASK_INTERRUPTIBLE, 1, 0,			\
+-			freezable_schedule())
++	___wait_event(wq, condition, (TASK_INTERRUPTIBLE|TASK_FREEZABLE), 1, 0,\
++			schedule())
+ 
+ #define wait_event_freezable_exclusive(wq, condition)				\
+ ({										\
+diff --git a/kernel/cgroup/legacy_freezer.c b/kernel/cgroup/legacy_freezer.c
+index 08236798d1731..1b6b21851e9d4 100644
+--- a/kernel/cgroup/legacy_freezer.c
++++ b/kernel/cgroup/legacy_freezer.c
+@@ -113,7 +113,7 @@ static int freezer_css_online(struct cgroup_subsys_state *css)
+ 
+ 	if (parent && (parent->state & CGROUP_FREEZING)) {
+ 		freezer->state |= CGROUP_FREEZING_PARENT | CGROUP_FROZEN;
+-		atomic_inc(&system_freezing_cnt);
++		static_branch_inc(&freezer_active);
+ 	}
+ 
+ 	mutex_unlock(&freezer_mutex);
+@@ -134,7 +134,7 @@ static void freezer_css_offline(struct cgroup_subsys_state *css)
+ 	mutex_lock(&freezer_mutex);
+ 
+ 	if (freezer->state & CGROUP_FREEZING)
+-		atomic_dec(&system_freezing_cnt);
++		static_branch_dec(&freezer_active);
+ 
+ 	freezer->state = 0;
+ 
+@@ -179,6 +179,7 @@ static void freezer_attach(struct cgroup_taskset *tset)
+ 			__thaw_task(task);
+ 		} else {
+ 			freeze_task(task);
++
+ 			/* clear FROZEN and propagate upwards */
+ 			while (freezer && (freezer->state & CGROUP_FROZEN)) {
+ 				freezer->state &= ~CGROUP_FROZEN;
+@@ -271,16 +272,8 @@ static void update_if_frozen(struct cgroup_subsys_state *css)
+ 	css_task_iter_start(css, 0, &it);
+ 
+ 	while ((task = css_task_iter_next(&it))) {
+-		if (freezing(task)) {
+-			/*
+-			 * freezer_should_skip() indicates that the task
+-			 * should be skipped when determining freezing
+-			 * completion.  Consider it frozen in addition to
+-			 * the usual frozen condition.
+-			 */
+-			if (!frozen(task) && !freezer_should_skip(task))
+-				goto out_iter_end;
+-		}
++		if (freezing(task) && !frozen(task))
++			goto out_iter_end;
+ 	}
+ 
+ 	freezer->state |= CGROUP_FROZEN;
+@@ -357,7 +350,7 @@ static void freezer_apply_state(struct freezer *freezer, bool freeze,
+ 
+ 	if (freeze) {
+ 		if (!(freezer->state & CGROUP_FREEZING))
+-			atomic_inc(&system_freezing_cnt);
++			static_branch_inc(&freezer_active);
+ 		freezer->state |= state;
+ 		freeze_cgroup(freezer);
+ 	} else {
+@@ -366,9 +359,9 @@ static void freezer_apply_state(struct freezer *freezer, bool freeze,
+ 		freezer->state &= ~state;
+ 
+ 		if (!(freezer->state & CGROUP_FREEZING)) {
+-			if (was_freezing)
+-				atomic_dec(&system_freezing_cnt);
+ 			freezer->state &= ~CGROUP_FROZEN;
++			if (was_freezing)
++				static_branch_dec(&freezer_active);
+ 			unfreeze_cgroup(freezer);
+ 		}
+ 	}
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 84021b24f79e3..ba683f8d292a4 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -374,10 +374,10 @@ static void coredump_task_exit(struct task_struct *tsk)
+ 			complete(&core_state->startup);
+ 
+ 		for (;;) {
+-			set_current_state(TASK_UNINTERRUPTIBLE);
++			set_current_state(TASK_UNINTERRUPTIBLE|TASK_FREEZABLE);
+ 			if (!self.task) /* see coredump_finish() */
+ 				break;
+-			freezable_schedule();
++			schedule();
+ 		}
+ 		__set_current_state(TASK_RUNNING);
+ 	}
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 90c85b17bf698..a1de2f5e305d5 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1420,13 +1420,12 @@ static void complete_vfork_done(struct task_struct *tsk)
+ static int wait_for_vfork_done(struct task_struct *child,
+ 				struct completion *vfork)
+ {
++	unsigned int state = TASK_UNINTERRUPTIBLE|TASK_KILLABLE|TASK_FREEZABLE;
+ 	int killed;
+ 
+-	freezer_do_not_count();
+ 	cgroup_enter_frozen();
+-	killed = wait_for_completion_killable(vfork);
++	killed = wait_for_completion_state(vfork, state);
+ 	cgroup_leave_frozen(false);
+-	freezer_count();
+ 
+ 	if (killed) {
+ 		task_lock(child);
+diff --git a/kernel/freezer.c b/kernel/freezer.c
+index 45ab36ffd0e79..4fad0e6fca644 100644
+--- a/kernel/freezer.c
++++ b/kernel/freezer.c
+@@ -13,10 +13,11 @@
+ #include <linux/kthread.h>
+ 
+ /* total number of freezing conditions in effect */
+-atomic_t system_freezing_cnt = ATOMIC_INIT(0);
+-EXPORT_SYMBOL(system_freezing_cnt);
++DEFINE_STATIC_KEY_FALSE(freezer_active);
++EXPORT_SYMBOL(freezer_active);
+ 
+-/* indicate whether PM freezing is in effect, protected by
++/*
++ * indicate whether PM freezing is in effect, protected by
+  * system_transition_mutex
+  */
+ bool pm_freezing;
+@@ -29,7 +30,7 @@ static DEFINE_SPINLOCK(freezer_lock);
+  * freezing_slow_path - slow path for testing whether a task needs to be frozen
+  * @p: task to be tested
+  *
+- * This function is called by freezing() if system_freezing_cnt isn't zero
++ * This function is called by freezing() if freezer_active isn't zero
+  * and tests whether @p needs to enter and stay in frozen state.  Can be
+  * called under any context.  The freezers are responsible for ensuring the
+  * target tasks see the updated state.
+@@ -52,41 +53,40 @@ bool freezing_slow_path(struct task_struct *p)
+ }
+ EXPORT_SYMBOL(freezing_slow_path);
+ 
++bool frozen(struct task_struct *p)
++{
++	return READ_ONCE(p->__state) & TASK_FROZEN;
++}
++
+ /* Refrigerator is place where frozen processes are stored :-). */
+ bool __refrigerator(bool check_kthr_stop)
+ {
+-	/* Hmm, should we be allowed to suspend when there are realtime
+-	   processes around? */
++	unsigned int state = get_current_state();
+ 	bool was_frozen = false;
+-	unsigned int save = get_current_state();
+ 
+ 	pr_debug("%s entered refrigerator\n", current->comm);
+ 
++	WARN_ON_ONCE(state && !(state & TASK_NORMAL));
++
+ 	for (;;) {
+-		set_current_state(TASK_UNINTERRUPTIBLE);
++		bool freeze;
++
++		set_current_state(TASK_FROZEN);
+ 
+ 		spin_lock_irq(&freezer_lock);
+-		current->flags |= PF_FROZEN;
+-		if (!freezing(current) ||
+-		    (check_kthr_stop && kthread_should_stop()))
+-			current->flags &= ~PF_FROZEN;
++		freeze = freezing(current) && !(check_kthr_stop && kthread_should_stop());
+ 		spin_unlock_irq(&freezer_lock);
+ 
+-		if (!(current->flags & PF_FROZEN))
++		if (!freeze)
+ 			break;
++
+ 		was_frozen = true;
+ 		schedule();
+ 	}
++	__set_current_state(TASK_RUNNING);
+ 
+ 	pr_debug("%s left refrigerator\n", current->comm);
+ 
+-	/*
+-	 * Restore saved task state before returning.  The mb'd version
+-	 * needs to be used; otherwise, it might silently break
+-	 * synchronization which depends on ordered task state change.
+-	 */
+-	set_current_state(save);
+-
+ 	return was_frozen;
+ }
+ EXPORT_SYMBOL(__refrigerator);
+@@ -101,6 +101,44 @@ static void fake_signal_wake_up(struct task_struct *p)
+ 	}
+ }
+ 
++static int __set_task_frozen(struct task_struct *p, void *arg)
++{
++	unsigned int state = READ_ONCE(p->__state);
++
++	if (p->on_rq)
++		return 0;
++
++	if (p != current && task_curr(p))
++		return 0;
++
++	if (!(state & (TASK_FREEZABLE | __TASK_STOPPED | __TASK_TRACED)))
++		return 0;
++
++	/*
++	 * Only TASK_NORMAL can be augmented with TASK_FREEZABLE, since they
++	 * can suffer spurious wakeups.
++	 */
++	if (state & TASK_FREEZABLE)
++		WARN_ON_ONCE(!(state & TASK_NORMAL));
++
++#ifdef CONFIG_LOCKDEP
++	/*
++	 * It's dangerous to freeze with locks held; there be dragons there.
++	 */
++	if (!(state & __TASK_FREEZABLE_UNSAFE))
++		WARN_ON_ONCE(debug_locks && p->lockdep_depth);
++#endif
++
++	WRITE_ONCE(p->__state, TASK_FROZEN);
++	return TASK_FROZEN;
++}
++
++static bool __freeze_task(struct task_struct *p)
++{
++	/* TASK_FREEZABLE|TASK_STOPPED|TASK_TRACED -> TASK_FROZEN */
++	return task_call_func(p, __set_task_frozen, NULL);
++}
++
+ /**
+  * freeze_task - send a freeze request to given task
+  * @p: task to send the request to
+@@ -116,20 +154,8 @@ bool freeze_task(struct task_struct *p)
+ {
+ 	unsigned long flags;
+ 
+-	/*
+-	 * This check can race with freezer_do_not_count, but worst case that
+-	 * will result in an extra wakeup being sent to the task.  It does not
+-	 * race with freezer_count(), the barriers in freezer_count() and
+-	 * freezer_should_skip() ensure that either freezer_count() sees
+-	 * freezing == true in try_to_freeze() and freezes, or
+-	 * freezer_should_skip() sees !PF_FREEZE_SKIP and freezes the task
+-	 * normally.
+-	 */
+-	if (freezer_should_skip(p))
+-		return false;
+-
+ 	spin_lock_irqsave(&freezer_lock, flags);
+-	if (!freezing(p) || frozen(p)) {
++	if (!freezing(p) || frozen(p) || __freeze_task(p)) {
+ 		spin_unlock_irqrestore(&freezer_lock, flags);
+ 		return false;
+ 	}
+@@ -137,19 +163,52 @@ bool freeze_task(struct task_struct *p)
+ 	if (!(p->flags & PF_KTHREAD))
+ 		fake_signal_wake_up(p);
+ 	else
+-		wake_up_state(p, TASK_INTERRUPTIBLE);
++		wake_up_state(p, TASK_NORMAL);
+ 
+ 	spin_unlock_irqrestore(&freezer_lock, flags);
+ 	return true;
+ }
+ 
++/*
++ * The special task states (TASK_STOPPED, TASK_TRACED) keep their canonical
++ * state in p->jobctl. If either of them got a wakeup that was missed because
++ * TASK_FROZEN, then their canonical state reflects that and the below will
++ * refuse to restore the special state and instead issue the wakeup.
++ */
++static int __set_task_special(struct task_struct *p, void *arg)
++{
++	unsigned int state = 0;
++
++	if (p->jobctl & JOBCTL_TRACED)
++		state = TASK_TRACED;
++
++	else if (p->jobctl & JOBCTL_STOPPED)
++		state = TASK_STOPPED;
++
++	if (state)
++		WRITE_ONCE(p->__state, state);
++
++	return state;
++}
++
+ void __thaw_task(struct task_struct *p)
+ {
+-	unsigned long flags;
++	unsigned long flags, flags2;
+ 
+ 	spin_lock_irqsave(&freezer_lock, flags);
+-	if (frozen(p))
+-		wake_up_process(p);
++	if (WARN_ON_ONCE(freezing(p)))
++		goto unlock;
++
++	if (lock_task_sighand(p, &flags2)) {
++		/* TASK_FROZEN -> TASK_{STOPPED,TRACED} */
++		bool ret = task_call_func(p, __set_task_special, NULL);
++		unlock_task_sighand(p, &flags2);
++		if (ret)
++			goto unlock;
++	}
++
++	wake_up_state(p, TASK_FROZEN);
++unlock:
+ 	spin_unlock_irqrestore(&freezer_lock, flags);
+ }
+ 
+diff --git a/kernel/futex/waitwake.c b/kernel/futex/waitwake.c
+index 4ce0923f1ce39..ba01b94082033 100644
+--- a/kernel/futex/waitwake.c
++++ b/kernel/futex/waitwake.c
+@@ -334,7 +334,7 @@ void futex_wait_queue(struct futex_hash_bucket *hb, struct futex_q *q,
+ 	 * futex_queue() calls spin_unlock() upon completion, both serializing
+ 	 * access to the hash list and forcing another memory barrier.
+ 	 */
+-	set_current_state(TASK_INTERRUPTIBLE);
++	set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
+ 	futex_queue(q, hb);
+ 
+ 	/* Arm the timer */
+@@ -352,7 +352,7 @@ void futex_wait_queue(struct futex_hash_bucket *hb, struct futex_q *q,
+ 		 * is no timeout, or if it has yet to expire.
+ 		 */
+ 		if (!timeout || timeout->task)
+-			freezable_schedule();
++			schedule();
+ 	}
+ 	__set_current_state(TASK_RUNNING);
+ }
+@@ -430,7 +430,7 @@ retry:
+ 			return ret;
+ 	}
+ 
+-	set_current_state(TASK_INTERRUPTIBLE);
++	set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
+ 
+ 	for (i = 0; i < count; i++) {
+ 		u32 __user *uaddr = (u32 __user *)(unsigned long)vs[i].w.uaddr;
+@@ -504,7 +504,7 @@ static void futex_sleep_multiple(struct futex_vector *vs, unsigned int count,
+ 			return;
+ 	}
+ 
+-	freezable_schedule();
++	schedule();
+ }
+ 
+ /**
+diff --git a/kernel/hung_task.c b/kernel/hung_task.c
+index bb2354f73dedc..f1321c03c32af 100644
+--- a/kernel/hung_task.c
++++ b/kernel/hung_task.c
+@@ -95,8 +95,8 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
+ 	 * Ensure the task is not frozen.
+ 	 * Also, skip vfork and any other user process that freezer should skip.
+ 	 */
+-	if (unlikely(t->flags & (PF_FROZEN | PF_FREEZER_SKIP)))
+-	    return;
++	if (unlikely(READ_ONCE(t->__state) & (TASK_FREEZABLE | TASK_FROZEN)))
++		return;
+ 
+ 	/*
+ 	 * When a freshly created task is scheduled once, changes its state to
+diff --git a/kernel/power/main.c b/kernel/power/main.c
+index dae3d17919e6f..31ec4a9b9d704 100644
+--- a/kernel/power/main.c
++++ b/kernel/power/main.c
+@@ -24,7 +24,7 @@
+ unsigned int lock_system_sleep(void)
+ {
+ 	unsigned int flags = current->flags;
+-	current->flags |= PF_FREEZER_SKIP;
++	current->flags |= PF_NOFREEZE;
+ 	mutex_lock(&system_transition_mutex);
+ 	return flags;
+ }
+@@ -48,8 +48,8 @@ void unlock_system_sleep(unsigned int flags)
+ 	 * Which means, if we use try_to_freeze() here, it would make them
+ 	 * enter the refrigerator, thus causing hibernation to lockup.
+ 	 */
+-	if (!(flags & PF_FREEZER_SKIP))
+-		current->flags &= ~PF_FREEZER_SKIP;
++	if (!(flags & PF_NOFREEZE))
++		current->flags &= ~PF_NOFREEZE;
+ 	mutex_unlock(&system_transition_mutex);
+ }
+ EXPORT_SYMBOL_GPL(unlock_system_sleep);
+diff --git a/kernel/power/process.c b/kernel/power/process.c
+index 3068601e585a8..ddd9988327fe2 100644
+--- a/kernel/power/process.c
++++ b/kernel/power/process.c
+@@ -50,8 +50,7 @@ static int try_to_freeze_tasks(bool user_only)
+ 			if (p == current || !freeze_task(p))
+ 				continue;
+ 
+-			if (!freezer_should_skip(p))
+-				todo++;
++			todo++;
+ 		}
+ 		read_unlock(&tasklist_lock);
+ 
+@@ -96,8 +95,7 @@ static int try_to_freeze_tasks(bool user_only)
+ 		if (!wakeup || pm_debug_messages_on) {
+ 			read_lock(&tasklist_lock);
+ 			for_each_process_thread(g, p) {
+-				if (p != current && !freezer_should_skip(p)
+-				    && freezing(p) && !frozen(p))
++				if (p != current && freezing(p) && !frozen(p))
+ 					sched_show_task(p);
+ 			}
+ 			read_unlock(&tasklist_lock);
+@@ -129,7 +127,7 @@ int freeze_processes(void)
+ 	current->flags |= PF_SUSPEND_TASK;
+ 
+ 	if (!pm_freezing)
+-		atomic_inc(&system_freezing_cnt);
++		static_branch_inc(&freezer_active);
+ 
+ 	pm_wakeup_clear(0);
+ 	pr_info("Freezing user space processes ... ");
+@@ -190,7 +188,7 @@ void thaw_processes(void)
+ 
+ 	trace_suspend_resume(TPS("thaw_processes"), 0, true);
+ 	if (pm_freezing)
+-		atomic_dec(&system_freezing_cnt);
++		static_branch_dec(&freezer_active);
+ 	pm_freezing = false;
+ 	pm_nosig_freezing = false;
+ 
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 1893d909e45ca..54482193e1edc 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -269,7 +269,7 @@ static int ptrace_check_attach(struct task_struct *child, bool ignore_state)
+ 	read_unlock(&tasklist_lock);
+ 
+ 	if (!ret && !ignore_state &&
+-	    WARN_ON_ONCE(!wait_task_inactive(child, __TASK_TRACED)))
++	    WARN_ON_ONCE(!wait_task_inactive(child, __TASK_TRACED|TASK_FROZEN)))
+ 		ret = -ESRCH;
+ 
+ 	return ret;
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index ea26526b45bbf..2b85d1b5fe0c1 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -6428,7 +6428,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
+ 			prev->sched_contributes_to_load =
+ 				(prev_state & TASK_UNINTERRUPTIBLE) &&
+ 				!(prev_state & TASK_NOLOAD) &&
+-				!(prev->flags & PF_FROZEN);
++				!(prev_state & TASK_FROZEN);
+ 
+ 			if (prev->sched_contributes_to_load)
+ 				rq->nr_uninterruptible++;
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 6f86fda5e432a..c2e90d6ca0d10 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -2304,7 +2304,7 @@ static int ptrace_stop(int exit_code, in
+ 	cgroup_enter_frozen();
+ 	if (!IS_ENABLED(CONFIG_PREEMPT_RT))
+ 		preempt_enable_no_resched();
+-	freezable_schedule();
++	schedule();
+ 	cgroup_leave_frozen(true);
+ 
+ 	/*
+@@ -2473,7 +2473,7 @@ static bool do_signal_stop(int signr)
+ 
+ 		/* Now we don't run again until woken by SIGCONT or SIGKILL */
+ 		cgroup_enter_frozen();
+-		freezable_schedule();
++		schedule();
+ 		return true;
+ 	} else {
+ 		/*
+@@ -2548,11 +2548,11 @@ static void do_freezer_trap(void)
+ 	 * immediately (if there is a non-fatal signal pending), and
+ 	 * put the task into sleep.
+ 	 */
+-	__set_current_state(TASK_INTERRUPTIBLE);
++	__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
+ 	clear_thread_flag(TIF_SIGPENDING);
+ 	spin_unlock_irq(&current->sighand->siglock);
+ 	cgroup_enter_frozen();
+-	freezable_schedule();
++	schedule();
+ }
+ 
+ static int ptrace_signal(int signr, kernel_siginfo_t *info, enum pid_type type)
+@@ -3600,9 +3600,9 @@ static int do_sigtimedwait(const sigset_t *which, kernel_siginfo_t *info,
+ 		recalc_sigpending();
+ 		spin_unlock_irq(&tsk->sighand->siglock);
+ 
+-		__set_current_state(TASK_INTERRUPTIBLE);
+-		ret = freezable_schedule_hrtimeout_range(to, tsk->timer_slack_ns,
+-							 HRTIMER_MODE_REL);
++		__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
++		ret = schedule_hrtimeout_range(to, tsk->timer_slack_ns,
++					       HRTIMER_MODE_REL);
+ 		spin_lock_irq(&tsk->sighand->siglock);
+ 		__set_task_blocked(tsk, &tsk->real_blocked);
+ 		sigemptyset(&tsk->real_blocked);
+diff --git a/kernel/time/hrtimer.c b/kernel/time/hrtimer.c
+index 23af5eca11b14..3ae661ab62603 100644
+--- a/kernel/time/hrtimer.c
++++ b/kernel/time/hrtimer.c
+@@ -2037,11 +2037,11 @@ static int __sched do_nanosleep(struct hrtimer_sleeper *t, enum hrtimer_mode mod
+ 	struct restart_block *restart;
+ 
+ 	do {
+-		set_current_state(TASK_INTERRUPTIBLE);
++		set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
+ 		hrtimer_sleeper_start_expires(t, mode);
+ 
+ 		if (likely(t->task))
+-			freezable_schedule();
++			schedule();
+ 
+ 		hrtimer_cancel(&t->timer);
+ 		mode = HRTIMER_MODE_ABS;
+diff --git a/kernel/umh.c b/kernel/umh.c
+index 8945eaf4c6717..8506315186652 100644
+--- a/kernel/umh.c
++++ b/kernel/umh.c
+@@ -404,6 +404,7 @@ EXPORT_SYMBOL(call_usermodehelper_setup);
+  */
+ int call_usermodehelper_exec(struct subprocess_info *sub_info, int wait)
+ {
++	unsigned int state = TASK_UNINTERRUPTIBLE;
+ 	DECLARE_COMPLETION_ONSTACK(done);
+ 	int retval = 0;
+ 
+@@ -437,25 +438,22 @@ int call_usermodehelper_exec(struct subprocess_info *sub_info, int wait)
+ 	if (wait == UMH_NO_WAIT)	/* task has freed sub_info */
+ 		goto unlock;
+ 
++	if (wait & UMH_KILLABLE)
++		state |= TASK_KILLABLE;
++
+ 	if (wait & UMH_FREEZABLE)
+-		freezer_do_not_count();
++		state |= TASK_FREEZABLE;
+ 
+-	if (wait & UMH_KILLABLE) {
+-		retval = wait_for_completion_killable(&done);
+-		if (!retval)
+-			goto wait_done;
++	retval = wait_for_completion_state(&done, state);
++	if (!retval)
++		goto wait_done;
+ 
++	if (wait & UMH_KILLABLE) {
+ 		/* umh_complete() will see NULL and free sub_info */
+ 		if (xchg(&sub_info->complete, NULL))
+ 			goto unlock;
+-		/* fallthrough, umh_complete() was already called */
+ 	}
+ 
+-	wait_for_completion(&done);
+-
+-	if (wait & UMH_FREEZABLE)
+-		freezer_count();
+-
+ wait_done:
+ 	retval = sub_info->retval;
+ out:
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 01f71786d5303..77162fb7e90b0 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -730,8 +730,8 @@ static void khugepaged_alloc_sleep(void)
+ 	DEFINE_WAIT(wait);
+ 
+ 	add_wait_queue(&khugepaged_wait, &wait);
+-	freezable_schedule_timeout_interruptible(
+-		msecs_to_jiffies(khugepaged_alloc_sleep_millisecs));
++	__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
++	schedule_timeout(msecs_to_jiffies(khugepaged_alloc_sleep_millisecs));
+ 	remove_wait_queue(&khugepaged_wait, &wait);
+ }
+ 
+diff --git a/net/sunrpc/sched.c b/net/sunrpc/sched.c
+index 25b9221950ffb..46cbf151a50b1 100644
+--- a/net/sunrpc/sched.c
++++ b/net/sunrpc/sched.c
+@@ -269,7 +269,7 @@ EXPORT_SYMBOL_GPL(rpc_destroy_wait_queue);
+ 
+ static int rpc_wait_bit_killable(struct wait_bit_key *key, int mode)
+ {
+-	freezable_schedule_unsafe();
++	schedule();
+ 	if (signal_pending_state(mode, current))
+ 		return -ERESTARTSYS;
+ 	return 0;
+@@ -333,14 +333,12 @@ static int rpc_complete_task(struct rpc_task *task)
+  * to enforce taking of the wq->lock and hence avoid races with
+  * rpc_complete_task().
+  */
+-int __rpc_wait_for_completion_task(struct rpc_task *task, wait_bit_action_f *action)
++int rpc_wait_for_completion_task(struct rpc_task *task)
+ {
+-	if (action == NULL)
+-		action = rpc_wait_bit_killable;
+ 	return out_of_line_wait_on_bit(&task->tk_runstate, RPC_TASK_ACTIVE,
+-			action, TASK_KILLABLE);
++			rpc_wait_bit_killable, TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+ }
+-EXPORT_SYMBOL_GPL(__rpc_wait_for_completion_task);
++EXPORT_SYMBOL_GPL(rpc_wait_for_completion_task);
+ 
+ /*
+  * Make an RPC task runnable.
+@@ -964,7 +962,7 @@ static void __rpc_execute(struct rpc_task *task)
+ 		trace_rpc_task_sync_sleep(task, task->tk_action);
+ 		status = out_of_line_wait_on_bit(&task->tk_runstate,
+ 				RPC_TASK_QUEUED, rpc_wait_bit_killable,
+-				TASK_KILLABLE);
++				TASK_KILLABLE|TASK_FREEZABLE);
+ 		if (status < 0) {
+ 			/*
+ 			 * When a sync task receives a signal, it exits with
+diff --git a/net/unix/af_unix.c b/net/unix/af_unix.c
+index bf338b782fc4c..dda9eb1ab41f0 100644
+--- a/net/unix/af_unix.c
++++ b/net/unix/af_unix.c
+@@ -2543,13 +2543,14 @@ static long unix_stream_data_wait(struct sock *sk, long timeo,
+ 				  struct sk_buff *last, unsigned int last_len,
+ 				  bool freezable)
+ {
++	unsigned int state = TASK_INTERRUPTIBLE | freezable * TASK_FREEZABLE;
+ 	struct sk_buff *tail;
+ 	DEFINE_WAIT(wait);
+ 
+ 	unix_state_lock(sk);
+ 
+ 	for (;;) {
+-		prepare_to_wait(sk_sleep(sk), &wait, TASK_INTERRUPTIBLE);
++		prepare_to_wait(sk_sleep(sk), &wait, state);
+ 
+ 		tail = skb_peek_tail(&sk->sk_receive_queue);
+ 		if (tail != last ||
+@@ -2562,10 +2563,7 @@ static long unix_stream_data_wait(struct sock *sk, long timeo,
+ 
+ 		sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+ 		unix_state_unlock(sk);
+-		if (freezable)
+-			timeo = freezable_schedule_timeout(timeo);
+-		else
+-			timeo = schedule_timeout(timeo);
++		timeo = schedule_timeout(timeo);
+ 		unix_state_lock(sk);
+ 
+ 		if (sock_flag(sk, SOCK_DEAD))
+-- 
+cgit 
+
+
+From fb04563d1cae6f361892b4a339ad92100b1eb0d0 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Tue, 6 Sep 2022 13:27:32 +0200
+Subject: sched: Show PF_flag holes
+
+Put placeholders in PF_flag so we can see how holey it is.
+
+Suggested-by: Ingo Molnar <mingo@kernel.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Ingo Molnar <mingo@kernel.org>
+Link: https://lkml.kernel.org/r/YxctoffFFPXONESt@hirez.programming.kicks-ass.net
+---
+ include/linux/sched.h | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 4c91efd6df821..15e3bd96e4ce2 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1722,7 +1722,9 @@ extern struct pid *cad_pid;
+ #define PF_MEMALLOC		0x00000800	/* Allocating memory */
+ #define PF_NPROC_EXCEEDED	0x00001000	/* set_user() noticed that RLIMIT_NPROC was exceeded */
+ #define PF_USED_MATH		0x00002000	/* If unset the fpu must be initialized before use */
++#define PF__HOLE__00004000	0x00004000
+ #define PF_NOFREEZE		0x00008000	/* This thread should not be frozen */
++#define PF__HOLE__00010000	0x00010000
+ #define PF_KSWAPD		0x00020000	/* I am kswapd */
+ #define PF_MEMALLOC_NOFS	0x00040000	/* All allocation requests will inherit GFP_NOFS */
+ #define PF_MEMALLOC_NOIO	0x00080000	/* All allocation requests will inherit GFP_NOIO */
+@@ -1730,9 +1732,14 @@ extern struct pid *cad_pid;
+ 						 * I am cleaning dirty pages from some other bdi. */
+ #define PF_KTHREAD		0x00200000	/* I am a kernel thread */
+ #define PF_RANDOMIZE		0x00400000	/* Randomize virtual address space */
++#define PF__HOLE__00800000	0x00800000
++#define PF__HOLE__01000000	0x01000000
++#define PF__HOLE__02000000	0x02000000
+ #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_mask */
+ #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
+ #define PF_MEMALLOC_PIN		0x10000000	/* Allocation context constrained to zones which allow long term pinning. */
++#define PF__HOLE__20000000	0x20000000
++#define PF__HOLE__40000000	0x40000000
+ #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
+ 
+ /*
+-- 
+cgit 
+
+From: Lin Shengwang <linshengwang1@huawei.com>
+To: <peterz@infradead.org>, <mingo@redhat.com>,
+	<juri.lelli@redhat.com>, <vincent.guittot@linaro.org>,
+	<aubrey.li@linux.intel.com>
+Cc: <dietmar.eggemann@arm.com>, <rostedt@goodmis.org>,
+	<bsegall@google.com>, <mgorman@suse.de>, <bristot@redhat.com>,
+	<vschneid@redhat.com>, <linux-kernel@vger.kernel.org>,
+	<cj.chengjian@huawei.com>
+Subject: [PATCH -next] sched/core: Fix the bug that traversal in sched_group_cookie_match is wrong
+Date: Sat, 8 Oct 2022 10:27:09 +0800	[thread overview]
+Message-ID: <20221008022709.642-1-linshengwang1@huawei.com> (raw)
+
+In commit 97886d9dcd86 ("sched: Migration changes for core scheduling"),
+sched_group_cookie_match() was added to help finding cookie matched
+group, but was inconsistent with the actual purpose.
+
+Using cpu_rq(cpu) instead of rq to fix the bug.
+
+Fixes: 97886d9dcd86 ("sched: Migration changes for core scheduling")
+Signed-off-by: Lin Shengwang <linshengwang1@huawei.com>
+---
+ kernel/sched/sched.h | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 23c6f9f42ba1..1ba602139840 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1182,6 +1182,14 @@ static inline bool is_migration_disabled(struct task_struct *p)
+ #endif
+ }
+ 
++DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
++
++#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
++#define this_rq()		this_cpu_ptr(&runqueues)
++#define task_rq(p)		cpu_rq(task_cpu(p))
++#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
++#define raw_rq()		raw_cpu_ptr(&runqueues)
++
+ struct sched_group;
+ #ifdef CONFIG_SCHED_CORE
+ static inline struct cpumask *sched_group_span(struct sched_group *sg);
+@@ -1269,7 +1277,7 @@ static inline bool sched_group_cookie_match(struct rq *rq,
+ 		return true;
+ 
+ 	for_each_cpu_and(cpu, sched_group_span(group), p->cpus_ptr) {
+-		if (sched_core_cookie_match(rq, p))
++		if (sched_core_cookie_match(cpu_rq(cpu), p))
+ 			return true;
+ 	}
+ 	return false;
+@@ -1384,14 +1392,6 @@ static inline void update_idle_core(struct rq *rq)
+ static inline void update_idle_core(struct rq *rq) { }
+ #endif
+ 
+-DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+-
+-#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
+-#define this_rq()		this_cpu_ptr(&runqueues)
+-#define task_rq(p)		cpu_rq(task_cpu(p))
+-#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
+-#define raw_rq()		raw_cpu_ptr(&runqueues)
+-
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ static inline struct task_struct *task_of(struct sched_entity *se)
+ {
+-- 
+2.17.1
+
+From 8e5bad7dccec2014f24497b57d8a8ee0b752c290 Mon Sep 17 00:00:00 2001
+From: Kees Cook <keescook@chromium.org>
+Date: Fri, 7 Oct 2022 17:07:58 -0700
+Subject: sched: Introduce struct balance_callback to avoid CFI mismatches
+
+Introduce distinct struct balance_callback instead of performing function
+pointer casting which will trip CFI. Avoids warnings as found by Clang's
+future -Wcast-function-type-strict option:
+
+In file included from kernel/sched/core.c:84:
+kernel/sched/sched.h:1755:15: warning: cast from 'void (*)(struct rq *)' to 'void (*)(struct callback_head *)' converts to incompatible function type [-Wcast-function-type-strict]
+        head->func = (void (*)(struct callback_head *))func;
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+No binary differences result from this change.
+
+This patch is a cleanup based on Brad Spengler/PaX Team's modifications
+to sched code in their last public patch of grsecurity/PaX based on my
+understanding of the code. Changes or omissions from the original code
+are mine and don't reflect the original grsecurity/PaX code.
+
+Reported-by: Sami Tolvanen <samitolvanen@google.com>
+Signed-off-by: Kees Cook <keescook@chromium.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Nathan Chancellor <nathan@kernel.org>
+Link: https://github.com/ClangBuiltLinux/linux/issues/1724
+Link: https://lkml.kernel.org/r/20221008000758.2957718-1-keescook@chromium.org
+---
+ kernel/sched/core.c     | 24 ++++++++++++------------
+ kernel/sched/deadline.c |  4 ++--
+ kernel/sched/rt.c       |  4 ++--
+ kernel/sched/sched.h    | 14 ++++++++++----
+ 4 files changed, 26 insertions(+), 20 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 5800b0623ff30..cb2aa2b54c7a4 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4823,10 +4823,10 @@ static inline void finish_task(struct task_struct *prev)
+ 
+ #ifdef CONFIG_SMP
+ 
+-static void do_balance_callbacks(struct rq *rq, struct callback_head *head)
++static void do_balance_callbacks(struct rq *rq, struct balance_callback *head)
+ {
+ 	void (*func)(struct rq *rq);
+-	struct callback_head *next;
++	struct balance_callback *next;
+ 
+ 	lockdep_assert_rq_held(rq);
+ 
+@@ -4853,15 +4853,15 @@ static void balance_push(struct rq *rq);
+  * This abuse is tolerated because it places all the unlikely/odd cases behind
+  * a single test, namely: rq->balance_callback == NULL.
+  */
+-struct callback_head balance_push_callback = {
++struct balance_callback balance_push_callback = {
+ 	.next = NULL,
+-	.func = (void (*)(struct callback_head *))balance_push,
++	.func = balance_push,
+ };
+ 
+-static inline struct callback_head *
++static inline struct balance_callback *
+ __splice_balance_callbacks(struct rq *rq, bool split)
+ {
+-	struct callback_head *head = rq->balance_callback;
++	struct balance_callback *head = rq->balance_callback;
+ 
+ 	if (likely(!head))
+ 		return NULL;
+@@ -4883,7 +4883,7 @@ __splice_balance_callbacks(struct rq *rq, bool split)
+ 	return head;
+ }
+ 
+-static inline struct callback_head *splice_balance_callbacks(struct rq *rq)
++static inline struct balance_callback *splice_balance_callbacks(struct rq *rq)
+ {
+ 	return __splice_balance_callbacks(rq, true);
+ }
+@@ -4893,7 +4893,7 @@ static void __balance_callbacks(struct rq *rq)
+ 	do_balance_callbacks(rq, __splice_balance_callbacks(rq, false));
+ }
+ 
+-static inline void balance_callbacks(struct rq *rq, struct callback_head *head)
++static inline void balance_callbacks(struct rq *rq, struct balance_callback *head)
+ {
+ 	unsigned long flags;
+ 
+@@ -4910,12 +4910,12 @@ static inline void __balance_callbacks(struct rq *rq)
+ {
+ }
+ 
+-static inline struct callback_head *splice_balance_callbacks(struct rq *rq)
++static inline struct balance_callback *splice_balance_callbacks(struct rq *rq)
+ {
+ 	return NULL;
+ }
+ 
+-static inline void balance_callbacks(struct rq *rq, struct callback_head *head)
++static inline void balance_callbacks(struct rq *rq, struct balance_callback *head)
+ {
+ }
+ 
+@@ -6188,7 +6188,7 @@ static void sched_core_balance(struct rq *rq)
+ 	preempt_enable();
+ }
+ 
+-static DEFINE_PER_CPU(struct callback_head, core_balance_head);
++static DEFINE_PER_CPU(struct balance_callback, core_balance_head);
+ 
+ static void queue_core_balance(struct rq *rq)
+ {
+@@ -7419,7 +7419,7 @@ static int __sched_setscheduler(struct task_struct *p,
+ 	int oldpolicy = -1, policy = attr->sched_policy;
+ 	int retval, oldprio, newprio, queued, running;
+ 	const struct sched_class *prev_class;
+-	struct callback_head *head;
++	struct balance_callback *head;
+ 	struct rq_flags rf;
+ 	int reset_on_fork;
+ 	int queue_flags = DEQUEUE_SAVE | DEQUEUE_MOVE | DEQUEUE_NOCLOCK;
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 86dea6a05267d..9ae8f41e3372f 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -644,8 +644,8 @@ static inline bool need_pull_dl_task(struct rq *rq, struct task_struct *prev)
+ 	return rq->online && dl_task(prev);
+ }
+ 
+-static DEFINE_PER_CPU(struct callback_head, dl_push_head);
+-static DEFINE_PER_CPU(struct callback_head, dl_pull_head);
++static DEFINE_PER_CPU(struct balance_callback, dl_push_head);
++static DEFINE_PER_CPU(struct balance_callback, dl_pull_head);
+ 
+ static void push_dl_tasks(struct rq *);
+ static void pull_dl_task(struct rq *);
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index d869bcf898ccb..ed2a47e4ddaec 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -410,8 +410,8 @@ static inline int has_pushable_tasks(struct rq *rq)
+ 	return !plist_head_empty(&rq->rt.pushable_tasks);
+ }
+ 
+-static DEFINE_PER_CPU(struct callback_head, rt_push_head);
+-static DEFINE_PER_CPU(struct callback_head, rt_pull_head);
++static DEFINE_PER_CPU(struct balance_callback, rt_push_head);
++static DEFINE_PER_CPU(struct balance_callback, rt_pull_head);
+ 
+ static void push_rt_tasks(struct rq *);
+ static void pull_rt_task(struct rq *);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 0d08511273695..a4a20046e586e 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -938,6 +938,12 @@ struct uclamp_rq {
+ DECLARE_STATIC_KEY_FALSE(sched_uclamp_used);
+ #endif /* CONFIG_UCLAMP_TASK */
+ 
++struct rq;
++struct balance_callback {
++	struct balance_callback *next;
++	void (*func)(struct rq *rq);
++};
++
+ /*
+  * This is the main, per-CPU runqueue data structure.
+  *
+@@ -1036,7 +1042,7 @@ struct rq {
+ 	unsigned long		cpu_capacity;
+ 	unsigned long		cpu_capacity_orig;
+ 
+-	struct callback_head	*balance_callback;
++	struct balance_callback *balance_callback;
+ 
+ 	unsigned char		nohz_idle_balance;
+ 	unsigned char		idle_balance;
+@@ -1544,7 +1550,7 @@ struct rq_flags {
+ #endif
+ };
+ 
+-extern struct callback_head balance_push_callback;
++extern struct balance_callback balance_push_callback;
+ 
+ /*
+  * Lockdep annotation that avoids accidental unlocks; it's like a
+@@ -1724,7 +1730,7 @@ init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
+ 
+ static inline void
+ queue_balance_callback(struct rq *rq,
+-		       struct callback_head *head,
++		       struct balance_callback *head,
+ 		       void (*func)(struct rq *rq))
+ {
+ 	lockdep_assert_rq_held(rq);
+@@ -1737,7 +1743,7 @@ queue_balance_callback(struct rq *rq,
+ 	if (unlikely(head->next || rq->balance_callback == &balance_push_callback))
+ 		return;
+ 
+-	head->func = (void (*)(struct callback_head *))func;
++	head->func = func;
+ 	head->next = rq->balance_callback;
+ 	rq->balance_callback = head;
+ }
+-- 
+cgit 
+
+

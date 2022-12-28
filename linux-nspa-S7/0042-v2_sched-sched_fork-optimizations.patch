@@ -1,0 +1,75 @@
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index e4ce124ec701..21481bd22bdf 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -4627,9 +4627,13 @@ void sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
+ 	 * so use __set_task_cpu().
+ 	 */
+ 	__set_task_cpu(p, smp_processor_id());
++	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
++}
++
++static void sched_task_fork(struct task_struct *p)
++{
+ 	if (p->sched_class->task_fork)
+ 		p->sched_class->task_fork(p);
+-	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
+ }
+ 
+ void sched_post_fork(struct task_struct *p)
+@@ -4682,6 +4686,7 @@ void wake_up_new_task(struct task_struct *p)
+ #endif
+ 	rq = __task_rq_lock(p, &rf);
+ 	update_rq_clock(rq);
++	sched_task_fork(p);
+ 	post_init_entity_util_avg(p);
+ 
+ 	activate_task(rq, p, ENQUEUE_NOCLOCK);
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index e4a0b8bd941c..34845d425180 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11603,12 +11603,8 @@ static void task_fork_fair(struct task_struct *p)
+ 	struct cfs_rq *cfs_rq;
+ 	struct sched_entity *se = &p->se, *curr;
+ 	struct rq *rq = this_rq();
+-	struct rq_flags rf;
+ 
+-	rq_lock(rq, &rf);
+-	update_rq_clock(rq);
+-
+-	cfs_rq = task_cfs_rq(current);
++	cfs_rq = task_cfs_rq(p);
+ 	curr = cfs_rq->curr;
+ 	if (curr) {
+ 		update_curr(cfs_rq);
+@@ -11626,7 +11622,6 @@ static void task_fork_fair(struct task_struct *p)
+ 	}
+ 
+ 	se->vruntime -= cfs_rq->min_vruntime;
+-	rq_unlock(rq, &rf);
+ }
+ 
+ /*
+-- 
+2.17.1
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 34845d425180..6061ceb1b7cb 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11612,7 +11612,9 @@ static void task_fork_fair(struct task_struct *p)
+ 	}
+ 	place_entity(cfs_rq, se, 1);
+ 
+-	if (sysctl_sched_child_runs_first && curr && entity_before(curr, se)) {
++	if (sysctl_sched_child_runs_first &&
++		cfs_rq == task_cfs_rq(current) &&
++		curr && entity_before(curr, se)) {
+ 		/*
+ 		 * Upon rescheduling, sched_class::put_prev_task() will place
+ 		 * 'current' within the tree based on its new key value.
+-- 
+2.17.1
+
+

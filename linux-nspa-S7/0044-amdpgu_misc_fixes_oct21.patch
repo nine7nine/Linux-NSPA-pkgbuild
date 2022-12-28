@@ -1,0 +1,1119 @@
+From 91954c6c904b515baafaee6a1f35c94409a3bb68 Mon Sep 17 00:00:00 2001
+From: Daniel Gomez <daniel@qtec.com>
+Date: Sun, 25 Sep 2022 23:53:13 +0200
+Subject: drm/amd/display: Fix mutex lock in dcn10
+
+Removal of DC_FP_* wrappers from dml (9696679bf7ac) provokes a mutex
+lock [2] on the amdgpu driver. Re-arrange the dcn10 code to avoid
+locking the mutex by placing the DC_FP_* wrappers around the proper
+functions.
+
+This fixes the following WARN/stacktrace:
+
+BUG: sleeping function called from invalid context at kernel/locking/mutex.c:283
+in_atomic(): 1, irqs_disabled(): 0, non_block: 0, pid: 227, name: systemd-udevd
+preempt_count: 1, expected: 0
+CPU: 4 PID: 227 Comm: systemd-udevd Not tainted 6.0.0-rc6-qtec-standard #2
+Hardware name: Qtechnology A/S QT5222/QT5221, BIOS v1.0.1 06/07/2021
+Call Trace:
+ <TASK>
+ dump_stack_lvl+0x33/0x42
+ __might_resched.cold.172+0xa5/0xb3
+ mutex_lock+0x1a/0x40
+ amdgpu_dpm_get_clock_by_type_with_voltage+0x38/0x70 [amdgpu]
+ dm_pp_get_clock_levels_by_type_with_voltage+0x64/0xa0 [amdgpu]
+ dcn_bw_update_from_pplib+0x70/0x340 [amdgpu]
+ dcn10_create_resource_pool+0x8c8/0xd20 [amdgpu]
+ ? __kmalloc+0x1c7/0x4a0
+ dc_create_resource_pool+0xe7/0x190 [amdgpu]
+ dc_create+0x212/0x5d0 [amdgpu]
+ amdgpu_dm_init+0x246/0x370 [amdgpu]
+ ? schedule_hrtimeout_range_clock+0x93/0x120
+ ? phm_wait_for_register_unequal.part.1+0x4a/0x80 [amdgpu]
+ dm_hw_init+0xe/0x20 [amdgpu]
+ amdgpu_device_init.cold.56+0x1324/0x1653 [amdgpu]
+ ? pci_bus_read_config_word+0x43/0x80
+ amdgpu_driver_load_kms+0x15/0x120 [amdgpu]
+ amdgpu_pci_probe+0x116/0x320 [amdgpu]
+ pci_device_probe+0x97/0x110
+ really_probe+0xdd/0x340
+ __driver_probe_device+0x80/0x170
+ driver_probe_device+0x1f/0x90
+ __driver_attach+0xdc/0x180
+ ? __device_attach_driver+0x100/0x100
+ ? __device_attach_driver+0x100/0x100
+ bus_for_each_dev+0x74/0xc0
+ bus_add_driver+0x19e/0x210
+ ? kset_find_obj+0x30/0xa0
+ ? 0xffffffffa0a5b000
+ driver_register+0x6b/0xc0
+ ? 0xffffffffa0a5b000
+ do_one_initcall+0x4a/0x1f0
+ ? __vunmap+0x28e/0x2f0
+ ? __cond_resched+0x15/0x30
+ ? kmem_cache_alloc_trace+0x3d/0x440
+ do_init_module+0x4a/0x1e0
+ load_module+0x1cba/0x1e10
+ ? __do_sys_finit_module+0xb7/0x120
+ __do_sys_finit_module+0xb7/0x120
+ do_syscall_64+0x3c/0x80
+ entry_SYSCALL_64_after_hwframe+0x63/0xcd
+RIP: 0033:0x7ff2b5f5422d
+Code: 5d c3 66 2e 0f 1f 84 00 00 00 00 00 90 f3 0f 1e fa 48 89 f8 48
+89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 <48>
+3d 01 f0 ff ff 73 01 c3 48 8b 0d c3 ab 0e 00 f7 d8 64 89 01 48
+RSP: 002b:00007ffc44ab28e8 EFLAGS: 00000246 ORIG_RAX: 0000000000000139
+RAX: ffffffffffffffda RBX: 0000555c566a9240 RCX: 00007ff2b5f5422d
+RDX: 0000000000000000 RSI: 00007ff2b60bb353 RDI: 0000000000000019
+RBP: 00007ff2b60bb353 R08: 0000000000000000 R09: 0000555c566a9240
+R10: 0000000000000019 R11: 0000000000000246 R12: 0000000000000000
+R13: 0000000000020000 R14: 0000000000000000 R15: 0000000000000000
+</TASK>
+
+Fixes: 9696679bf7ac ("drm/amd/display: remove DC_FP_* wrapper from dml folder")
+Reviewed-by: Hamza Mahfooz <hamza.mahfooz@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Daniel Gomez <daniel@qtec.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ .../drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c  |  12 ++-
+ .../gpu/drm/amd/display/dc/dcn10/dcn10_resource.c  |  66 +++++++++++-
+ .../gpu/drm/amd/display/dc/dml/calcs/dcn_calcs.c   | 118 +++++++++------------
+ drivers/gpu/drm/amd/display/dc/inc/dcn_calcs.h     |  19 +++-
+ 4 files changed, 138 insertions(+), 77 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c
+index 72521749c01d9..4390f6d7050fc 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_hw_sequencer.c
+@@ -3005,6 +3005,7 @@ void dcn10_prepare_bandwidth(
+ {
+ 	struct dce_hwseq *hws = dc->hwseq;
+ 	struct hubbub *hubbub = dc->res_pool->hubbub;
++	int min_fclk_khz, min_dcfclk_khz, socclk_khz;
+ 
+ 	if (dc->debug.sanity_checks)
+ 		hws->funcs.verify_allow_pstate_change_high(dc);
+@@ -3027,8 +3028,11 @@ void dcn10_prepare_bandwidth(
+ 
+ 	if (dc->debug.pplib_wm_report_mode == WM_REPORT_OVERRIDE) {
+ 		DC_FP_START();
+-		dcn_bw_notify_pplib_of_wm_ranges(dc);
++		dcn_get_soc_clks(
++			dc, &min_fclk_khz, &min_dcfclk_khz, &socclk_khz);
+ 		DC_FP_END();
++		dcn_bw_notify_pplib_of_wm_ranges(
++			dc, min_fclk_khz, min_dcfclk_khz, socclk_khz);
+ 	}
+ 
+ 	if (dc->debug.sanity_checks)
+@@ -3041,6 +3045,7 @@ void dcn10_optimize_bandwidth(
+ {
+ 	struct dce_hwseq *hws = dc->hwseq;
+ 	struct hubbub *hubbub = dc->res_pool->hubbub;
++	int min_fclk_khz, min_dcfclk_khz, socclk_khz;
+ 
+ 	if (dc->debug.sanity_checks)
+ 		hws->funcs.verify_allow_pstate_change_high(dc);
+@@ -3064,8 +3069,11 @@ void dcn10_optimize_bandwidth(
+ 
+ 	if (dc->debug.pplib_wm_report_mode == WM_REPORT_OVERRIDE) {
+ 		DC_FP_START();
+-		dcn_bw_notify_pplib_of_wm_ranges(dc);
++		dcn_get_soc_clks(
++			dc, &min_fclk_khz, &min_dcfclk_khz, &socclk_khz);
+ 		DC_FP_END();
++		dcn_bw_notify_pplib_of_wm_ranges(
++			dc, min_fclk_khz, min_dcfclk_khz, socclk_khz);
+ 	}
+ 
+ 	if (dc->debug.sanity_checks)
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_resource.c b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_resource.c
+index 831080b9eb873..56d30baf12df2 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_resource.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn10/dcn10_resource.c
+@@ -1336,6 +1336,21 @@ static noinline void dcn10_resource_construct_fp(
+ 	}
+ }
+ 
++static bool verify_clock_values(struct dm_pp_clock_levels_with_voltage *clks)
++{
++	int i;
++
++	if (clks->num_levels == 0)
++		return false;
++
++	for (i = 0; i < clks->num_levels; i++)
++		/* Ensure that the result is sane */
++		if (clks->data[i].clocks_in_khz == 0)
++			return false;
++
++	return true;
++}
++
+ static bool dcn10_resource_construct(
+ 	uint8_t num_virtual_links,
+ 	struct dc *dc,
+@@ -1345,6 +1360,9 @@ static bool dcn10_resource_construct(
+ 	int j;
+ 	struct dc_context *ctx = dc->ctx;
+ 	uint32_t pipe_fuses = read_pipe_fuses(ctx);
++	struct dm_pp_clock_levels_with_voltage fclks = {0}, dcfclks = {0};
++	int min_fclk_khz, min_dcfclk_khz, socclk_khz;
++	bool res;
+ 
+ 	ctx->dc_bios->regs = &bios_regs;
+ 
+@@ -1523,15 +1541,53 @@ static bool dcn10_resource_construct(
+ 			&& pool->base.pp_smu->rv_funcs.set_pme_wa_enable != NULL)
+ 		dc->debug.az_endpoint_mute_only = false;
+ 
+-	DC_FP_START();
+-	if (!dc->debug.disable_pplib_clock_request)
+-		dcn_bw_update_from_pplib(dc);
++
++	if (!dc->debug.disable_pplib_clock_request) {
++		/*
++		 * TODO: This is not the proper way to obtain
++		 * fabric_and_dram_bandwidth, should be min(fclk, memclk).
++		 */
++		res = dm_pp_get_clock_levels_by_type_with_voltage(
++				ctx, DM_PP_CLOCK_TYPE_FCLK, &fclks);
++
++		DC_FP_START();
++
++		if (res)
++			res = verify_clock_values(&fclks);
++
++		if (res)
++			dcn_bw_update_from_pplib_fclks(dc, &fclks);
++		else
++			BREAK_TO_DEBUGGER();
++
++		DC_FP_END();
++
++		res = dm_pp_get_clock_levels_by_type_with_voltage(
++			ctx, DM_PP_CLOCK_TYPE_DCFCLK, &dcfclks);
++
++		DC_FP_START();
++
++		if (res)
++			res = verify_clock_values(&dcfclks);
++
++		if (res)
++			dcn_bw_update_from_pplib_dcfclks(dc, &dcfclks);
++		else
++			BREAK_TO_DEBUGGER();
++
++		DC_FP_END();
++	}
++
+ 	dcn_bw_sync_calcs_and_dml(dc);
+ 	if (!dc->debug.disable_pplib_wm_range) {
+ 		dc->res_pool = &pool->base;
+-		dcn_bw_notify_pplib_of_wm_ranges(dc);
++		DC_FP_START();
++		dcn_get_soc_clks(
++			dc, &min_fclk_khz, &min_dcfclk_khz, &socclk_khz);
++		DC_FP_END();
++		dcn_bw_notify_pplib_of_wm_ranges(
++			dc, min_fclk_khz, min_dcfclk_khz, socclk_khz);
+ 	}
+-	DC_FP_END();
+ 
+ 	{
+ 		struct irq_service_init_data init_data;
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/calcs/dcn_calcs.c b/drivers/gpu/drm/amd/display/dc/dml/calcs/dcn_calcs.c
+index d46adc849d2aa..e73f089c84bb6 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/calcs/dcn_calcs.c
++++ b/drivers/gpu/drm/amd/display/dc/dml/calcs/dcn_calcs.c
+@@ -1444,81 +1444,67 @@ unsigned int dcn_find_dcfclk_suits_all(
+ 	return dcf_clk;
+ }
+ 
+-static bool verify_clock_values(struct dm_pp_clock_levels_with_voltage *clks)
++void dcn_bw_update_from_pplib_fclks(
++	struct dc *dc,
++	struct dm_pp_clock_levels_with_voltage *fclks)
+ {
+-	int i;
+-
+-	if (clks->num_levels == 0)
+-		return false;
+-
+-	for (i = 0; i < clks->num_levels; i++)
+-		/* Ensure that the result is sane */
+-		if (clks->data[i].clocks_in_khz == 0)
+-			return false;
++	unsigned vmin0p65_idx, vmid0p72_idx, vnom0p8_idx, vmax0p9_idx;
+ 
+-	return true;
++	ASSERT(fclks->num_levels);
++
++	vmin0p65_idx = 0;
++	vmid0p72_idx = fclks->num_levels -
++		(fclks->num_levels > 2 ? 3 : (fclks->num_levels > 1 ? 2 : 1));
++	vnom0p8_idx = fclks->num_levels - (fclks->num_levels > 1 ? 2 : 1);
++	vmax0p9_idx = fclks->num_levels - 1;
++
++	dc->dcn_soc->fabric_and_dram_bandwidth_vmin0p65 =
++		32 * (fclks->data[vmin0p65_idx].clocks_in_khz / 1000.0) / 1000.0;
++	dc->dcn_soc->fabric_and_dram_bandwidth_vmid0p72 =
++		dc->dcn_soc->number_of_channels *
++		(fclks->data[vmid0p72_idx].clocks_in_khz / 1000.0)
++		* ddr4_dram_factor_single_Channel / 1000.0;
++	dc->dcn_soc->fabric_and_dram_bandwidth_vnom0p8 =
++		dc->dcn_soc->number_of_channels *
++		(fclks->data[vnom0p8_idx].clocks_in_khz / 1000.0)
++		* ddr4_dram_factor_single_Channel / 1000.0;
++	dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 =
++		dc->dcn_soc->number_of_channels *
++		(fclks->data[vmax0p9_idx].clocks_in_khz / 1000.0)
++		* ddr4_dram_factor_single_Channel / 1000.0;
+ }
+ 
+-void dcn_bw_update_from_pplib(struct dc *dc)
++void dcn_bw_update_from_pplib_dcfclks(
++	struct dc *dc,
++	struct dm_pp_clock_levels_with_voltage *dcfclks)
+ {
+-	struct dc_context *ctx = dc->ctx;
+-	struct dm_pp_clock_levels_with_voltage fclks = {0}, dcfclks = {0};
+-	bool res;
+-	unsigned vmin0p65_idx, vmid0p72_idx, vnom0p8_idx, vmax0p9_idx;
+-
+-	/* TODO: This is not the proper way to obtain fabric_and_dram_bandwidth, should be min(fclk, memclk) */
+-	res = dm_pp_get_clock_levels_by_type_with_voltage(
+-			ctx, DM_PP_CLOCK_TYPE_FCLK, &fclks);
+-
+-	if (res)
+-		res = verify_clock_values(&fclks);
+-
+-	if (res) {
+-		ASSERT(fclks.num_levels);
+-
+-		vmin0p65_idx = 0;
+-		vmid0p72_idx = fclks.num_levels -
+-			(fclks.num_levels > 2 ? 3 : (fclks.num_levels > 1 ? 2 : 1));
+-		vnom0p8_idx = fclks.num_levels - (fclks.num_levels > 1 ? 2 : 1);
+-		vmax0p9_idx = fclks.num_levels - 1;
+-
+-		dc->dcn_soc->fabric_and_dram_bandwidth_vmin0p65 =
+-			32 * (fclks.data[vmin0p65_idx].clocks_in_khz / 1000.0) / 1000.0;
+-		dc->dcn_soc->fabric_and_dram_bandwidth_vmid0p72 =
+-			dc->dcn_soc->number_of_channels *
+-			(fclks.data[vmid0p72_idx].clocks_in_khz / 1000.0)
+-			* ddr4_dram_factor_single_Channel / 1000.0;
+-		dc->dcn_soc->fabric_and_dram_bandwidth_vnom0p8 =
+-			dc->dcn_soc->number_of_channels *
+-			(fclks.data[vnom0p8_idx].clocks_in_khz / 1000.0)
+-			* ddr4_dram_factor_single_Channel / 1000.0;
+-		dc->dcn_soc->fabric_and_dram_bandwidth_vmax0p9 =
+-			dc->dcn_soc->number_of_channels *
+-			(fclks.data[vmax0p9_idx].clocks_in_khz / 1000.0)
+-			* ddr4_dram_factor_single_Channel / 1000.0;
+-	} else
+-		BREAK_TO_DEBUGGER();
+-
+-	res = dm_pp_get_clock_levels_by_type_with_voltage(
+-			ctx, DM_PP_CLOCK_TYPE_DCFCLK, &dcfclks);
+-
+-	if (res)
+-		res = verify_clock_values(&dcfclks);
++	if (dcfclks->num_levels >= 3) {
++		dc->dcn_soc->dcfclkv_min0p65 = dcfclks->data[0].clocks_in_khz / 1000.0;
++		dc->dcn_soc->dcfclkv_mid0p72 = dcfclks->data[dcfclks->num_levels - 3].clocks_in_khz / 1000.0;
++		dc->dcn_soc->dcfclkv_nom0p8 = dcfclks->data[dcfclks->num_levels - 2].clocks_in_khz / 1000.0;
++		dc->dcn_soc->dcfclkv_max0p9 = dcfclks->data[dcfclks->num_levels - 1].clocks_in_khz / 1000.0;
++	}
++}
+ 
+-	if (res && dcfclks.num_levels >= 3) {
+-		dc->dcn_soc->dcfclkv_min0p65 = dcfclks.data[0].clocks_in_khz / 1000.0;
+-		dc->dcn_soc->dcfclkv_mid0p72 = dcfclks.data[dcfclks.num_levels - 3].clocks_in_khz / 1000.0;
+-		dc->dcn_soc->dcfclkv_nom0p8 = dcfclks.data[dcfclks.num_levels - 2].clocks_in_khz / 1000.0;
+-		dc->dcn_soc->dcfclkv_max0p9 = dcfclks.data[dcfclks.num_levels - 1].clocks_in_khz / 1000.0;
+-	} else
+-		BREAK_TO_DEBUGGER();
++void dcn_get_soc_clks(
++	struct dc *dc,
++	int *min_fclk_khz,
++	int *min_dcfclk_khz,
++	int *socclk_khz)
++{
++	*min_fclk_khz = dc->dcn_soc->fabric_and_dram_bandwidth_vmin0p65 * 1000000 / 32;
++	*min_dcfclk_khz = dc->dcn_soc->dcfclkv_min0p65 * 1000;
++	*socclk_khz = dc->dcn_soc->socclk * 1000;
+ }
+ 
+-void dcn_bw_notify_pplib_of_wm_ranges(struct dc *dc)
++void dcn_bw_notify_pplib_of_wm_ranges(
++	struct dc *dc,
++	int min_fclk_khz,
++	int min_dcfclk_khz,
++	int socclk_khz)
+ {
+ 	struct pp_smu_funcs_rv *pp = NULL;
+ 	struct pp_smu_wm_range_sets ranges = {0};
+-	int min_fclk_khz, min_dcfclk_khz, socclk_khz;
+ 	const int overdrive = 5000000; /* 5 GHz to cover Overdrive */
+ 
+ 	if (dc->res_pool->pp_smu)
+@@ -1526,10 +1512,6 @@ void dcn_bw_notify_pplib_of_wm_ranges(struct dc *dc)
+ 	if (!pp || !pp->set_wm_ranges)
+ 		return;
+ 
+-	min_fclk_khz = dc->dcn_soc->fabric_and_dram_bandwidth_vmin0p65 * 1000000 / 32;
+-	min_dcfclk_khz = dc->dcn_soc->dcfclkv_min0p65 * 1000;
+-	socclk_khz = dc->dcn_soc->socclk * 1000;
+-
+ 	/* Now notify PPLib/SMU about which Watermarks sets they should select
+ 	 * depending on DPM state they are in. And update BW MGR GFX Engine and
+ 	 * Memory clock member variables for Watermarks calculations for each
+diff --git a/drivers/gpu/drm/amd/display/dc/inc/dcn_calcs.h b/drivers/gpu/drm/amd/display/dc/inc/dcn_calcs.h
+index 806f3041db141..9e4ddc9852406 100644
+--- a/drivers/gpu/drm/amd/display/dc/inc/dcn_calcs.h
++++ b/drivers/gpu/drm/amd/display/dc/inc/dcn_calcs.h
+@@ -628,8 +628,23 @@ unsigned int dcn_find_dcfclk_suits_all(
+ 	const struct dc *dc,
+ 	struct dc_clocks *clocks);
+ 
+-void dcn_bw_update_from_pplib(struct dc *dc);
+-void dcn_bw_notify_pplib_of_wm_ranges(struct dc *dc);
++void dcn_get_soc_clks(
++		struct dc *dc,
++		int *min_fclk_khz,
++		int *min_dcfclk_khz,
++		int *socclk_khz);
++
++void dcn_bw_update_from_pplib_fclks(
++		struct dc *dc,
++		struct dm_pp_clock_levels_with_voltage *fclks);
++void dcn_bw_update_from_pplib_dcfclks(
++		struct dc *dc,
++		struct dm_pp_clock_levels_with_voltage *dcfclks);
++void dcn_bw_notify_pplib_of_wm_ranges(
++		struct dc *dc,
++		int min_fclk_khz,
++		int min_dcfclk_khz,
++		int socclk_khz);
+ void dcn_bw_sync_calcs_and_dml(struct dc *dc);
+ 
+ enum source_macro_tile_size swizzle_mode_to_macro_tile_size(enum swizzle_mode_values sw_mode);
+-- 
+cgit 
+
+
+From 8ab1d7a27eff87001ebd0977db600e4187f63f78 Mon Sep 17 00:00:00 2001
+From: Alvin Lee <Alvin.Lee2@amd.com>
+Date: Wed, 17 Aug 2022 10:47:59 -0400
+Subject: drm/amd/display: Only commit SubVP state after pipe programming
+
+[Description]
+We only want to commit the SubVP config to DMCUB
+after the main and phantom pipe programming has
+completed. Commiting the state early can cause
+issues such as P-State being allowed by the HW
+early which causes the SubVP state machine to
+go into a bad state
+
+Reviewed-by: Jun Lei <Jun.Lei@amd.com>
+Acked-by: Brian Chang <Brian.Chang@amd.com>
+Signed-off-by: Alvin Lee <Alvin.Lee2@amd.com>
+Tested-by: Daniel Wheeler <daniel.wheeler@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/display/dc/core/dc.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/core/dc.c b/drivers/gpu/drm/amd/display/dc/core/dc.c
+index 258ba5a872b11..ccaa43d071cf3 100644
+--- a/drivers/gpu/drm/amd/display/dc/core/dc.c
++++ b/drivers/gpu/drm/amd/display/dc/core/dc.c
+@@ -3495,6 +3495,9 @@ static void commit_planes_for_stream(struct dc *dc,
+ 
+ 	if (update_type != UPDATE_TYPE_FAST)
+ 		dc->hwss.post_unlock_program_front_end(dc, context);
++		if (update_type != UPDATE_TYPE_FAST)
++			if (dc->hwss.commit_subvp_config)
++				dc->hwss.commit_subvp_config(dc, context);
+ 
+ 	if (update_type != UPDATE_TYPE_FAST)
+ 		if (dc->hwss.commit_subvp_config)
+-- 
+cgit 
+
+
+From d37f379ad04dcc21ebd1d2380c3bc979d54f7c46 Mon Sep 17 00:00:00 2001
+From: Yang Yingliang <yangyingliang@huawei.com>
+Date: Thu, 29 Sep 2022 17:02:00 +0800
+Subject: drm/amd/display: change to enc314_stream_encoder_dp_blank static
+
+enc314_stream_encoder_dp_blank is only used in dcn314_dio_stream_encoder.c now,
+change it to static.
+
+Fixes: c55bf690fe79 ("drm/amd/display: Add explicit FIFO disable for DP blank")
+Signed-off-by: Yang Yingliang <yangyingliang@huawei.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/display/dc/dcn314/dcn314_dio_stream_encoder.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_dio_stream_encoder.c b/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_dio_stream_encoder.c
+index 0d2ffb692957f..7e773bf7b895f 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_dio_stream_encoder.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn314/dcn314_dio_stream_encoder.c
+@@ -262,7 +262,7 @@ static bool is_two_pixels_per_containter(const struct dc_crtc_timing *timing)
+ 	return two_pix;
+ }
+ 
+-void enc314_stream_encoder_dp_blank(
++static void enc314_stream_encoder_dp_blank(
+ 	struct dc_link *link,
+ 	struct stream_encoder *enc)
+ {
+-- 
+cgit 
+
+
+From 8abbc4f768ddc5c2190ab8966e529cec42b4b2d4 Mon Sep 17 00:00:00 2001
+From: Li Zhong <floridsleeves@gmail.com>
+Date: Sat, 24 Sep 2022 15:19:39 -0700
+Subject: drivers/amd/pm: check the return value of amdgpu_bo_kmap
+
+amdgpu_bo_kmap() returns error when fails to map buffer object. Add the
+error check and propagate the error.
+
+Signed-off-by: Li Zhong <floridsleeves@gmail.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/pm/legacy-dpm/kv_dpm.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/pm/legacy-dpm/kv_dpm.c b/drivers/gpu/drm/amd/pm/legacy-dpm/kv_dpm.c
+index 8fd0782a2b206..f5e08b60f66ef 100644
+--- a/drivers/gpu/drm/amd/pm/legacy-dpm/kv_dpm.c
++++ b/drivers/gpu/drm/amd/pm/legacy-dpm/kv_dpm.c
+@@ -1384,13 +1384,16 @@ static int kv_dpm_enable(struct amdgpu_device *adev)
+ static void kv_dpm_disable(struct amdgpu_device *adev)
+ {
+ 	struct kv_power_info *pi = kv_get_pi(adev);
++	int err;
+ 
+ 	amdgpu_irq_put(adev, &adev->pm.dpm.thermal.irq,
+ 		       AMDGPU_THERMAL_IRQ_LOW_TO_HIGH);
+ 	amdgpu_irq_put(adev, &adev->pm.dpm.thermal.irq,
+ 		       AMDGPU_THERMAL_IRQ_HIGH_TO_LOW);
+ 
+-	amdgpu_kv_smc_bapm_enable(adev, false);
++	err = amdgpu_kv_smc_bapm_enable(adev, false);
++	if (err)
++		DRM_ERROR("amdgpu_kv_smc_bapm_enable failed\n");
+ 
+ 	if (adev->asic_type == CHIP_MULLINS)
+ 		kv_enable_nb_dpm(adev, false);
+-- 
+cgit 
+
+
+From f7367b5fe0e38af02d6915a355f2ee63b172c9ac Mon Sep 17 00:00:00 2001
+From: Dillon Varone <Dillon.Varone@amd.com>
+Date: Mon, 19 Sep 2022 10:29:24 -0400
+Subject: drm/amd/display: Program SubVP in dc_commit_state_no_check
+
+[Why?]
+Currently SubVP programming is only done in commit_planes_for_stream, as
+it was expected only this call would add/remove planes from a
+display.
+
+[How?]
+Add SubVP programming to dc_commit_state_no_check.
+
+Reviewed-by: Alvin Lee <Alvin.Lee2@amd.com>
+Acked-by: Hamza Mahfooz <hamza.mahfooz@amd.com>
+Signed-off-by: Dillon Varone <Dillon.Varone@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/display/dc/core/dc.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/core/dc.c b/drivers/gpu/drm/amd/display/dc/core/dc.c
+index ccaa43d071cf3..4ba2c1f95dcbd 100644
+--- a/drivers/gpu/drm/amd/display/dc/core/dc.c
++++ b/drivers/gpu/drm/amd/display/dc/core/dc.c
+@@ -1734,10 +1734,20 @@ static enum dc_status dc_commit_state_no_check(struct dc *dc, struct dc_state *c
+ 	int i, k, l;
+ 	struct dc_stream_state *dc_streams[MAX_STREAMS] = {0};
+ 	struct dc_state *old_state;
++	bool subvp_prev_use = false;
+ 
+ 	dc_z10_restore(dc);
+ 	dc_allow_idle_optimizations(dc, false);
+ 
++	for (i = 0; i < dc->res_pool->pipe_count; i++) {
++		struct pipe_ctx *old_pipe = &dc->current_state->res_ctx.pipe_ctx[i];
++
++		/* Check old context for SubVP */
++		subvp_prev_use |= (old_pipe->stream && old_pipe->stream->mall_stream_config.type == SUBVP_PHANTOM);
++		if (subvp_prev_use)
++			break;
++	}
++
+ 	for (i = 0; i < context->stream_count; i++)
+ 		dc_streams[i] =  context->streams[i];
+ 
+@@ -1777,6 +1787,9 @@ static enum dc_status dc_commit_state_no_check(struct dc *dc, struct dc_state *c
+ 		dc->hwss.wait_for_mpcc_disconnect(dc, dc->res_pool, pipe);
+ 	}
+ 
++	if (dc->hwss.subvp_pipe_control_lock)
++		dc->hwss.subvp_pipe_control_lock(dc, context, true, true, NULL, subvp_prev_use);
++
+ 	result = dc->hwss.apply_ctx_to_hw(dc, context);
+ 
+ 	if (result != DC_OK) {
+@@ -1794,6 +1807,12 @@ static enum dc_status dc_commit_state_no_check(struct dc *dc, struct dc_state *c
+ 		dc->hwss.interdependent_update_lock(dc, context, false);
+ 		dc->hwss.post_unlock_program_front_end(dc, context);
+ 	}
++
++	if (dc->hwss.commit_subvp_config)
++		dc->hwss.commit_subvp_config(dc, context);
++	if (dc->hwss.subvp_pipe_control_lock)
++		dc->hwss.subvp_pipe_control_lock(dc, context, false, true, NULL, subvp_prev_use);
++
+ 	for (i = 0; i < context->stream_count; i++) {
+ 		const struct dc_link *link = context->streams[i]->link;
+ 
+-- 
+cgit 
+
+
+From c1969fbaa57d88ddef626bb8ae313d38478d8631 Mon Sep 17 00:00:00 2001
+From: Dillon Varone <Dillon.Varone@amd.com>
+Date: Mon, 19 Sep 2022 13:14:02 -0400
+Subject: drm/amd/display: Reorder FCLK P-state switch sequence for DCN32
+
+[WHY?]
+In some cases, DCFCLK hardmin requests are not acknowledged by SMU as
+the requested clock does not have a compatible ratio with current FCLK,
+and it cannot be changed as FCLK P-state is not allowed.
+
+[HOW?]
+Allow FCLK p-state change prior to changing DCFCLK hardmin.
+
+Reviewed-by: Alvin Lee <Alvin.Lee2@amd.com>
+Acked-by: Hamza Mahfooz <hamza.mahfooz@amd.com>
+Signed-off-by: Dillon Varone <Dillon.Varone@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ .../amd/display/dc/clk_mgr/dcn32/dcn32_clk_mgr.c   | 44 +++++++++++-----------
+ 1 file changed, 23 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/clk_mgr/dcn32/dcn32_clk_mgr.c b/drivers/gpu/drm/amd/display/dc/clk_mgr/dcn32/dcn32_clk_mgr.c
+index f0f3f66629cc0..96d5e0d5b3ce0 100644
+--- a/drivers/gpu/drm/amd/display/dc/clk_mgr/dcn32/dcn32_clk_mgr.c
++++ b/drivers/gpu/drm/amd/display/dc/clk_mgr/dcn32/dcn32_clk_mgr.c
+@@ -333,6 +333,21 @@ static void dcn32_update_clocks(struct clk_mgr *clk_mgr_base,
+ 		if (enter_display_off == safe_to_lower)
+ 			dcn30_smu_set_num_of_displays(clk_mgr, display_count);
+ 
++		clk_mgr_base->clks.fclk_prev_p_state_change_support = clk_mgr_base->clks.fclk_p_state_change_support;
++
++		total_plane_count = clk_mgr_helper_get_active_plane_cnt(dc, context);
++		fclk_p_state_change_support = new_clocks->fclk_p_state_change_support || (total_plane_count == 0);
++
++		if (should_update_pstate_support(safe_to_lower, fclk_p_state_change_support, clk_mgr_base->clks.fclk_p_state_change_support)) {
++			clk_mgr_base->clks.fclk_p_state_change_support = fclk_p_state_change_support;
++
++			/* To enable FCLK P-state switching, send FCLK_PSTATE_NOTSUPPORTED message to PMFW */
++			if (clk_mgr_base->ctx->dce_version != DCN_VERSION_3_21 && clk_mgr_base->clks.fclk_p_state_change_support && update_fclk) {
++				/* Handle the code for sending a message to PMFW that FCLK P-state change is supported */
++				dcn32_smu_send_fclk_pstate_message(clk_mgr, FCLK_PSTATE_SUPPORTED);
++			}
++		}
++
+ 		if (dc->debug.force_min_dcfclk_mhz > 0)
+ 			new_clocks->dcfclk_khz = (new_clocks->dcfclk_khz > (dc->debug.force_min_dcfclk_mhz * 1000)) ?
+ 					new_clocks->dcfclk_khz : (dc->debug.force_min_dcfclk_mhz * 1000);
+@@ -352,7 +367,6 @@ static void dcn32_update_clocks(struct clk_mgr *clk_mgr_base,
+ 			clk_mgr_base->clks.socclk_khz = new_clocks->socclk_khz;
+ 
+ 		clk_mgr_base->clks.prev_p_state_change_support = clk_mgr_base->clks.p_state_change_support;
+-		clk_mgr_base->clks.fclk_prev_p_state_change_support = clk_mgr_base->clks.fclk_p_state_change_support;
+ 		clk_mgr_base->clks.prev_num_ways = clk_mgr_base->clks.num_ways;
+ 
+ 		if (clk_mgr_base->clks.num_ways != new_clocks->num_ways &&
+@@ -361,9 +375,8 @@ static void dcn32_update_clocks(struct clk_mgr *clk_mgr_base,
+ 			dcn32_smu_send_cab_for_uclk_message(clk_mgr, clk_mgr_base->clks.num_ways);
+ 		}
+ 
+-		total_plane_count = clk_mgr_helper_get_active_plane_cnt(dc, context);
++
+ 		p_state_change_support = new_clocks->p_state_change_support || (total_plane_count == 0);
+-		fclk_p_state_change_support = new_clocks->fclk_p_state_change_support || (total_plane_count == 0);
+ 		if (should_update_pstate_support(safe_to_lower, p_state_change_support, clk_mgr_base->clks.p_state_change_support)) {
+ 			clk_mgr_base->clks.p_state_change_support = p_state_change_support;
+ 
+@@ -373,15 +386,14 @@ static void dcn32_update_clocks(struct clk_mgr *clk_mgr_base,
+ 						clk_mgr_base->bw_params->clk_table.entries[clk_mgr_base->bw_params->clk_table.num_entries - 1].memclk_mhz);
+ 		}
+ 
+-		if (should_update_pstate_support(safe_to_lower, fclk_p_state_change_support, clk_mgr_base->clks.fclk_p_state_change_support) &&
+-				clk_mgr_base->ctx->dce_version != DCN_VERSION_3_21) {
+-			clk_mgr_base->clks.fclk_p_state_change_support = fclk_p_state_change_support;
++		/* Always update saved value, even if new value not set due to P-State switching unsupported. Also check safe_to_lower for FCLK */
++		if (safe_to_lower && (clk_mgr_base->clks.fclk_p_state_change_support != clk_mgr_base->clks.fclk_prev_p_state_change_support)) {
++			update_fclk = true;
++		}
+ 
+-			/* To disable FCLK P-state switching, send FCLK_PSTATE_NOTSUPPORTED message to PMFW */
+-			if (clk_mgr_base->ctx->dce_version != DCN_VERSION_3_21 && !clk_mgr_base->clks.fclk_p_state_change_support) {
+-				/* Handle code for sending a message to PMFW that FCLK P-state change is not supported */
+-				dcn32_smu_send_fclk_pstate_message(clk_mgr, FCLK_PSTATE_NOTSUPPORTED);
+-			}
++		if (clk_mgr_base->ctx->dce_version != DCN_VERSION_3_21 && !clk_mgr_base->clks.fclk_p_state_change_support && update_fclk) {
++			/* Handle code for sending a message to PMFW that FCLK P-state change is not supported */
++			dcn32_smu_send_fclk_pstate_message(clk_mgr, FCLK_PSTATE_NOTSUPPORTED);
+ 		}
+ 
+ 		/* Always update saved value, even if new value not set due to P-State switching unsupported */
+@@ -390,21 +402,11 @@ static void dcn32_update_clocks(struct clk_mgr *clk_mgr_base,
+ 			update_uclk = true;
+ 		}
+ 
+-		/* Always update saved value, even if new value not set due to P-State switching unsupported. Also check safe_to_lower for FCLK */
+-		if (safe_to_lower && (clk_mgr_base->clks.fclk_p_state_change_support != clk_mgr_base->clks.fclk_prev_p_state_change_support)) {
+-			update_fclk = true;
+-		}
+-
+ 		/* set UCLK to requested value if P-State switching is supported, or to re-enable P-State switching */
+ 		if (clk_mgr_base->clks.p_state_change_support &&
+ 				(update_uclk || !clk_mgr_base->clks.prev_p_state_change_support))
+ 			dcn32_smu_set_hard_min_by_freq(clk_mgr, PPCLK_UCLK, khz_to_mhz_ceil(clk_mgr_base->clks.dramclk_khz));
+ 
+-		if (clk_mgr_base->ctx->dce_version != DCN_VERSION_3_21 && clk_mgr_base->clks.fclk_p_state_change_support && update_fclk) {
+-			/* Handle the code for sending a message to PMFW that FCLK P-state change is supported */
+-			dcn32_smu_send_fclk_pstate_message(clk_mgr, FCLK_PSTATE_SUPPORTED);
+-		}
+-
+ 		if (clk_mgr_base->clks.num_ways != new_clocks->num_ways &&
+ 				clk_mgr_base->clks.num_ways > new_clocks->num_ways) {
+ 			clk_mgr_base->clks.num_ways = new_clocks->num_ways;
+-- 
+cgit 
+
+
+From ab5220bb5a910246c61512a9e29a4e2406cb1ecd Mon Sep 17 00:00:00 2001
+From: Dmytro Laktyushkin <Dmytro.Laktyushkin@amd.com>
+Date: Thu, 8 Sep 2022 11:37:58 -0400
+Subject: drm/amd/display: fix dcn315 dml detile overestimation
+
+DML does not take the fact that dcn315 does not have enough detile
+buffer to max all pipes. This change adds a workaround to apply
+the same logic DC does when calculating detile buffer size in DML.
+
+Reviewed-by: Charlene Liu <Charlene.Liu@amd.com>
+Acked-by: Hamza Mahfooz <hamza.mahfooz@amd.com>
+Signed-off-by: Dmytro Laktyushkin <Dmytro.Laktyushkin@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/display/dc/dml/dcn31/dcn31_fpu.c      |  2 +-
+ .../drm/amd/display/dc/dml/dcn31/display_mode_vba_31.c    | 15 +++++++++++++++
+ drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.c     |  1 +
+ drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.h     |  1 +
+ 4 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/dcn31/dcn31_fpu.c b/drivers/gpu/drm/amd/display/dc/dml/dcn31/dcn31_fpu.c
+index b6e99eefe869e..94b0842cd89b5 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/dcn31/dcn31_fpu.c
++++ b/drivers/gpu/drm/amd/display/dc/dml/dcn31/dcn31_fpu.c
+@@ -739,7 +739,7 @@ void dcn315_update_bw_bounding_box(struct dc *dc, struct clk_bw_params *bw_param
+ 	}
+ 
+ 	if (!IS_FPGA_MAXIMUS_DC(dc->ctx->dce_environment))
+-		dml_init_instance(&dc->dml, &dcn3_15_soc, &dcn3_15_ip, DML_PROJECT_DCN31);
++		dml_init_instance(&dc->dml, &dcn3_15_soc, &dcn3_15_ip, DML_PROJECT_DCN315);
+ 	else
+ 		dml_init_instance(&dc->dml, &dcn3_15_soc, &dcn3_15_ip, DML_PROJECT_DCN31_FPGA);
+ }
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/dcn31/display_mode_vba_31.c b/drivers/gpu/drm/amd/display/dc/dml/dcn31/display_mode_vba_31.c
+index 8dfe639b65087..b612edb144172 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/dcn31/display_mode_vba_31.c
++++ b/drivers/gpu/drm/amd/display/dc/dml/dcn31/display_mode_vba_31.c
+@@ -43,6 +43,8 @@
+ #define BPP_BLENDED_PIPE 0xffffffff
+ #define DCN31_MAX_DSC_IMAGE_WIDTH 5184
+ #define DCN31_MAX_FMT_420_BUFFER_WIDTH 4096
++#define DCN3_15_MIN_COMPBUF_SIZE_KB 128
++#define DCN3_15_MAX_DET_SIZE 384
+ 
+ // For DML-C changes that hasn't been propagated to VBA yet
+ //#define __DML_VBA_ALLOW_DELTA__
+@@ -3775,6 +3777,17 @@ static noinline void CalculatePrefetchSchedulePerPlane(
+ 		&v->VReadyOffsetPix[k]);
+ }
+ 
++static void PatchDETBufferSizeInKByte(unsigned int NumberOfActivePlanes, int NoOfDPPThisState[], unsigned int config_return_buffer_size_in_kbytes, unsigned int *DETBufferSizeInKByte)
++{
++	int i, total_pipes = 0;
++	for (i = 0; i < NumberOfActivePlanes; i++)
++		total_pipes += NoOfDPPThisState[i];
++	*DETBufferSizeInKByte = ((config_return_buffer_size_in_kbytes - DCN3_15_MIN_COMPBUF_SIZE_KB) / 64 / total_pipes) * 64;
++	if (*DETBufferSizeInKByte > DCN3_15_MAX_DET_SIZE)
++		*DETBufferSizeInKByte = DCN3_15_MAX_DET_SIZE;
++}
++
++
+ void dml31_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_lib)
+ {
+ 	struct vba_vars_st *v = &mode_lib->vba;
+@@ -4533,6 +4546,8 @@ void dml31_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_l
+ 				v->ODMCombineEnableThisState[k] = v->ODMCombineEnablePerState[i][k];
+ 			}
+ 
++			if (v->NumberOfActivePlanes > 1 && mode_lib->project == DML_PROJECT_DCN315)
++				PatchDETBufferSizeInKByte(v->NumberOfActivePlanes, v->NoOfDPPThisState, v->ip.config_return_buffer_size_in_kbytes, &v->DETBufferSizeInKByte[0]);
+ 			CalculateSwathAndDETConfiguration(
+ 					false,
+ 					v->NumberOfActivePlanes,
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.c b/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.c
+index f5400eda07a53..4125d3d111d15 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.c
++++ b/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.c
+@@ -114,6 +114,7 @@ void dml_init_instance(struct display_mode_lib *lib,
+ 		break;
+ 	case DML_PROJECT_DCN31:
+ 	case DML_PROJECT_DCN31_FPGA:
++	case DML_PROJECT_DCN315:
+ 		lib->funcs = dml31_funcs;
+ 		break;
+ 	case DML_PROJECT_DCN314:
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.h b/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.h
+index b1878a1440e2b..3d643d50c3eb5 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.h
++++ b/drivers/gpu/drm/amd/display/dc/dml/display_mode_lib.h
+@@ -40,6 +40,7 @@ enum dml_project {
+ 	DML_PROJECT_DCN21,
+ 	DML_PROJECT_DCN30,
+ 	DML_PROJECT_DCN31,
++	DML_PROJECT_DCN315,
+ 	DML_PROJECT_DCN31_FPGA,
+ 	DML_PROJECT_DCN314,
+ 	DML_PROJECT_DCN32,
+-- 
+cgit 
+
+
+From d35e8b7ae01430b1e722547b2ef40f42dc30520f Mon Sep 17 00:00:00 2001
+From: Alvin Lee <Alvin.Lee2@amd.com>
+Date: Tue, 20 Sep 2022 10:46:18 -0400
+Subject: drm/amd/display: Block SubVP if rotation being used
+
+[Description]
+- SubVP rotation support is not explicitly implemented,
+  so block SubVP in rotation cases to avoid unexpected
+  behaviors
+
+Reviewed-by: Nevenko Stupar <Nevenko.Stupar@amd.com>
+Reviewed-by: Jun Lei <Jun.Lei@amd.com>
+Acked-by: Hamza Mahfooz <hamza.mahfooz@amd.com>
+Signed-off-by: Alvin Lee <Alvin.Lee2@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource.h   |  2 ++
+ .../drm/amd/display/dc/dcn32/dcn32_resource_helpers.c   | 17 +++++++++++++++++
+ drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c    |  3 ++-
+ 3 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource.h b/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource.h
+index 55945cca2260d..a24f538bdc4cc 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource.h
++++ b/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource.h
+@@ -108,6 +108,8 @@ bool dcn32_subvp_in_use(struct dc *dc,
+ 
+ bool dcn32_mpo_in_use(struct dc_state *context);
+ 
++bool dcn32_any_surfaces_rotated(struct dc *dc, struct dc_state *context);
++
+ struct pipe_ctx *dcn32_acquire_idle_pipe_for_head_pipe_in_layer(
+ 		struct dc_state *state,
+ 		const struct resource_pool *pool,
+diff --git a/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource_helpers.c b/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource_helpers.c
+index a2a70a1572b7f..7f318ced5dee4 100644
+--- a/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource_helpers.c
++++ b/drivers/gpu/drm/amd/display/dc/dcn32/dcn32_resource_helpers.c
+@@ -233,6 +233,23 @@ bool dcn32_mpo_in_use(struct dc_state *context)
+ 	return false;
+ }
+ 
++
++bool dcn32_any_surfaces_rotated(struct dc *dc, struct dc_state *context)
++{
++	uint32_t i;
++
++	for (i = 0; i < dc->res_pool->pipe_count; i++) {
++		struct pipe_ctx *pipe = &context->res_ctx.pipe_ctx[i];
++
++		if (!pipe->stream)
++			continue;
++
++		if (pipe->plane_state && pipe->plane_state->rotation != ROTATION_ANGLE_0)
++			return true;
++	}
++	return false;
++}
++
+ /**
+  * *******************************************************************************************
+  * dcn32_determine_det_override: Determine DET allocation for each pipe
+diff --git a/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c b/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c
+index 0571700f53f93..a56ee04f7df93 100644
+--- a/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c
++++ b/drivers/gpu/drm/amd/display/dc/dml/dcn32/dcn32_fpu.c
+@@ -1115,7 +1115,8 @@ static void dcn32_full_validate_bw_helper(struct dc *dc,
+ 	 * 5. (Config doesn't support MCLK in VACTIVE/VBLANK || dc->debug.force_subvp_mclk_switch)
+ 	 */
+ 	if (!dc->debug.force_disable_subvp && dcn32_all_pipes_have_stream_and_plane(dc, context) &&
+-	    !dcn32_mpo_in_use(context) && (*vlevel == context->bw_ctx.dml.soc.num_states ||
++	    !dcn32_mpo_in_use(context) && !dcn32_any_surfaces_rotated(dc, context) &&
++		(*vlevel == context->bw_ctx.dml.soc.num_states ||
+ 	    vba->DRAMClockChangeSupport[*vlevel][vba->maxMpcComb] == dm_dram_clock_change_unsupported ||
+ 	    dc->debug.force_subvp_mclk_switch)) {
+ 
+-- 
+cgit 
+From dc341060fe79ac0905a6e9dd9f4c625582296160 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Christian=20K=C3=B6nig?= <christian.koenig@amd.com>
+Date: Fri, 7 Oct 2022 09:51:13 +0200
+Subject: [PATCH] drm/sched: add DRM_SCHED_FENCE_DONT_PIPELINE flag
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Setting this flag on a scheduler fence prevents pipelining of jobs
+depending on this fence. In other words we always insert a full CPU
+round trip before dependen jobs are pushed to the pipeline.
+
+Signed-off-by: Christian König <christian.koenig@amd.com>
+---
+ drivers/gpu/drm/scheduler/sched_entity.c | 3 ++-
+ include/drm/gpu_scheduler.h              | 9 +++++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/scheduler/sched_entity.c b/drivers/gpu/drm/scheduler/sched_entity.c
+index 6b25b2f4f5a308..6137537aaea4df 100644
+--- a/drivers/gpu/drm/scheduler/sched_entity.c
++++ b/drivers/gpu/drm/scheduler/sched_entity.c
+@@ -385,7 +385,8 @@ static bool drm_sched_entity_add_dependency_cb(struct drm_sched_entity *entity)
+ 	}
+ 
+ 	s_fence = to_drm_sched_fence(fence);
+-	if (s_fence && s_fence->sched == sched) {
++	if (s_fence && s_fence->sched == sched &&
++	    !test_bit(DRM_SCHED_FENCE_DONT_PIPELINE, &fence->flags)) {
+ 
+ 		/*
+ 		 * Fence is from the same scheduler, only need to wait for
+diff --git a/include/drm/gpu_scheduler.h b/include/drm/gpu_scheduler.h
+index addb135eeea622..289a33e8063978 100644
+--- a/include/drm/gpu_scheduler.h
++++ b/include/drm/gpu_scheduler.h
+@@ -32,6 +32,15 @@
+ 
+ #define MAX_WAIT_SCHED_ENTITY_Q_EMPTY msecs_to_jiffies(1000)
+ 
++/**
++ * DRM_SCHED_FENCE_DONT_PIPELINE - Prefent dependency pipelining
++ *
++ * Setting this flag on a scheduler fence prevents pipelining of jobs depending
++ * on this fence. In other words we always insert a full CPU round trip before
++ * dependen jobs are pushed to the hw queue.
++ */
++#define DRM_SCHED_FENCE_DONT_PIPELINE	DMA_FENCE_FLAG_USER_BITS
++
+ struct drm_gem_object;
+ 
+ struct drm_gpu_scheduler;
+From 964e7eb96d1470adb73186ce8f3ee37e8d8d9608 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Christian=20K=C3=B6nig?= <christian.koenig@amd.com>
+Date: Fri, 7 Oct 2022 10:59:58 +0200
+Subject: [PATCH] drm/amdgpu: use DRM_SCHED_FENCE_DONT_PIPELINE for VM updates
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Make sure that we always have a CPU round trip to let the submission
+code correctly decide if a TLB flush is necessary or not.
+
+Signed-off-by: Christian König <christian.koenig@amd.com>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_vm_sdma.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_vm_sdma.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_vm_sdma.c
+index 1fd3cbca20a290..c7bf189d50deff 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_vm_sdma.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_vm_sdma.c
+@@ -115,8 +115,15 @@ static int amdgpu_vm_sdma_commit(struct amdgpu_vm_update_params *p,
+ 		amdgpu_bo_fence(p->vm->root.bo, f, true);
+ 	}
+ 
+-	if (fence && !p->immediate)
++	if (fence && !p->immediate) {
++		/*
++		 * Most hw generations now have a separate queue for page table
++		 * updates, but when the queue is shared with userspace we need
++		 * the extra CPU round trip to correctly flush the TLB.
++		 */
++		set_bit(DRM_SCHED_FENCE_DONT_PIPELINE, &f->flags);
+ 		swap(*fence, f);
++	}
+ 	dma_fence_put(f);
+ 	return 0;
+ 
+From 93289678d31cd5460be499acf74aedbf0a43c9d7 Mon Sep 17 00:00:00 2001
+From: Arunpravin Paneer Selvam <Arunpravin.PaneerSelvam@amd.com>
+Date: Tue, 4 Oct 2022 07:33:39 -0700
+Subject: [PATCH] drm/amdgpu: Fix VRAM BO swap issue
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+DRM buddy manager allocates the contiguous memory requests in
+a single block or multiple blocks. So for the ttm move operation
+(incase of low vram memory) we should consider all the blocks to
+compute the total memory size which compared with the struct
+ttm_resource num_pages in order to verify that the blocks are
+contiguous for the eviction process.
+
+v2: Added a Fixes tag
+v3: Rewrite the code to save a bit of calculations and
+    variables (Christian)
+
+Fixes: c9cad937c0c5 ("drm/amdgpu: add drm buddy support to amdgpu")
+Signed-off-by: Arunpravin Paneer Selvam <Arunpravin.PaneerSelvam@amd.com>
+Reviewed-by: Christian König <christian.koenig@amd.com>
+Signed-off-by: Alex Deucher <alexander.deucher@amd.com>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+index 134575a3893c53..794062ab57fca4 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+@@ -424,8 +424,9 @@ static int amdgpu_move_blit(struct ttm_buffer_object *bo,
+ static bool amdgpu_mem_visible(struct amdgpu_device *adev,
+ 			       struct ttm_resource *mem)
+ {
+-	uint64_t mem_size = (u64)mem->num_pages << PAGE_SHIFT;
++	u64 mem_size = (u64)mem->num_pages << PAGE_SHIFT;
+ 	struct amdgpu_res_cursor cursor;
++	u64 end;
+ 
+ 	if (mem->mem_type == TTM_PL_SYSTEM ||
+ 	    mem->mem_type == TTM_PL_TT)
+@@ -434,12 +435,18 @@ static bool amdgpu_mem_visible(struct amdgpu_device *adev,
+ 		return false;
+ 
+ 	amdgpu_res_first(mem, 0, mem_size, &cursor);
++	end = cursor.start + cursor.size;
++	while (cursor.remaining) {
++		amdgpu_res_next(&cursor, cursor.size);
+ 
+-	/* ttm_resource_ioremap only supports contiguous memory */
+-	if (cursor.size != mem_size)
+-		return false;
++		/* ttm_resource_ioremap only supports contiguous memory */
++		if (end != cursor.start)
++			return false;
++
++		end = cursor.start + cursor.size;
++	}
+ 
+-	return cursor.start + cursor.size <= adev->gmc.visible_vram_size;
++	return end <= adev->gmc.visible_vram_size;
+ }
+ 
+ /*
+From ccbab5a7d4e7d5c68211377823358f318e59cdf7 Mon Sep 17 00:00:00 2001
+From: Arunpravin Paneer Selvam <Arunpravin.PaneerSelvam@amd.com>
+Date: Mon, 17 Oct 2022 13:15:21 -0700
+Subject: [PATCH] drm/amdgpu: Fix for BO move issue
+
+If there are no blocks to compare then exit
+the loop.
+
+Signed-off-by: Arunpravin Paneer Selvam <Arunpravin.PaneerSelvam@amd.com>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+index 794062ab57fca4..9e6c23266a1a0f 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_ttm.c
+@@ -439,6 +439,9 @@ static bool amdgpu_mem_visible(struct amdgpu_device *adev,
+ 	while (cursor.remaining) {
+ 		amdgpu_res_next(&cursor, cursor.size);
+ 
++		if (!cursor.remaining)
++			break;
++
+ 		/* ttm_resource_ioremap only supports contiguous memory */
+ 		if (end != cursor.start)
+ 			return false;
+
+From patchwork Wed Nov  2 14:58:11 2022
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Subject: drm/amdgpu: workaround for TLB seq race
+From: "=?UTF-8?q?Christian=20K=C3=B6nig?=" <ckoenig.leichtzumerken@gmail.com>
+X-Patchwork-Id: 509532
+Message-Id: <20221102145811.17968-1-christian.koenig@amd.com>
+To: amd-gfx@lists.freedesktop.org
+Cc: =?UTF-8?q?Christian=20K=C3=B6nig?= <christian.koenig@amd.com>
+Date: Wed,  2 Nov 2022 15:58:11 +0100
+
+It can happen that we query the sequence value before the callback
+had a chance to run.
+
+Work around that by grabbing the fence lock and releasing it again.
+Should be replaced by hw handling soon.
+
+Signed-off-by: Christian König <christian.koenig@amd.com>
+Acked-by: Alex Deucher <alexander.deucher@amd.com>
+Fixes: 5255e146c99a6 ("drm/amdgpu: rework TLB flushing")
+Acked-by: Philip Yang <Philip.Yang@amd.com>
+---
+ drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h b/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h
+index 9ecb7f663e19..e51a46c9582b 100644
+--- a/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h
++++ b/drivers/gpu/drm/amd/amdgpu/amdgpu_vm.h
+@@ -485,6 +485,21 @@ void amdgpu_debugfs_vm_bo_info(struct amdgpu_vm *vm, struct seq_file *m);
+  */
+ static inline uint64_t amdgpu_vm_tlb_seq(struct amdgpu_vm *vm)
+ {
++	unsigned long flags;
++	spinlock_t *lock;
++
++	/*
++	 * Work around to stop racing between the fence signaling and handling
++	 * the cb. The lock is static after initially setting it up, just make
++	 * sure that the dma_fence structure isn't freed up.
++	 */
++	rcu_read_lock();
++	lock = vm->last_tlb_flush->lock;
++	rcu_read_unlock();
++
++	spin_lock_irqsave(lock, flags);
++	spin_unlock_irqrestore(lock, flags);
++
+ 	return atomic64_read(&vm->tlb_seq);
+ }
+ 
