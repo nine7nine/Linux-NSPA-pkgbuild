@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=44
+pkgrel=45
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -146,6 +146,7 @@ source=(
   "0058-cgroup-cpuset-Task_migration_optimization.patch"
   "0059-Microsoft_Surface_support-6.0.patch"
   "0060-ipts_driver_updates.patch"
+  "0061-pm_vs_preempt_rt.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -552,5 +553,6 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '12d28c8c8683c8b5aa3d100ab0ce9f563a274e4c35b37f552f65ec6e587a67e1'
             'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13'
             '60a3a1b7c3c2959913fc5648d67223dd929f1775b15cf99a3dd8dca63cdee7f6'
-            'db1353bdaa9576bbd5a2163108e2ed62b23cc22ae45db772900ca42e1ff8dbfd')
+            'db1353bdaa9576bbd5a2163108e2ed62b23cc22ae45db772900ca42e1ff8dbfd'
+            'e1bbb0a8a66bbbea97ef4bbba4f875088ca5bce3bd6e64ba43a1be3879969a25')
 
