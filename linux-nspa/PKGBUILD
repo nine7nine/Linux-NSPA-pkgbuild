@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=36
+pkgrel=38
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -144,6 +144,8 @@ source=(
   "0056-mm-multi-gen-LRU-memcg-LRU.patch"
   "0057-sched-core_ttwu_optimize_and_organize.patch"
   "0058-cgroup-cpuset-Task_migration_optimization.patch"
+  "0059-mm-hotfixes-stable-2022-12-10.patch"
+  "0061-pm_vs_preempt_rt.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -549,5 +551,7 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '9fca36d6492c6ab4244f197f3cf5771d50b8bdad6061987a36bdc9a91cec0aa8'
             '1fbba2faa29189509376e2892f0cc25cd7760f46029e8c4633af6ae537e4202b'
             '12d28c8c8683c8b5aa3d100ab0ce9f563a274e4c35b37f552f65ec6e587a67e1'
-            'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13')
+            'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13'
+            'f352b3a571959bd49230600f1461aa08fd63659a8ade5572067afcc6cde145c8'
+            '496808ae80e24a5a9d38864c51fd7b7077060e2d95a74d9f1c4bdb34f20ca7d6')
 
