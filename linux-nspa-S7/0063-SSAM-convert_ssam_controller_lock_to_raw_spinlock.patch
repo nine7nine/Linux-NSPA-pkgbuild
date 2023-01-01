@@ -1,0 +1,58 @@
+diff -pur a/drivers/platform/surface/aggregator/core.c b/drivers/platform/surface/aggregator/core.c' 
+--- a/drivers/platform/surface/aggregator/core.c	2023-01-01 10:27:13.670767035 -0500
++++ b/drivers/platform/surface/aggregator/core.c	2023-01-01 10:26:49.382798044 -0500
+@@ -38,7 +38,7 @@
+  * accessing (reading/writing) the reference.
+  */
+ static struct ssam_controller *__ssam_controller;
+-static DEFINE_SPINLOCK(__ssam_controller_lock);
++static DEFINE_RAW_SPINLOCK(__ssam_controller_lock);
+ 
+ /**
+  * ssam_get_controller() - Get reference to SSAM controller.
+@@ -53,7 +53,7 @@ struct ssam_controller *ssam_get_control
+ {
+ 	struct ssam_controller *ctrl;
+ 
+-	spin_lock(&__ssam_controller_lock);
++	raw_spin_lock(&__ssam_controller_lock);
+ 
+ 	ctrl = __ssam_controller;
+ 	if (!ctrl)
+@@ -63,7 +63,7 @@ struct ssam_controller *ssam_get_control
+ 		ctrl = NULL;
+ 
+ out:
+-	spin_unlock(&__ssam_controller_lock);
++	raw_spin_unlock(&__ssam_controller_lock);
+ 	return ctrl;
+ }
+ EXPORT_SYMBOL_GPL(ssam_get_controller);
+@@ -82,12 +82,12 @@ static int ssam_try_set_controller(struc
+ {
+ 	int status = 0;
+ 
+-	spin_lock(&__ssam_controller_lock);
++	raw_spin_lock(&__ssam_controller_lock);
+ 	if (!__ssam_controller)
+ 		__ssam_controller = ctrl;
+ 	else
+ 		status = -EEXIST;
+-	spin_unlock(&__ssam_controller_lock);
++	raw_spin_unlock(&__ssam_controller_lock);
+ 
+ 	return status;
+ }
+@@ -100,9 +100,9 @@ static int ssam_try_set_controller(struc
+  */
+ static void ssam_clear_controller(void)
+ {
+-	spin_lock(&__ssam_controller_lock);
++	raw_spin_lock(&__ssam_controller_lock);
+ 	__ssam_controller = NULL;
+-	spin_unlock(&__ssam_controller_lock);
++	raw_spin_unlock(&__ssam_controller_lock);
+ }
+ 
+ /**
+

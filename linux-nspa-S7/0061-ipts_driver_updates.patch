@@ -1198,7 +1198,7 @@ diff -Npur a/drivers/misc/ipts/Kconfig b/drivers/misc/ipts/Kconfig
  # SPDX-License-Identifier: GPL-2.0-or-later
  
 -config MISC_IPTS
-+config HID_IPTS
++config MISC_IPTS
  	tristate "Intel Precise Touch & Stylus"
  	depends on INTEL_MEI
 +	depends on HID
@@ -1222,7 +1222,7 @@ diff -Npur a/drivers/misc/ipts/Makefile b/drivers/misc/ipts/Makefile
  
 -obj-$(CONFIG_MISC_IPTS) += ipts.o
 -ipts-objs := control.o
-+obj-$(CONFIG_HID_IPTS) += ipts.o
++obj-$(CONFIG_MISC_IPTS) += ipts.o
 +ipts-objs := cmd.o
 +ipts-objs += control.o
 +ipts-objs += hid.o
@@ -1811,9 +1811,9 @@ diff -Npur a/drivers/misc/ipts/receiver.c b/drivers/misc/ipts/receiver.c
 +	 * n seconds, sleep longer to avoid wasting CPU cycles.
 +	 */
 +	if (last + n > ktime_get_seconds())
-+		msleep(20);
++		msleep(12);
 +	else
-+		msleep(200);
++		msleep(130);
  }
  
 -static int ipts_receiver_handle_set_mode(struct ipts_context *ipts)
