@@ -1,3 +1,7 @@
+ - Convert __sam_controller_lock to raw spinlock
+ - On PREEMPT_RT, it's likely this shouldn't be a sleeping spinlock
+ - Next patch will convert the rwsems to be mutexes
+
 diff -pur a/drivers/platform/surface/aggregator/core.c b/drivers/platform/surface/aggregator/core.c' 
 --- a/drivers/platform/surface/aggregator/core.c	2023-01-01 10:27:13.670767035 -0500
 +++ b/drivers/platform/surface/aggregator/core.c	2023-01-01 10:26:49.382798044 -0500

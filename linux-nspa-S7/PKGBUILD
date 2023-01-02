@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=48
+pkgrel=50
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -149,6 +149,7 @@ source=(
   "0061-Microsoft_Surface_support-6.0.patch"
   "0062-pm_vs_preempt_rt.patch"
   "0063-SSAM-convert_ssam_controller_lock_to_raw_spinlock.patch"
+  "0064-SSAM-convert_rwsems_to_mutexes.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -557,6 +558,7 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '8d9f419050f66ffb28d6624af3f2a26558a421dccc43765ba7bcbc7cdc33f902'
             'd0707af73d5c8afc8250c02c41a2867feadac6772c625023b50541a21f7a4e20'
             '8932133a568e7738ddc74ffc4cffc5e78a9d269fa965f50c3577bde059e2e6a8'
-            'e1bbb0a8a66bbbea97ef4bbba4f875088ca5bce3bd6e64ba43a1be3879969a25'
-            '907581a862efb0bb3e6bff8b38bc39e6cca52d2b4ba4cbb6ba5dc10c83cf16f2')
+            '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
+            '6c173f1ed247204522656076f15b771c1e18b6cafb4666de313e265ee1a91f50'
+            '42d5cc0484e5ba884062d12c938d0edf3f13cca84038410ac86be569e46e4f79')
 
