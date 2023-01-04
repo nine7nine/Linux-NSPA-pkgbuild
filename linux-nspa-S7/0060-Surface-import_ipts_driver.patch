@@ -689,7 +689,7 @@ diff -Npur a/drivers/hid/ipts/control.c b/drivers/hid/ipts/control.c
 +	/*
 +	 * Give the sensor some time to come back from resetting
 +	 */
-+	msleep(1000);
++	msleep(1500);
 +
 +	ret = ipts_control_start(ipts);
 +	if (ret)

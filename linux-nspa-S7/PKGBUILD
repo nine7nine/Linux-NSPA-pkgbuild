@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=50
+pkgrel=51
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -494,7 +494,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
-            '5afa0b52c78feaceae15dbad5d1c88a3d3621e1b0cde76a56ca1ea19dcf65a05'
+            '93ea237bf6f239c4192294520afc1aefb6211fc8a9fe9c8246092127a433b354'
             '9abdc6c5f40b81c044f5549e8f29d474dc51e2765ee2b5e9a5fba9e62499dd9e'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '9164104200bf7ad46e5092f14f8bae62b1eba320ff83a3210abcfabc67e8a0a3'
@@ -556,8 +556,8 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '12d28c8c8683c8b5aa3d100ab0ce9f563a274e4c35b37f552f65ec6e587a67e1'
             'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13'
             '8d9f419050f66ffb28d6624af3f2a26558a421dccc43765ba7bcbc7cdc33f902'
-            'd0707af73d5c8afc8250c02c41a2867feadac6772c625023b50541a21f7a4e20'
-            '8932133a568e7738ddc74ffc4cffc5e78a9d269fa965f50c3577bde059e2e6a8'
+            'dbdfe22d7eb1a603fda7620dd9559c872177da29b35377c7c715722c8fca718a'
+            '119a14ebc1c486e5b688b42897e0d9bc2378f72d15ca582205b1c72b2082149c'
             '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
             '6c173f1ed247204522656076f15b771c1e18b6cafb4666de313e265ee1a91f50'
             '42d5cc0484e5ba884062d12c938d0edf3f13cca84038410ac86be569e46e4f79')
