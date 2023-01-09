@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.0-rt11
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=38
+pkgrel=54
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -146,6 +146,10 @@ source=(
   "0058-cgroup-cpuset-Task_migration_optimization.patch"
   "0059-mm-hotfixes-stable-2022-12-10.patch"
   "0061-pm_vs_preempt_rt.patch"
+  "0065-i2c-designware-Fix_unbalanced_suspended_flag.patch"
+  "0066-qspinlock-Optimize_pending_state_waiting_for_unlock.patch"
+  "0067-softirq-wake_up_ktimer_thread_in_softirq_context.patch"
+  "0068-locking-rwbase-Prevent_indefinite_writer_starvation.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -553,5 +557,9 @@ sha256sums=('98001d91f5bb1d29ad9489c71a6a75950c2610027e9eb0c513379b8f6d44df38'
             '12d28c8c8683c8b5aa3d100ab0ce9f563a274e4c35b37f552f65ec6e587a67e1'
             'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13'
             'f352b3a571959bd49230600f1461aa08fd63659a8ade5572067afcc6cde145c8'
-            '496808ae80e24a5a9d38864c51fd7b7077060e2d95a74d9f1c4bdb34f20ca7d6')
+            '496808ae80e24a5a9d38864c51fd7b7077060e2d95a74d9f1c4bdb34f20ca7d6'
+            '20957e713d21d8e23614510f9299cff0dc4cfbf85ee4b826b7efcfc80b460f5a'
+            'b516980c9d6c26c4bc214a9543f8727a601305fb67adc715c937f33b12c8defb'
+            '9d1833e412ca375420a2d7dc0ab343e86210df8d1e49b751c3b0ddf32b948837'
+            'ca873d12780be5e08853319b242deda3baacf069722f1bd764f7a6b1dab76f57')
 
