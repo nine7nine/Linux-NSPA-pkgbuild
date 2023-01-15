@@ -170,14 +170,14 @@ diff --git a/kernel/power/process.c b/kernel/power/process.c
 index c9da2f439994..0a5e25a20864 100644
 --- a/kernel/power/process.c
 +++ b/kernel/power/process.c
-@@ -134,7 +134,6 @@ int freeze_processes(void)
+@@ -132,7 +132,6 @@ int freeze_processes(void)
  	if (!pm_freezing)
- 		atomic_inc(&system_freezing_cnt);
+ 		static_branch_inc(&freezer_active);
  
 -	pm_wakeup_clear(0);
- 	pr_info("Freezing user space processes ... ");
  	pm_freezing = true;
  	error = try_to_freeze_tasks(true);
+ 	if (!error)
 diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
 index 4732ea41fdfa..79b6b710bd3c 100644
 --- a/kernel/power/suspend.c
