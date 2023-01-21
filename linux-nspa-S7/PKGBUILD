@@ -1,5 +1,5 @@
 # Maintainer: Jordan Johnston <johnstonljordan@gmail.com>
-# Maintainer: Peter Jung ptr1337 <admin@ptr1337.dev>
+# Contributor: Peter Jung ptr1337 <admin@ptr1337.dev>
 # Contributor: Piotr Gorski <lucjan.lucjanov@gmail.com>
 # Contributor: Jan Alexander Steffens (heftig) <jan.steffens@gmail.com>
 # Contributor: Tobias Powalowski <tpowa@archlinux.org>
@@ -16,7 +16,7 @@ _makemenuconfig=
 # See, https://bugs.archlinux.org/task/31187
 _NUMAdisable=y
 
-# Compile ONLY used modules to VASTLYreduce the number of modules built
+# Compile ONLY used modules to VASTLY reduce the number of modules built
 # and the build time.
 #
 # To keep track of which modules are needed for your specific system/hardware,
@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.2-rc3-rt1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=1
+pkgrel=6
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -86,6 +86,7 @@ source=(
   "config"
   "config_generic_nspa"
   "auto-cpu-optimization.sh"
+  "0000-more-uarches-for-kernel-5.17+.patch"
   "0001-ClearLinux-patchwork.patch"
   "0005-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
   "0006-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
@@ -112,7 +113,6 @@ source=(
   "0043-Kernel_tuning-CONFIG_NSPA.patch"
   "0046-v5-locking-rwsem-Enable-direct-rwsem-lock-handoff.patch"
   "0051-workqueue-destroy_worker_vs_isolated_CPUs.patch"
-  "0053-scheduler_urgent_fixes_jan_12_2023.patch"
   "0055-Add_support_for_epoll_min_wait.patch"
   "0058-cgroup-cpuset-Task_migration_optimization.patch"
   "0060-Surface-import_ipts_driver.patch"
@@ -125,6 +125,13 @@ source=(
   "0067-softirq-wake_up_ktimer_thread_in_softirq_context.patch"
   "0068-locking-rwbase-Prevent_indefinite_writer_starvation.patch"
   "0069-iwlwifi-Add_missing_check_for_alloc_ordered_workqueue.patch"
+  "0070-linux-6.2-rc4-incremental.patch"
+  "0070-linux-6.2-rc-git-updates_1.patch"
+  "0070-linux-6.2-rc-git-updates_2.patch"
+  "0071-Surface-ipts-update_to_commit-596fc42.patch"
+  "0072-rtmutex-ensure_we_wake_up_the_top_waiter.patch"
+  "0073-sched-Fix-put_task_struct-calls-under-PREEMPT_RT.patch"
+  "0075-exit-Detect_and_fix_irq_disabled_state_in_oops.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -300,13 +307,6 @@ prepare() {
                        --disable DEBUG_PREEMPT
     fi
 
-    echo "Enable ZRAM_ENTROPY"
-	  scripts/config --enable ZRAM_ENTROPY
-    echo "Enable USER_NS_UNPRIVILEGED"
-    scripts/config --enable USER_NS
-    echo "Enable WINE FASTSYNC"
-    scripts/config --enable WINESYNC
-
     ### Optionally use running kernel's config
     # code originally by nous; http://aur.archlinux.org/packages.php?ID=40191
     if [ -n "$_use_current" ]; then
@@ -469,9 +469,10 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
-            '93ea237bf6f239c4192294520afc1aefb6211fc8a9fe9c8246092127a433b354'
+            '722393c5d09e1f39664056909fee6cc02ca4ddfe5cb257a6c37dbc9dd2e112da'
             '9abdc6c5f40b81c044f5549e8f29d474dc51e2765ee2b5e9a5fba9e62499dd9e'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
+            '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             'e3c106cfac323c6f677b698b080b48798ea63786a7153f81d9a21f749e73168d'
@@ -489,7 +490,7 @@ sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
             'da259147de1c555f52558a1a6f6070e96b5f868713a274ffb78381baa9047af7'
             'e22faa7811a3de10affe5f7e6d671f263599c75f9f78cca6e3cdf7a9e36d71de'
             'ba640b93b7d4bce58b15ad2232f0547007b725c2f518a8b19902d45632da0a47'
-            'c47d7d93b3532aab48e80c746fa64e913fb6575ee14d7d3d18f9dccb925f8d24'
+            '4b64b1876a92096f165868095d3638b5664681662410afbb2af34543a597f792'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '7f6f1c4b6c79cc033af9059ff3c400252220cf2747b66e1ffc51375c8dfcb4c5'
             '8511cff3907b1d688182dcab8a2378dcd16deabba3c4e02884ee56f9e32fcb86'
@@ -498,7 +499,6 @@ sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
             '291eb19ef27bc9ece3f8afc8496b324b049af5ee961f6dba034497dd26918c69'
             'a3aa689da7950661fbbe5fb796807a676072bae60a21d1eaf9d5401558ecaef5'
             '3e77a086f598ae68b8271aff793d6bc0c4734c62a7bd394e1942925065b406d6'
-            'a16a5644618ba134cc9d4ca16245d061904b51fb4a83059335d3b0cee976e483'
             '9fca36d6492c6ab4244f197f3cf5771d50b8bdad6061987a36bdc9a91cec0aa8'
             'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13'
             'dbdfe22d7eb1a603fda7620dd9559c872177da29b35377c7c715722c8fca718a'
@@ -510,5 +510,12 @@ sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
             'b516980c9d6c26c4bc214a9543f8727a601305fb67adc715c937f33b12c8defb'
             '9d1833e412ca375420a2d7dc0ab343e86210df8d1e49b751c3b0ddf32b948837'
             'ca873d12780be5e08853319b242deda3baacf069722f1bd764f7a6b1dab76f57'
-            '182c50f8a2c913a7dd4bd3844a25b696798cb08456ba7d49d265efb17cad3195')
+            '182c50f8a2c913a7dd4bd3844a25b696798cb08456ba7d49d265efb17cad3195'
+            'c9de81b9fb7cacef08c300090de80b7708d8443d07152b64eb627c181235d7ac'
+            'c70660a71fc227db744ffaa2e112d39f7d5c7082cee0af67ede892188e481613'
+            'b68091128cebde85455f6d24c5048447e33b1e32b2fcc104a6aa942b95de871c'
+            '943a79445e1139e28250cc359b90b3b12cdcb616c498e17cc719922a786640f7'
+            '18c25d2652113340e1090e6ddadaa9d30c2bb985a33652fd9f72575421e87ad1'
+            '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413'
+            '1304b96f81d568aa7745cc0039fe5c7ed51531ef73456d29c409b906e27d5647')
 

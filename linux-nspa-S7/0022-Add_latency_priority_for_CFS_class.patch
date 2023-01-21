@@ -265,7 +265,7 @@ index 8a85c6cf781e..e87a863a2aa6 100644
  		update_idle_cfs_rq_clock_pelt(cfs_rq);
  }
  
-+static long wakeup_latency_gran(struct sched_entity *curr, struct sched_entity *se);
++static long wakeup_latency_gran(const struct sched_entity *curr, const struct sched_entity *se);
 +
  /*
   * Preempt the current task with a newly woken task if needed:
@@ -352,7 +352,7 @@ index 8a85c6cf781e..e87a863a2aa6 100644
  }
  #endif /* CONFIG_SMP */
  
-+static long wakeup_latency_gran(struct sched_entity *curr, struct sched_entity *se)
++static long wakeup_latency_gran(const struct sched_entity *curr, const struct sched_entity *se)
 +{
 +	long latency_offset = se->latency_offset;
 +
