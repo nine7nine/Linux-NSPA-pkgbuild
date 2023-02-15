@@ -1,0 +1,129 @@
+ - These defaults are all pulled from zen kernel and/or chromeOS kernels.  
+ - Trimmed off anything I already use and unnecessary bits
+
+diff --git a/Makefile b/Makefile
+index b5d570810e23b3..df75f91d4dc157 100644
+--- a/Makefile
++++ b/Makefile
+@@ -834,6 +834,9 @@ KBUILD_CFLAGS	+= $(call cc-disable-warni
+ ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+ KBUILD_CFLAGS += -O2
+ KBUILD_RUSTFLAGS += -Copt-level=2
++else ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
++KBUILD_CFLAGS += -O3
++KBUILD_RUSTFLAGS += -Copt-level=3
+ else ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
+ KBUILD_CFLAGS += -Os
+ KBUILD_RUSTFLAGS += -Copt-level=s
+diff --git a/init/Kconfig b/init/Kconfig
+index 532362fcfe31fd..26e42fabc16cde 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1407,6 +1407,12 @@ config CC_OPTIMIZE_FOR_PERFORMANCE
+ 	  with the "-O2" compiler flag for best performance and most
+ 	  helpful compile-time warnings.
+ 
++config CC_OPTIMIZE_FOR_PERFORMANCE_O3
++	bool "Optimize more for performance (-O3)"
++	help
++	  Choosing this option will pass "-O3" to your compiler to optimize
++	  the kernel yet more for performance.
++
+ config CC_OPTIMIZE_FOR_SIZE
+ 	bool "Optimize for size (-Os)"
+ 	help
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 914096c5b1ae1e..6b00fd116af78a 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -68,8 +68,13 @@
+  *
+  * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
+  */
++#ifdef CONFIG_NSPA
++unsigned int sysctl_sched_latency			= 4000000ULL;
++static unsigned int normalized_sysctl_sched_latency	= 4000000ULL;
++#else
+ unsigned int sysctl_sched_latency			= 6000000ULL;
+ static unsigned int normalized_sysctl_sched_latency	= 6000000ULL;
++#endif
+ 
+ /*
+  * The initial- and re-scaling of tunables is configurable
+@@ -89,8 +94,13 @@ unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
+  *
+  * (default: 0.75 msec * (1 + ilog(ncpus)), units: nanoseconds)
+  */
++#ifdef CONFIG_NSPA
++unsigned int sysctl_sched_min_granularity			= 400000ULL;
++static unsigned int normalized_sysctl_sched_min_granularity	= 400000ULL;
++#else
+ unsigned int sysctl_sched_min_granularity			= 750000ULL;
+ static unsigned int normalized_sysctl_sched_min_granularity	= 750000ULL;
++#endif
+ 
+ /*
+  * Minimal preemption granularity for CPU-bound SCHED_IDLE tasks.
+@@ -103,7 +113,11 @@ unsigned int sysctl_sched_idle_min_granularity			= 750000ULL;
+ /*
+  * This value is kept at sysctl_sched_latency/sysctl_sched_min_granularity
+  */
++#ifdef CONFIG_NSPA
++static unsigned int sched_nr_latency = 10;
++#else
+ static unsigned int sched_nr_latency = 8;
++#endif
+ 
+ /*
+  * After fork, child runs first. If set to 0 (default) then
+@@ -120,8 +134,13 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
+  *
+  * (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
+  */
++#ifdef CONFIG_NSPA
++unsigned int sysctl_sched_wakeup_granularity			= 500000UL;
++static unsigned int normalized_sysctl_sched_wakeup_granularity	= 500000UL;
++#else
+ unsigned int sysctl_sched_wakeup_granularity			= 1000000UL;
+ static unsigned int normalized_sysctl_sched_wakeup_granularity	= 1000000UL;
++#endif
+ 
+ const_debug unsigned int sysctl_sched_migration_cost	= 500000UL;
+ 
+@@ -174,8 +193,12 @@ int __weak arch_asym_cpu_priority(int cpu)
+  *
+  * (default: 5 msec, units: microseconds)
+  */
++#ifdef CONFIG_NSPA
++static unsigned int sysctl_sched_cfs_bandwidth_slice		= 3000UL;
++#else
+ static unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
+ #endif
++#endif
+ 
+ #ifdef CONFIG_SYSCTL
+ static struct ctl_table sched_fair_sysctls[] = {
+
+diff --git a/mm/swap.c b/mm/swap.c
+index 9cee7f6a380942..99ce0d2442d7c4 100644
+--- a/mm/swap.c
++++ b/mm/swap.c
+@@ -1070,6 +1070,10 @@ EXPORT_SYMBOL(pagevec_lookup_range_tag);
+  */
+ void __init swap_setup(void)
+ {
++#ifdef CONFIG_NSPA
++	/* Only swap-in pages requested, avoid readahead */
++	page_cluster = 0;
++#else
+ 	unsigned long megs = totalram_pages() >> (20 - PAGE_SHIFT);
+ 
+ 	/* Use a smaller cluster for small-memory machines */
+@@ -1081,4 +1085,5 @@ void __init swap_setup(void)
+ 	 * Right now other parts of the system means that we
+ 	 * _really_ don't want to cluster much more
+ 	 */
++#endif
+ }
+

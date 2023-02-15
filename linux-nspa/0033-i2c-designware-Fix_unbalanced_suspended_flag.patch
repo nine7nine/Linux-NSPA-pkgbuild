@@ -1,0 +1,109 @@
+From: Richard Fitzgerald <rf@opensource.cirrus.com>
+
+Subject: [PATCH v2] i2c: designware: Fix unbalanced suspended flag
+Date: Tue, 13 Dec 2022 14:45:24 +0000	[thread overview]
+Message-ID: <20221213144524.368297-1-rf@opensource.cirrus.com> (raw)
+
+Ensure that i2c_mark_adapter_suspended() is always balanced by a call to
+i2c_mark_adapter_resumed().
+
+dw_i2c_plat_resume() must always be called, so that
+i2c_mark_adapter_resumed() is called. This is not compatible with
+DPM_FLAG_MAY_SKIP_RESUME.
+
+The pairing of pm_runtime_force_suspend() and pm_runtime_force_resume()
+can replace this. If nothing is using the driver, and it is not currently
+suspended, it will be put into runtime-suspend and will be left in
+runtime-suspend during the system resume.
+
+pm_runtime_force_suspend() is not compatible with DPM_FLAG_SMART_SUSPEND
+so this must also be removed. DPM_FLAG_SMART_SUSPEND will set the device
+back to pm_runtime_active() during resume_noirq if it cannot skip resume.
+This would lead to the inconsistent state where the driver runtime_suspend
+has been called (by force_suspend()) but it is marked active (by PM core).
+
+The unbalanced suspended flag was introduced by
+commit c57813b8b288 ("i2c: designware: Lock the adapter while setting the
+suspended flag")
+
+Before that commit, the system and runtime PM used the same functions. The
+DPM_FLAG_MAY_SKIP_RESUME was used to skip the system resume if the driver
+had been in runtime-suspend. If system resume was skipped, the suspended
+flag would be cleared by the next runtime resume. The check of the
+suspended flag was _after_ the call to pm_runtime_get_sync() in
+i2c_dw_xfer(). So either a system resume or a runtime resume would clear
+the flag before it was checked.
+
+Having introduced the unbalanced suspended flag with that commit, a further
+commit 80704a84a9f8 ("i2c: designware: Use the
+i2c_mark_adapter_suspended/resumed() helpers")
+
+changed from using a local suspended flag to using the
+i2c_mark_adapter_suspended/resumed() functions. These use a flag that is
+checked by I2C core code before issuing the transfer to the bus driver, so
+there was no opportunity for the bus driver to runtime resume itself before
+the flag check.
+
+Signed-off-by: Richard Fitzgerald <rf@opensource.cirrus.com>
+Fixes: c57813b8b288 ("i2c: designware: Lock the adapter while setting the suspended flag")
+---
+ drivers/i2c/busses/i2c-designware-platdrv.c | 26 ++++++++++-----------
+ 1 file changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-designware-platdrv.c b/drivers/i2c/busses/i2c-designware-platdrv.c
+index ba043b547393..590503e56bd0 100644
+--- a/drivers/i2c/busses/i2c-designware-platdrv.c
++++ b/drivers/i2c/busses/i2c-designware-platdrv.c
+@@ -349,17 +349,7 @@ static int dw_i2c_plat_probe(struct platform_device *pdev)
+ 	adap->dev.of_node = pdev->dev.of_node;
+ 	adap->nr = -1;
+ 
+-	if (dev->flags & ACCESS_NO_IRQ_SUSPEND) {
+-		dev_pm_set_driver_flags(&pdev->dev,
+-					DPM_FLAG_SMART_PREPARE |
+-					DPM_FLAG_MAY_SKIP_RESUME);
+-	} else {
+-		dev_pm_set_driver_flags(&pdev->dev,
+-					DPM_FLAG_SMART_PREPARE |
+-					DPM_FLAG_SMART_SUSPEND |
+-					DPM_FLAG_MAY_SKIP_RESUME);
+-	}
+-
++	dev_pm_set_driver_flags(&pdev->dev, DPM_FLAG_SMART_PREPARE);
+ 	device_enable_async_suspend(&pdev->dev);
+ 
+ 	/* The code below assumes runtime PM to be disabled. */
+@@ -453,10 +443,15 @@ static int dw_i2c_plat_runtime_suspend(struct device *dev)
+ static int __maybe_unused dw_i2c_plat_suspend(struct device *dev)
+ {
+ 	struct dw_i2c_dev *i_dev = dev_get_drvdata(dev);
++	int ret;
++
++	ret = pm_runtime_force_suspend(dev);
++	if (ret)
++		return ret;
+ 
+ 	i2c_mark_adapter_suspended(&i_dev->adapter);
+ 
+-	return dw_i2c_plat_runtime_suspend(dev);
++	return 0;
+ }
+ 
+ static int dw_i2c_plat_runtime_resume(struct device *dev)
+@@ -474,8 +469,13 @@ static int dw_i2c_plat_runtime_resume(struct device *dev)
+ static int __maybe_unused dw_i2c_plat_resume(struct device *dev)
+ {
+ 	struct dw_i2c_dev *i_dev = dev_get_drvdata(dev);
++	int ret;
++
++	/* Resume if pm_runtime_force_suspend() suspended. */
++	ret = pm_runtime_force_resume(dev);
++	if (ret)
++		return ret;
+ 
+-	dw_i2c_plat_runtime_resume(dev);
+ 	i2c_mark_adapter_resumed(&i_dev->adapter);
+ 
+ 	return 0;
+-- 
+2.30.2

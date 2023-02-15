@@ -1,0 +1,3648 @@
+From 482f57248a833f7fa4d4712f67d4e0d2ff7b8090 Mon Sep 17 00:00:00 2001
+From: Tsuchiya Yuto <kitakar@gmail.com>
+Date: Sun, 18 Oct 2020 16:42:44 +0900
+Subject: [PATCH] (surface3-oemb) add DMI matches for Surface 3 with broken DMI
+ table
+
+On some Surface 3, the DMI table gets corrupted for unknown reasons
+and breaks existing DMI matching used for device-specific quirks.
+
+This commit adds the (broken) DMI data into dmi_system_id tables used
+for quirks so that each driver can enable quirks even on the affected
+systems.
+
+On affected systems, DMI data will look like this:
+    $ grep . /sys/devices/virtual/dmi/id/{bios_vendor,board_name,board_vendor,\
+    chassis_vendor,product_name,sys_vendor}
+    /sys/devices/virtual/dmi/id/bios_vendor:American Megatrends Inc.
+    /sys/devices/virtual/dmi/id/board_name:OEMB
+    /sys/devices/virtual/dmi/id/board_vendor:OEMB
+    /sys/devices/virtual/dmi/id/chassis_vendor:OEMB
+    /sys/devices/virtual/dmi/id/product_name:OEMB
+    /sys/devices/virtual/dmi/id/sys_vendor:OEMB
+
+Expected:
+    $ grep . /sys/devices/virtual/dmi/id/{bios_vendor,board_name,board_vendor,\
+    chassis_vendor,product_name,sys_vendor}
+    /sys/devices/virtual/dmi/id/bios_vendor:American Megatrends Inc.
+    /sys/devices/virtual/dmi/id/board_name:Surface 3
+    /sys/devices/virtual/dmi/id/board_vendor:Microsoft Corporation
+    /sys/devices/virtual/dmi/id/chassis_vendor:Microsoft Corporation
+    /sys/devices/virtual/dmi/id/product_name:Surface 3
+    /sys/devices/virtual/dmi/id/sys_vendor:Microsoft Corporation
+
+Signed-off-by: Tsuchiya Yuto <kitakar@gmail.com>
+Patchset: surface3-oemb
+---
+ drivers/platform/surface/surface3-wmi.c           | 7 +++++++
+ sound/soc/codecs/rt5645.c                         | 9 +++++++++
+ sound/soc/intel/common/soc-acpi-intel-cht-match.c | 8 ++++++++
+ 3 files changed, 24 insertions(+)
+
+diff --git a/drivers/platform/surface/surface3-wmi.c b/drivers/platform/surface/surface3-wmi.c
+index ca4602bcc7de..490b9731068a 100644
+--- a/drivers/platform/surface/surface3-wmi.c
++++ b/drivers/platform/surface/surface3-wmi.c
+@@ -37,6 +37,13 @@ static const struct dmi_system_id surface3_dmi_table[] = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "Surface 3"),
+ 		},
+ 	},
++	{
++		.matches = {
++			DMI_MATCH(DMI_BIOS_VENDOR, "American Megatrends Inc."),
++			DMI_MATCH(DMI_SYS_VENDOR, "OEMB"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "OEMB"),
++		},
++	},
+ #endif
+ 	{ }
+ };
+diff --git a/sound/soc/codecs/rt5645.c b/sound/soc/codecs/rt5645.c
+index 8635bc6567dc..436c9ef78cca 100644
+--- a/sound/soc/codecs/rt5645.c
++++ b/sound/soc/codecs/rt5645.c
+@@ -3717,6 +3717,15 @@ static const struct dmi_system_id dmi_platform_data[] = {
+ 		},
+ 		.driver_data = (void *)&intel_braswell_platform_data,
+ 	},
++	{
++		.ident = "Microsoft Surface 3",
++		.matches = {
++			DMI_MATCH(DMI_BIOS_VENDOR, "American Megatrends Inc."),
++			DMI_MATCH(DMI_SYS_VENDOR, "OEMB"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "OEMB"),
++		},
++		.driver_data = (void *)&intel_braswell_platform_data,
++	},
+ 	{
+ 		/*
+ 		 * Match for the GPDwin which unfortunately uses somewhat
+diff --git a/sound/soc/intel/common/soc-acpi-intel-cht-match.c b/sound/soc/intel/common/soc-acpi-intel-cht-match.c
+index 6beb00858c33..d82d77387a0a 100644
+--- a/sound/soc/intel/common/soc-acpi-intel-cht-match.c
++++ b/sound/soc/intel/common/soc-acpi-intel-cht-match.c
+@@ -27,6 +27,14 @@ static const struct dmi_system_id cht_table[] = {
+ 			DMI_MATCH(DMI_PRODUCT_NAME, "Surface 3"),
+ 		},
+ 	},
++	{
++		.callback = cht_surface_quirk_cb,
++		.matches = {
++			DMI_MATCH(DMI_BIOS_VENDOR, "American Megatrends Inc."),
++			DMI_MATCH(DMI_SYS_VENDOR, "OEMB"),
++			DMI_MATCH(DMI_PRODUCT_NAME, "OEMB"),
++		},
++	},
+ 	{ }
+ };
+ 
+-- 
+2.38.1
+
+From 0e7550c367ae47a8447c4d87c45d55ecd8c82d8b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Tue, 3 Nov 2020 13:28:04 +0100
+Subject: [PATCH] mwifiex: Add quirk resetting the PCI bridge on MS Surface
+ devices
+
+The most recent firmware of the 88W8897 card reports a hardcoded LTR
+value to the system during initialization, probably as an (unsuccessful)
+attempt of the developers to fix firmware crashes. This LTR value
+prevents most of the Microsoft Surface devices from entering deep
+powersaving states (either platform C-State 10 or S0ix state), because
+the exit latency of that state would be higher than what the card can
+tolerate.
+
+Turns out the card works just the same (including the firmware crashes)
+no matter if that hardcoded LTR value is reported or not, so it's kind
+of useless and only prevents us from saving power.
+
+To get rid of those hardcoded LTR reports, it's possible to reset the
+PCI bridge device after initializing the cards firmware. I'm not exactly
+sure why that works, maybe the power management subsystem of the PCH
+resets its stored LTR values when doing a function level reset of the
+bridge device. Doing the reset once after starting the wifi firmware
+works very well, probably because the firmware only reports that LTR
+value a single time during firmware startup.
+
+Patchset: mwifiex
+---
+ drivers/net/wireless/marvell/mwifiex/pcie.c   | 12 +++++++++
+ .../wireless/marvell/mwifiex/pcie_quirks.c    | 26 +++++++++++++------
+ .../wireless/marvell/mwifiex/pcie_quirks.h    |  1 +
+ 3 files changed, 31 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/wireless/marvell/mwifiex/pcie.c b/drivers/net/wireless/marvell/mwifiex/pcie.c
+index f7f9277602a5..3aeff40179cf 100644
+--- a/drivers/net/wireless/marvell/mwifiex/pcie.c
++++ b/drivers/net/wireless/marvell/mwifiex/pcie.c
+@@ -1762,9 +1762,21 @@ mwifiex_pcie_send_boot_cmd(struct mwifiex_adapter *adapter, struct sk_buff *skb)
+ static int mwifiex_pcie_init_fw_port(struct mwifiex_adapter *adapter)
+ {
+ 	struct pcie_service_card *card = adapter->card;
++	struct pci_dev *pdev = card->dev;
++	struct pci_dev *parent_pdev = pci_upstream_bridge(pdev);
+ 	const struct mwifiex_pcie_card_reg *reg = card->pcie.reg;
+ 	int tx_wrap = card->txbd_wrptr & reg->tx_wrap_mask;
+ 
++	/* Trigger a function level reset of the PCI bridge device, this makes
++	 * the firmware of PCIe 88W8897 cards stop reporting a fixed LTR value
++	 * that prevents the system from entering package C10 and S0ix powersaving
++	 * states.
++	 * We need to do it here because it must happen after firmware
++	 * initialization and this function is called after that is done.
++	 */
++	if (card->quirks & QUIRK_DO_FLR_ON_BRIDGE)
++		pci_reset_function(parent_pdev);
++
+ 	/* Write the RX ring read pointer in to reg->rx_rdptr */
+ 	if (mwifiex_write_reg(adapter, reg->rx_rdptr, card->rxbd_rdptr |
+ 			      tx_wrap)) {
+diff --git a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
+index dd6d21f1dbfd..f46b06f8d643 100644
+--- a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
++++ b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
+@@ -13,7 +13,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Surface Pro 4"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{
+ 		.ident = "Surface Pro 5",
+@@ -22,7 +23,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "Surface_Pro_1796"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{
+ 		.ident = "Surface Pro 5 (LTE)",
+@@ -31,7 +33,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "Surface_Pro_1807"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{
+ 		.ident = "Surface Pro 6",
+@@ -39,7 +42,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Surface Pro 6"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{
+ 		.ident = "Surface Book 1",
+@@ -47,7 +51,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Surface Book"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{
+ 		.ident = "Surface Book 2",
+@@ -55,7 +60,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Surface Book 2"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{
+ 		.ident = "Surface Laptop 1",
+@@ -63,7 +69,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Surface Laptop"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{
+ 		.ident = "Surface Laptop 2",
+@@ -71,7 +78,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Surface Laptop 2"),
+ 		},
+-		.driver_data = (void *)QUIRK_FW_RST_D3COLD,
++		.driver_data = (void *)(QUIRK_FW_RST_D3COLD |
++					QUIRK_DO_FLR_ON_BRIDGE),
+ 	},
+ 	{}
+ };
+@@ -89,6 +97,8 @@ void mwifiex_initialize_quirks(struct pcie_service_card *card)
+ 		dev_info(&pdev->dev, "no quirks enabled\n");
+ 	if (card->quirks & QUIRK_FW_RST_D3COLD)
+ 		dev_info(&pdev->dev, "quirk reset_d3cold enabled\n");
++	if (card->quirks & QUIRK_DO_FLR_ON_BRIDGE)
++		dev_info(&pdev->dev, "quirk do_flr_on_bridge enabled\n");
+ }
+ 
+ static void mwifiex_pcie_set_power_d3cold(struct pci_dev *pdev)
+diff --git a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
+index d6ff964aec5b..5d30ae39d65e 100644
+--- a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
++++ b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
+@@ -4,6 +4,7 @@
+ #include "pcie.h"
+ 
+ #define QUIRK_FW_RST_D3COLD	BIT(0)
++#define QUIRK_DO_FLR_ON_BRIDGE	BIT(1)
+ 
+ void mwifiex_initialize_quirks(struct pcie_service_card *card);
+ int mwifiex_pcie_reset_d3cold_quirk(struct pci_dev *pdev);
+-- 
+2.38.1
+
+From fce0e500ebcbca9c39ceea306932297a30df0608 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Thu, 25 Mar 2021 11:33:02 +0100
+Subject: [PATCH] Bluetooth: btusb: Lower passive lescan interval on Marvell
+ 88W8897
+
+The Marvell 88W8897 combined wifi and bluetooth card (pcie+usb version)
+is used in a lot of Microsoft Surface devices, and all those devices
+suffer from very low 2.4GHz wifi connection speeds while bluetooth is
+enabled. The reason for that is that the default passive scanning
+interval for Bluetooth Low Energy devices is quite high in Linux
+(interval of 60 msec and scan window of 30 msec, see hci_core.c), and
+the Marvell chip is known for its bad bt+wifi coexisting performance.
+
+So decrease that passive scan interval and make the scan window shorter
+on this particular device to allow for spending more time transmitting
+wifi signals: The new scan interval is 250 msec (0x190 * 0.625 msec) and
+the new scan window is 6.25 msec (0xa * 0,625 msec).
+
+This change has a very large impact on the 2.4GHz wifi speeds and gets
+it up to performance comparable with the Windows driver, which seems to
+apply a similar quirk.
+
+The interval and window length were tested and found to work very well
+with a lot of Bluetooth Low Energy devices, including the Surface Pen, a
+Bluetooth Speaker and two modern Bluetooth headphones. All devices were
+discovered immediately after turning them on. Even lower values were
+also tested, but they introduced longer delays until devices get
+discovered.
+
+Patchset: mwifiex
+---
+ drivers/bluetooth/btusb.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
+index 1bb46cbff0fa..8aa8db5d4cde 100644
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -63,6 +63,7 @@ static struct usb_driver btusb_driver;
+ #define BTUSB_INTEL_BROKEN_SHUTDOWN_LED	BIT(24)
+ #define BTUSB_INTEL_BROKEN_INITIAL_NCMD BIT(25)
+ #define BTUSB_INTEL_NO_WBS_SUPPORT	BIT(26)
++#define BTUSB_LOWER_LESCAN_INTERVAL	BIT(27)
+ 
+ static const struct usb_device_id btusb_table[] = {
+ 	/* Generic Bluetooth USB device */
+@@ -382,6 +383,7 @@ static const struct usb_device_id blacklist_table[] = {
+ 	{ USB_DEVICE(0x1286, 0x2044), .driver_info = BTUSB_MARVELL },
+ 	{ USB_DEVICE(0x1286, 0x2046), .driver_info = BTUSB_MARVELL },
+ 	{ USB_DEVICE(0x1286, 0x204e), .driver_info = BTUSB_MARVELL },
++	{ USB_DEVICE(0x1286, 0x204c), .driver_info = BTUSB_LOWER_LESCAN_INTERVAL },
+ 
+ 	/* Intel Bluetooth devices */
+ 	{ USB_DEVICE(0x8087, 0x0025), .driver_info = BTUSB_INTEL_COMBINED },
+@@ -3842,6 +3844,19 @@ static int btusb_probe(struct usb_interface *intf,
+ 	if (id->driver_info & BTUSB_MARVELL)
+ 		hdev->set_bdaddr = btusb_set_bdaddr_marvell;
+ 
++	/* The Marvell 88W8897 combined wifi and bluetooth card is known for
++	 * very bad bt+wifi coexisting performance.
++	 *
++	 * Decrease the passive BT Low Energy scan interval a bit
++	 * (0x0190 * 0.625 msec = 250 msec) and make the scan window shorter
++	 * (0x000a * 0,625 msec = 6.25 msec). This allows for significantly
++	 * higher wifi throughput while passively scanning for BT LE devices.
++	 */
++	if (id->driver_info & BTUSB_LOWER_LESCAN_INTERVAL) {
++		hdev->le_scan_interval = 0x0190;
++		hdev->le_scan_window = 0x000a;
++	}
++
+ 	if (IS_ENABLED(CONFIG_BT_HCIBTUSB_MTK) &&
+ 	    (id->driver_info & BTUSB_MEDIATEK)) {
+ 		hdev->setup = btusb_mtk_setup;
+-- 
+2.38.1
+
+From e8e003483d143e5eb20e8c0650dcc77aa5ebafa0 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 27 Feb 2021 00:45:52 +0100
+Subject: [PATCH] ath10k: Add module parameters to override board files
+
+Some Surface devices, specifically the Surface Go and AMD version of the
+Surface Laptop 3 (wich both come with QCA6174 WiFi chips), work better
+with a different board file, as it seems that the firmeware included
+upstream is buggy.
+
+As it is generally not a good idea to randomly overwrite files, let
+alone doing so via packages, we add module parameters to override those
+file names in the driver. This allows us to package/deploy the override
+via a modprobe.d config.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: ath10k
+---
+ drivers/net/wireless/ath/ath10k/core.c | 58 ++++++++++++++++++++++++++
+ 1 file changed, 58 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
+index d1ac64026cb3..5c883a12d9f8 100644
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -38,6 +38,9 @@ static bool fw_diag_log;
+ /* frame mode values are mapped as per enum ath10k_hw_txrx_mode */
+ unsigned int ath10k_frame_mode = ATH10K_HW_TXRX_NATIVE_WIFI;
+ 
++static char *override_board = "";
++static char *override_board2 = "";
++
+ unsigned long ath10k_coredump_mask = BIT(ATH10K_FW_CRASH_DUMP_REGISTERS) |
+ 				     BIT(ATH10K_FW_CRASH_DUMP_CE_DATA);
+ 
+@@ -50,6 +53,9 @@ module_param(fw_diag_log, bool, 0644);
+ module_param_named(frame_mode, ath10k_frame_mode, uint, 0644);
+ module_param_named(coredump_mask, ath10k_coredump_mask, ulong, 0444);
+ 
++module_param(override_board, charp, 0644);
++module_param(override_board2, charp, 0644);
++
+ MODULE_PARM_DESC(debug_mask, "Debugging mask");
+ MODULE_PARM_DESC(uart_print, "Uart target debugging");
+ MODULE_PARM_DESC(skip_otp, "Skip otp failure for calibration in testmode");
+@@ -59,6 +65,9 @@ MODULE_PARM_DESC(frame_mode,
+ MODULE_PARM_DESC(coredump_mask, "Bitfield of what to include in firmware crash file");
+ MODULE_PARM_DESC(fw_diag_log, "Diag based fw log debugging");
+ 
++MODULE_PARM_DESC(override_board, "Override for board.bin file");
++MODULE_PARM_DESC(override_board2, "Override for board-2.bin file");
++
+ static const struct ath10k_hw_params ath10k_hw_params_list[] = {
+ 	{
+ 		.id = QCA988X_HW_2_0_VERSION,
+@@ -895,6 +904,42 @@ static int ath10k_init_configure_target(struct ath10k *ar)
+ 	return 0;
+ }
+ 
++static const char *ath10k_override_board_fw_file(struct ath10k *ar,
++						 const char *file)
++{
++	if (strcmp(file, "board.bin") == 0) {
++		if (strcmp(override_board, "") == 0)
++			return file;
++
++		if (strcmp(override_board, "none") == 0) {
++			dev_info(ar->dev, "firmware override: pretending 'board.bin' does not exist\n");
++			return NULL;
++		}
++
++		dev_info(ar->dev, "firmware override: replacing 'board.bin' with '%s'\n",
++			 override_board);
++
++		return override_board;
++	}
++
++	if (strcmp(file, "board-2.bin") == 0) {
++		if (strcmp(override_board2, "") == 0)
++			return file;
++
++		if (strcmp(override_board2, "none") == 0) {
++			dev_info(ar->dev, "firmware override: pretending 'board-2.bin' does not exist\n");
++			return NULL;
++		}
++
++		dev_info(ar->dev, "firmware override: replacing 'board-2.bin' with '%s'\n",
++			 override_board2);
++
++		return override_board2;
++	}
++
++	return file;
++}
++
+ static const struct firmware *ath10k_fetch_fw_file(struct ath10k *ar,
+ 						   const char *dir,
+ 						   const char *file)
+@@ -909,6 +954,19 @@ static const struct firmware *ath10k_fetch_fw_file(struct ath10k *ar,
+ 	if (dir == NULL)
+ 		dir = ".";
+ 
++	/* HACK: Override board.bin and board-2.bin files if specified.
++	 *
++	 * Some Surface devices perform better with a different board
++	 * configuration. To this end, one would need to replace the board.bin
++	 * file with the modified config and remove the board-2.bin file.
++	 * Unfortunately, that's not a solution that we can easily package. So
++	 * we add module options to perform these overrides here.
++	 */
++
++	file = ath10k_override_board_fw_file(ar, file);
++	if (!file)
++		return ERR_PTR(-ENOENT);
++
+ 	snprintf(filename, sizeof(filename), "%s/%s", dir, file);
+ 	ret = firmware_request_nowarn(&fw, filename, ar->dev);
+ 	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot fw request '%s': %d\n",
+-- 
+2.38.1
+
+From 1679ef2a91b0a4926f9a7586fc15b1bff11504c4 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:23:53 +0100
+Subject: [PATCH] platform/surface: aggregator: Improve documentation and
+ handling of message target and source IDs
+
+The `tid_in` and `tid_out` fields of the serial hub protocol command
+struct (struct ssh_command) are actually source and target IDs,
+indicating the peer from which the message originated and the peer for
+which it is intended.
+
+Change the naming of those fields accordingly and improve the protocol
+documenation. Additionally, introduce an enum containing all currently
+known peers, i.e. targets and sources.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ .../driver-api/surface_aggregator/client.rst  |  4 +-
+ .../driver-api/surface_aggregator/ssh.rst     | 36 +++++++++--------
+ .../platform/surface/aggregator/controller.c  | 12 +++---
+ .../platform/surface/aggregator/ssh_msgb.h    |  4 +-
+ include/linux/surface_aggregator/controller.h |  4 +-
+ include/linux/surface_aggregator/serial_hub.h | 40 +++++++++++++------
+ 6 files changed, 58 insertions(+), 42 deletions(-)
+
+diff --git a/Documentation/driver-api/surface_aggregator/client.rst b/Documentation/driver-api/surface_aggregator/client.rst
+index 27f95abdbe99..9d7411223a84 100644
+--- a/Documentation/driver-api/surface_aggregator/client.rst
++++ b/Documentation/driver-api/surface_aggregator/client.rst
+@@ -191,7 +191,7 @@ data received from it is converted from little-endian to host endianness.
+             *       they do not correspond to an actual SAM/EC request.
+             */
+            rqst.target_category = SSAM_SSH_TC_SAM;
+-           rqst.target_id = 0x01;
++           rqst.target_id = SSAM_SSH_TID_SAM;
+            rqst.command_id = 0x02;
+            rqst.instance_id = 0x03;
+            rqst.flags = SSAM_REQUEST_HAS_RESPONSE;
+@@ -241,7 +241,7 @@ one of the generator macros, for example via:
+ 
+    SSAM_DEFINE_SYNC_REQUEST_W(__ssam_tmp_perf_mode_set, __le32, {
+            .target_category = SSAM_SSH_TC_TMP,
+-           .target_id       = 0x01,
++           .target_id       = SSAM_SSH_TID_SAM,
+            .command_id      = 0x03,
+            .instance_id     = 0x00,
+    });
+diff --git a/Documentation/driver-api/surface_aggregator/ssh.rst b/Documentation/driver-api/surface_aggregator/ssh.rst
+index bf007d6c9873..18fd0f0aee84 100644
+--- a/Documentation/driver-api/surface_aggregator/ssh.rst
++++ b/Documentation/driver-api/surface_aggregator/ssh.rst
+@@ -13,6 +13,7 @@
+ .. |DATA_NSQ| replace:: ``DATA_NSQ``
+ .. |TC| replace:: ``TC``
+ .. |TID| replace:: ``TID``
++.. |SID| replace:: ``SID``
+ .. |IID| replace:: ``IID``
+ .. |RQID| replace:: ``RQID``
+ .. |CID| replace:: ``CID``
+@@ -219,13 +220,13 @@ following fields, packed together and in order:
+      - |u8|
+      - Target category.
+ 
+-   * - |TID| (out)
++   * - |TID|
+      - |u8|
+-     - Target ID for outgoing (host to EC) commands.
++     - Target ID for commands/messages.
+ 
+-   * - |TID| (in)
++   * - |SID|
+      - |u8|
+-     - Target ID for incoming (EC to host) commands.
++     - Source ID for commands/messages.
+ 
+    * - |IID|
+      - |u8|
+@@ -286,19 +287,20 @@ general, however, a single target category should map to a single reserved
+ event request ID.
+ 
+ Furthermore, requests, responses, and events have an associated target ID
+-(``TID``). This target ID is split into output (host to EC) and input (EC to
+-host) fields, with the respecting other field (e.g. output field on incoming
+-messages) set to zero. Two ``TID`` values are known: Primary (``0x01``) and
+-secondary (``0x02``). In general, the response to a request should have the
+-same ``TID`` value, however, the field (output vs. input) should be used in
+-accordance to the direction in which the response is sent (i.e. on the input
+-field, as responses are generally sent from the EC to the host).
+-
+-Note that, even though requests and events should be uniquely identifiable
+-by target category and command ID alone, the EC may require specific
+-target ID and instance ID values to accept a command. A command that is
+-accepted for ``TID=1``, for example, may not be accepted for ``TID=2``
+-and vice versa.
++(``TID``) and source ID (``SID``). These two fields indicate where a message
++originates from (``SID``) and what the intended target of the message is
++(``TID``). Note that a response to a specific request therefore has the source
++and target IDs swapped when compared to the original request (i.e. the request
++target is the response source and the request source is the response target).
++See (:c:type:`enum ssh_request_id <ssh_request_id>`) for possible values of
++both.
++
++Note that, even though requests and events should be uniquely identifiable by
++target category and command ID alone, the EC may require specific target ID and
++instance ID values to accept a command. A command that is accepted for
++``TID=1``, for example, may not be accepted for ``TID=2`` and vice versa. While
++this may not always hold in reality, you can think of different target/source
++IDs indicating different physical ECs with potentially different feature sets.
+ 
+ 
+ Limitations and Observations
+diff --git a/drivers/platform/surface/aggregator/controller.c b/drivers/platform/surface/aggregator/controller.c
+index 43e765199137..54bfb1f3d2dc 100644
+--- a/drivers/platform/surface/aggregator/controller.c
++++ b/drivers/platform/surface/aggregator/controller.c
+@@ -994,7 +994,7 @@ static void ssam_handle_event(struct ssh_rtl *rtl,
+ 
+ 	item->rqid = get_unaligned_le16(&cmd->rqid);
+ 	item->event.target_category = cmd->tc;
+-	item->event.target_id = cmd->tid_in;
++	item->event.target_id = cmd->sid;
+ 	item->event.command_id = cmd->cid;
+ 	item->event.instance_id = cmd->iid;
+ 	memcpy(&item->event.data[0], data->ptr, data->len);
+@@ -1777,35 +1777,35 @@ EXPORT_SYMBOL_GPL(ssam_request_sync_with_buffer);
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_ssh_get_firmware_version, __le32, {
+ 	.target_category = SSAM_SSH_TC_SAM,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x13,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_ssh_notif_display_off, u8, {
+ 	.target_category = SSAM_SSH_TC_SAM,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x15,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_ssh_notif_display_on, u8, {
+ 	.target_category = SSAM_SSH_TC_SAM,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x16,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_ssh_notif_d0_exit, u8, {
+ 	.target_category = SSAM_SSH_TC_SAM,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x33,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_ssh_notif_d0_entry, u8, {
+ 	.target_category = SSAM_SSH_TC_SAM,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x34,
+ 	.instance_id     = 0x00,
+ });
+diff --git a/drivers/platform/surface/aggregator/ssh_msgb.h b/drivers/platform/surface/aggregator/ssh_msgb.h
+index f3ecad92eefd..438873e06098 100644
+--- a/drivers/platform/surface/aggregator/ssh_msgb.h
++++ b/drivers/platform/surface/aggregator/ssh_msgb.h
+@@ -189,8 +189,8 @@ static inline void msgb_push_cmd(struct msgbuf *msgb, u8 seq, u16 rqid,
+ 
+ 	__msgb_push_u8(msgb, SSH_PLD_TYPE_CMD);		/* Payload type. */
+ 	__msgb_push_u8(msgb, rqst->target_category);	/* Target category. */
+-	__msgb_push_u8(msgb, rqst->target_id);		/* Target ID (out). */
+-	__msgb_push_u8(msgb, 0x00);			/* Target ID (in). */
++	__msgb_push_u8(msgb, rqst->target_id);		/* Target ID. */
++	__msgb_push_u8(msgb, SSAM_SSH_TID_HOST);	/* Source ID. */
+ 	__msgb_push_u8(msgb, rqst->instance_id);	/* Instance ID. */
+ 	__msgb_push_u16(msgb, rqid);			/* Request ID. */
+ 	__msgb_push_u8(msgb, rqst->command_id);		/* Command ID. */
+diff --git a/include/linux/surface_aggregator/controller.h b/include/linux/surface_aggregator/controller.h
+index d11a1c6e3186..8932bc0bae18 100644
+--- a/include/linux/surface_aggregator/controller.h
++++ b/include/linux/surface_aggregator/controller.h
+@@ -912,10 +912,10 @@ enum ssam_event_mask {
+ 	})
+ 
+ #define SSAM_EVENT_REGISTRY_SAM	\
+-	SSAM_EVENT_REGISTRY(SSAM_SSH_TC_SAM, 0x01, 0x0b, 0x0c)
++	SSAM_EVENT_REGISTRY(SSAM_SSH_TC_SAM, SSAM_SSH_TID_SAM, 0x0b, 0x0c)
+ 
+ #define SSAM_EVENT_REGISTRY_KIP	\
+-	SSAM_EVENT_REGISTRY(SSAM_SSH_TC_KIP, 0x02, 0x27, 0x28)
++	SSAM_EVENT_REGISTRY(SSAM_SSH_TC_KIP, SSAM_SSH_TID_KIP, 0x27, 0x28)
+ 
+ #define SSAM_EVENT_REGISTRY_REG(tid)\
+ 	SSAM_EVENT_REGISTRY(SSAM_SSH_TC_REG, tid, 0x01, 0x02)
+diff --git a/include/linux/surface_aggregator/serial_hub.h b/include/linux/surface_aggregator/serial_hub.h
+index 45501b6e54e8..5c4ae1a26183 100644
+--- a/include/linux/surface_aggregator/serial_hub.h
++++ b/include/linux/surface_aggregator/serial_hub.h
+@@ -83,23 +83,21 @@ enum ssh_payload_type {
+ 
+ /**
+  * struct ssh_command - Payload of a command-type frame.
+- * @type:    The type of the payload. See &enum ssh_payload_type. Should be
+- *           SSH_PLD_TYPE_CMD for this struct.
+- * @tc:      Command target category.
+- * @tid_out: Output target ID. Should be zero if this an incoming (EC to host)
+- *           message.
+- * @tid_in:  Input target ID. Should be zero if this is an outgoing (host to
+- *           EC) message.
+- * @iid:     Instance ID.
+- * @rqid:    Request ID. Used to match requests with responses and differentiate
+- *           between responses and events.
+- * @cid:     Command ID.
++ * @type: The type of the payload. See &enum ssh_payload_type. Should be
++ *        SSH_PLD_TYPE_CMD for this struct.
++ * @tc:   Command target category.
++ * @tid:  Target ID. Indicates the target of the message.
++ * @sid:  Source ID. Indicates the source of the message.
++ * @iid:  Instance ID.
++ * @rqid: Request ID. Used to match requests with responses and differentiate
++ *        between responses and events.
++ * @cid:  Command ID.
+  */
+ struct ssh_command {
+ 	u8 type;
+ 	u8 tc;
+-	u8 tid_out;
+-	u8 tid_in;
++	u8 tid;
++	u8 sid;
+ 	u8 iid;
+ 	__le16 rqid;
+ 	u8 cid;
+@@ -280,6 +278,22 @@ struct ssam_span {
+ 	size_t len;
+ };
+ 
++/**
++ * enum ssam_ssh_tid - Target/source IDs for Serial Hub messages.
++ * @SSAM_SSH_TID_HOST:     We as the kernel Serial Hub driver.
++ * @SSAM_SSH_TID_SAM:      The Surface Aggregator EC.
++ * @SSAM_SSH_TID_KIP:      Keyboard and perihperal controller.
++ * @SSAM_SSH_TID_DEBUG:    Debug connector.
++ * @SSAM_SSH_TID_SURFLINK: SurfLink connector.
++ */
++enum ssam_ssh_tid {
++	SSAM_SSH_TID_HOST     = 0x00,
++	SSAM_SSH_TID_SAM      = 0x01,
++	SSAM_SSH_TID_KIP      = 0x02,
++	SSAM_SSH_TID_DEBUG    = 0x03,
++	SSAM_SSH_TID_SURFLINK = 0x04,
++};
++
+ /*
+  * Known SSH/EC target categories.
+  *
+-- 
+2.38.1
+
+From 44a5356d20e25dd22cbdc020cc3c9b0b480f5a4a Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:30:58 +0100
+Subject: [PATCH] platform/surface: aggregator: Ignore command messages not
+ intended for us
+
+It is possible that we (the host/kernel driver) receive command messages
+that are not intended for us. Ignore those for now.
+
+The whole story is a bit more complicated: It is possible to enable
+debug output on SAM, which is sent via SSH command messages. By default
+this output is sent to a debug connector, with its own target ID
+(TID=0x03). It is possible to override the target of the debug output
+and set it to the host/kernel driver. This, however, does not change the
+original target ID of the message. Meaning, we receive messages with
+TID=0x03 (debug) but expect to only receive messages with TID=0x00
+(host).
+
+The problem is that the different target ID also comes with a different
+scope of request IDs. In particular, these do not follow the standard
+event rules (i.e. do not fall into a set of small reserved values).
+Therefore, current message handling interprets them as responses to
+pending requests and tries to match them up via the request ID. However,
+these debug output messages are not in fact responses, and therefore
+this will at best fail to find the request and at worst pass on the
+wrong data as response for a request.
+
+Therefore ignore any command messages not intended for us (host) for
+now. We can implement support for the debug messages once we have a
+better understanding of them.
+
+Note that this may also provide a bit more stability and avoid some
+driver confusion in case any other targets want to talk to us in the
+future, since we don't yet know what to do with those as well. A warning
+for the dropped messages should suffice for now and also give us a
+chance of discovering new targets if they come along without any
+potential for bugs/instabilities.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ .../surface/aggregator/ssh_request_layer.c        | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/platform/surface/aggregator/ssh_request_layer.c b/drivers/platform/surface/aggregator/ssh_request_layer.c
+index f5565570f16c..90634dcacabf 100644
+--- a/drivers/platform/surface/aggregator/ssh_request_layer.c
++++ b/drivers/platform/surface/aggregator/ssh_request_layer.c
+@@ -916,6 +916,21 @@ static void ssh_rtl_rx_command(struct ssh_ptl *p, const struct ssam_span *data)
+ 	if (sshp_parse_command(dev, data, &command, &command_data))
+ 		return;
+ 
++	/*
++	 * Check if the message was intended for us. If not, drop it.
++	 *
++	 * Note: We will need to change this to handle debug messages. On newer
++	 * generation devices, these seem to be sent to SSAM_SSH_TID_DEBUG. We
++	 * as host can still receive them as they can be forwarded via an
++	 * override option on SAM, but doing so does not change the target ID
++	 * to SSAM_SSH_TID_HOST.
++	 */
++	if (command->tid != SSAM_SSH_TID_HOST) {
++		rtl_warn(rtl, "rtl: dropping message not intended for us (tid = %#04x)\n",
++			 command->tid);
++		return;
++	}
++
+ 	if (ssh_rqid_is_event(get_unaligned_le16(&command->rqid)))
+ 		ssh_rtl_rx_event(rtl, command, &command_data);
+ 	else
+-- 
+2.38.1
+
+From 64ec558a10a7412aceeb093b22b02cab0a761d9d Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:42:19 +0100
+Subject: [PATCH] platform/surface: aggregator: Add target and source IDs to
+ command trace events
+
+Add command source and target IDs to trace events.
+
+Tracing support for the Surface Aggregator driver was originally
+implemented at a time when only two peers were known: Host and SAM. We
+now know that there are at least five, with three actively being used
+(Host, SAM, KIP; four with Debug if you want to count manually enabling
+that interface). So it makes sense to also explicitly name the peers
+involved when tracing.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ drivers/platform/surface/aggregator/trace.h | 73 +++++++++++++++++++--
+ 1 file changed, 67 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/platform/surface/aggregator/trace.h b/drivers/platform/surface/aggregator/trace.h
+index 2a2c17771d01..55cc61bba1da 100644
+--- a/drivers/platform/surface/aggregator/trace.h
++++ b/drivers/platform/surface/aggregator/trace.h
+@@ -96,6 +96,7 @@ TRACE_DEFINE_ENUM(SSAM_SSH_TC_POS);
+ #define SSAM_SEQ_NOT_APPLICABLE		((u16)-1)
+ #define SSAM_RQID_NOT_APPLICABLE	((u32)-1)
+ #define SSAM_SSH_TC_NOT_APPLICABLE	0
++#define SSAM_SSH_TID_NOT_APPLICABLE	((u8)-1)
+ 
+ #ifndef _SURFACE_AGGREGATOR_TRACE_HELPERS
+ #define _SURFACE_AGGREGATOR_TRACE_HELPERS
+@@ -150,12 +151,44 @@ static inline u32 ssam_trace_get_request_id(const struct ssh_packet *p)
+ 	return get_unaligned_le16(&p->data.ptr[SSH_MSGOFFSET_COMMAND(rqid)]);
+ }
+ 
++/**
++ * ssam_trace_get_request_tid() - Read the packet's request target ID.
++ * @p: The packet.
++ *
++ * Return: Returns the packet's request target ID (TID) field if the packet
++ * represents a request with command data, or %SSAM_SSH_TID_NOT_APPLICABLE
++ * if not (e.g. flush request, control packet).
++ */
++static inline u32 ssam_trace_get_request_tid(const struct ssh_packet *p)
++{
++	if (!p->data.ptr || p->data.len < SSH_COMMAND_MESSAGE_LENGTH(0))
++		return SSAM_SSH_TID_NOT_APPLICABLE;
++
++	return get_unaligned_le16(&p->data.ptr[SSH_MSGOFFSET_COMMAND(tid)]);
++}
++
++/**
++ * ssam_trace_get_request_sid() - Read the packet's request source ID.
++ * @p: The packet.
++ *
++ * Return: Returns the packet's request source ID (SID) field if the packet
++ * represents a request with command data, or %SSAM_SSH_TID_NOT_APPLICABLE
++ * if not (e.g. flush request, control packet).
++ */
++static inline u32 ssam_trace_get_request_sid(const struct ssh_packet *p)
++{
++	if (!p->data.ptr || p->data.len < SSH_COMMAND_MESSAGE_LENGTH(0))
++		return SSAM_SSH_TID_NOT_APPLICABLE;
++
++	return get_unaligned_le16(&p->data.ptr[SSH_MSGOFFSET_COMMAND(sid)]);
++}
++
+ /**
+  * ssam_trace_get_request_tc() - Read the packet's request target category.
+  * @p: The packet.
+  *
+  * Return: Returns the packet's request target category (TC) field if the
+- * packet represents a request with command data, or %SSAM_TC_NOT_APPLICABLE
++ * packet represents a request with command data, or %SSAM_SSH_TC_NOT_APPLICABLE
+  * if not (e.g. flush request, control packet).
+  */
+ static inline u32 ssam_trace_get_request_tc(const struct ssh_packet *p)
+@@ -232,8 +265,18 @@ static inline u32 ssam_trace_get_request_tc(const struct ssh_packet *p)
+ 		{ SSAM_RQID_NOT_APPLICABLE,		"N/A" }		\
+ 	)
+ 
+-#define ssam_show_ssh_tc(rqid)						\
+-	__print_symbolic(rqid,						\
++#define ssam_show_ssh_tid(tid)						\
++	__print_symbolic(tid,						\
++		{ SSAM_SSH_TID_NOT_APPLICABLE,		"N/A"      },	\
++		{ SSAM_SSH_TID_HOST,			"Host"     },	\
++		{ SSAM_SSH_TID_SAM,			"SAM"      },	\
++		{ SSAM_SSH_TID_KIP,			"KIP"      },	\
++		{ SSAM_SSH_TID_DEBUG,			"Debug"    },	\
++		{ SSAM_SSH_TID_SURFLINK,		"SurfLink" }	\
++	)
++
++#define ssam_show_ssh_tc(tc)						\
++	__print_symbolic(tc,						\
+ 		{ SSAM_SSH_TC_NOT_APPLICABLE,		"N/A"  },	\
+ 		{ SSAM_SSH_TC_SAM,			"SAM"  },	\
+ 		{ SSAM_SSH_TC_BAT,			"BAT"  },	\
+@@ -313,6 +356,8 @@ DECLARE_EVENT_CLASS(ssam_command_class,
+ 	TP_STRUCT__entry(
+ 		__field(u16, rqid)
+ 		__field(u16, len)
++		__field(u8, tid)
++		__field(u8, sid)
+ 		__field(u8, tc)
+ 		__field(u8, cid)
+ 		__field(u8, iid)
+@@ -320,14 +365,18 @@ DECLARE_EVENT_CLASS(ssam_command_class,
+ 
+ 	TP_fast_assign(
+ 		__entry->rqid = get_unaligned_le16(&cmd->rqid);
++		__entry->tid = cmd->tid;
++		__entry->sid = cmd->sid;
+ 		__entry->tc = cmd->tc;
+ 		__entry->cid = cmd->cid;
+ 		__entry->iid = cmd->iid;
+ 		__entry->len = len;
+ 	),
+ 
+-	TP_printk("rqid=%#06x, tc=%s, cid=%#04x, iid=%#04x, len=%u",
++	TP_printk("rqid=%#06x, tid=%s, sid=%s, tc=%s, cid=%#04x, iid=%#04x, len=%u",
+ 		__entry->rqid,
++		ssam_show_ssh_tid(__entry->tid),
++		ssam_show_ssh_tid(__entry->sid),
+ 		ssam_show_ssh_tc(__entry->tc),
+ 		__entry->cid,
+ 		__entry->iid,
+@@ -430,6 +479,8 @@ DECLARE_EVENT_CLASS(ssam_request_class,
+ 		__field(u8, tc)
+ 		__field(u16, cid)
+ 		__field(u16, iid)
++		__field(u8, tid)
++		__field(u8, sid)
+ 	),
+ 
+ 	TP_fast_assign(
+@@ -439,16 +490,20 @@ DECLARE_EVENT_CLASS(ssam_request_class,
+ 		__entry->state = READ_ONCE(request->state);
+ 		__entry->rqid = ssam_trace_get_request_id(p);
+ 		ssam_trace_ptr_uid(p, __entry->uid);
++		__entry->tid = ssam_trace_get_request_tid(p);
++		__entry->sid = ssam_trace_get_request_sid(p);
+ 		__entry->tc = ssam_trace_get_request_tc(p);
+ 		__entry->cid = ssam_trace_get_command_field_u8(p, cid);
+ 		__entry->iid = ssam_trace_get_command_field_u8(p, iid);
+ 	),
+ 
+-	TP_printk("uid=%s, rqid=%s, ty=%s, sta=%s, tc=%s, cid=%s, iid=%s",
++	TP_printk("uid=%s, rqid=%s, ty=%s, sta=%s, tid=%s, sid=%s, tc=%s, cid=%s, iid=%s",
+ 		__entry->uid,
+ 		ssam_show_request_id(__entry->rqid),
+ 		ssam_show_request_type(__entry->state),
+ 		ssam_show_request_state(__entry->state),
++		ssam_show_ssh_tid(__entry->tid),
++		ssam_show_ssh_tid(__entry->sid),
+ 		ssam_show_ssh_tc(__entry->tc),
+ 		ssam_show_generic_u8_field(__entry->cid),
+ 		ssam_show_generic_u8_field(__entry->iid)
+@@ -474,6 +529,8 @@ DECLARE_EVENT_CLASS(ssam_request_status_class,
+ 		__field(u8, tc)
+ 		__field(u16, cid)
+ 		__field(u16, iid)
++		__field(u8, tid)
++		__field(u8, sid)
+ 	),
+ 
+ 	TP_fast_assign(
+@@ -484,16 +541,20 @@ DECLARE_EVENT_CLASS(ssam_request_status_class,
+ 		__entry->rqid = ssam_trace_get_request_id(p);
+ 		__entry->status = status;
+ 		ssam_trace_ptr_uid(p, __entry->uid);
++		__entry->tid = ssam_trace_get_request_tid(p);
++		__entry->sid = ssam_trace_get_request_sid(p);
+ 		__entry->tc = ssam_trace_get_request_tc(p);
+ 		__entry->cid = ssam_trace_get_command_field_u8(p, cid);
+ 		__entry->iid = ssam_trace_get_command_field_u8(p, iid);
+ 	),
+ 
+-	TP_printk("uid=%s, rqid=%s, ty=%s, sta=%s, tc=%s, cid=%s, iid=%s, status=%d",
++	TP_printk("uid=%s, rqid=%s, ty=%s, sta=%s, tid=%s, sid=%s, tc=%s, cid=%s, iid=%s, status=%d",
+ 		__entry->uid,
+ 		ssam_show_request_id(__entry->rqid),
+ 		ssam_show_request_type(__entry->state),
+ 		ssam_show_request_state(__entry->state),
++		ssam_show_ssh_tid(__entry->tid),
++		ssam_show_ssh_tid(__entry->sid),
+ 		ssam_show_ssh_tc(__entry->tc),
+ 		ssam_show_generic_u8_field(__entry->cid),
+ 		ssam_show_generic_u8_field(__entry->iid),
+-- 
+2.38.1
+
+From 4f8baf2a40ad5b9595a784d2145ad15e0ce7ceed Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:32:16 +0100
+Subject: [PATCH] platform/surface: aggregator_hub: Use target-ID enum instead
+ of hard-coding values
+
+Instead of hard-coding the target ID, use the respective enum
+ssam_ssh_tid value.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ drivers/platform/surface/surface_aggregator_hub.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/platform/surface/surface_aggregator_hub.c b/drivers/platform/surface/surface_aggregator_hub.c
+index 43061514be38..62f27cdb6ca8 100644
+--- a/drivers/platform/surface/surface_aggregator_hub.c
++++ b/drivers/platform/surface/surface_aggregator_hub.c
+@@ -214,7 +214,7 @@ static void ssam_hub_remove(struct ssam_device *sdev)
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_bas_query_opmode, u8, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x0d,
+ 	.instance_id     = 0x00,
+ });
+@@ -292,7 +292,7 @@ static const struct ssam_hub_desc base_hub = {
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(__ssam_kip_query_state, u8, {
+ 	.target_category = SSAM_SSH_TC_KIP,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x2c,
+ 	.instance_id     = 0x00,
+ });
+-- 
+2.38.1
+
+From aa7fcdadf6e32bdcf4f9269ba5ed6129e0a9d4f2 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:33:26 +0100
+Subject: [PATCH] platform/surface: aggregator_tabletsw: Use target-ID enum
+ instead of hard-coding values
+
+Instead of hard-coding the target ID, use the respective enum
+ssam_ssh_tid value.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ drivers/platform/surface/surface_aggregator_tabletsw.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/platform/surface/surface_aggregator_tabletsw.c b/drivers/platform/surface/surface_aggregator_tabletsw.c
+index 27d95a6a7851..bd8cd453c393 100644
+--- a/drivers/platform/surface/surface_aggregator_tabletsw.c
++++ b/drivers/platform/surface/surface_aggregator_tabletsw.c
+@@ -247,7 +247,7 @@ static bool ssam_kip_cover_state_is_tablet_mode(struct ssam_tablet_sw *sw, u32 s
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(__ssam_kip_get_cover_state, u8, {
+ 	.target_category = SSAM_SSH_TC_KIP,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x1d,
+ 	.instance_id     = 0x00,
+ });
+@@ -371,7 +371,7 @@ static int ssam_pos_get_sources_list(struct ssam_tablet_sw *sw, struct ssam_sour
+ 	int status;
+ 
+ 	rqst.target_category = SSAM_SSH_TC_POS;
+-	rqst.target_id = 0x01;
++	rqst.target_id = SSAM_SSH_TID_SAM;
+ 	rqst.command_id = 0x01;
+ 	rqst.instance_id = 0x00;
+ 	rqst.flags = SSAM_REQUEST_HAS_RESPONSE;
+@@ -430,7 +430,7 @@ static int ssam_pos_get_source(struct ssam_tablet_sw *sw, u32 *source_id)
+ 
+ SSAM_DEFINE_SYNC_REQUEST_WR(__ssam_pos_get_posture_for_source, __le32, __le32, {
+ 	.target_category = SSAM_SSH_TC_POS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x02,
+ 	.instance_id     = 0x00,
+ });
+-- 
+2.38.1
+
+From d6ae2d7d75a8cf4218916ef08bba19b4a0f8f09f Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:34:06 +0100
+Subject: [PATCH] platform/surface: dtx: Use target-ID enum instead of
+ hard-coding values
+
+Instead of hard-coding the target ID, use the respective enum
+ssam_ssh_tid value.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ drivers/platform/surface/surface_dtx.c | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/platform/surface/surface_dtx.c b/drivers/platform/surface/surface_dtx.c
+index ed36944467f9..0de76a784a35 100644
+--- a/drivers/platform/surface/surface_dtx.c
++++ b/drivers/platform/surface/surface_dtx.c
+@@ -71,63 +71,63 @@ static_assert(sizeof(struct ssam_bas_base_info) == 2);
+ 
+ SSAM_DEFINE_SYNC_REQUEST_N(ssam_bas_latch_lock, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x06,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_N(ssam_bas_latch_unlock, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x07,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_N(ssam_bas_latch_request, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x08,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_N(ssam_bas_latch_confirm, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x09,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_N(ssam_bas_latch_heartbeat, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x0a,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_N(ssam_bas_latch_cancel, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x0b,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_bas_get_base, struct ssam_bas_base_info, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x0c,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_bas_get_device_mode, u8, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x0d,
+ 	.instance_id     = 0x00,
+ });
+ 
+ SSAM_DEFINE_SYNC_REQUEST_R(ssam_bas_get_latch_status, u8, {
+ 	.target_category = SSAM_SSH_TC_BAS,
+-	.target_id       = 0x01,
++	.target_id       = SSAM_SSH_TID_SAM,
+ 	.command_id      = 0x11,
+ 	.instance_id     = 0x00,
+ });
+-- 
+2.38.1
+
+From 8103b8c3f6c70460b804398a2db6949e814bdae0 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:40:06 +0100
+Subject: [PATCH] HID: surface-hid: Use target-ID enum instead of hard-coding
+ values
+
+Instead of hard-coding the target ID, use the respective enum
+ssam_ssh_tid value.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ drivers/hid/surface-hid/surface_kbd.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/hid/surface-hid/surface_kbd.c b/drivers/hid/surface-hid/surface_kbd.c
+index 0635341bc517..42933bf3e925 100644
+--- a/drivers/hid/surface-hid/surface_kbd.c
++++ b/drivers/hid/surface-hid/surface_kbd.c
+@@ -250,7 +250,7 @@ static int surface_kbd_probe(struct platform_device *pdev)
+ 
+ 	shid->uid.domain = SSAM_DOMAIN_SERIALHUB;
+ 	shid->uid.category = SSAM_SSH_TC_KBD;
+-	shid->uid.target = 2;
++	shid->uid.target = SSAM_SSH_TID_KIP;
+ 	shid->uid.instance = 0;
+ 	shid->uid.function = 0;
+ 
+-- 
+2.38.1
+
+From 1fd9f11ec7abe0945aa2e5211102d20594dbbbc2 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:45:28 +0100
+Subject: [PATCH] platform/surface: aggregator: Enforce use of target-ID enum
+ in device ID macros
+
+Similar to the target category (TC), the target ID (TID) can be one
+value out of a small number of choices, given in enum ssam_ssh_tid.
+
+In the device ID macros, SSAM_SDEV() and SSAM_VDEV() we already use text
+expansion to, both, remove some textual clutter for the target category
+values and enforce that the value belongs to the known set. Now that we
+know the names for the target IDs, use the same trick for them as well.
+
+Also rename the SSAM_ANY_x macros to SSAM_SSH_x_ANY to better fit in.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ drivers/hid/surface-hid/surface_hid.c         |  2 +-
+ .../platform/surface/surface_aggregator_hub.c |  4 +-
+ .../surface/surface_aggregator_tabletsw.c     |  4 +-
+ drivers/platform/surface/surface_dtx.c        |  2 +-
+ .../surface/surface_platform_profile.c        |  2 +-
+ drivers/power/supply/surface_battery.c        |  4 +-
+ drivers/power/supply/surface_charger.c        |  2 +-
+ include/linux/surface_aggregator/device.h     | 50 +++++++++----------
+ 8 files changed, 35 insertions(+), 35 deletions(-)
+
+diff --git a/drivers/hid/surface-hid/surface_hid.c b/drivers/hid/surface-hid/surface_hid.c
+index d4aa8c81903a..aa80d83a83d1 100644
+--- a/drivers/hid/surface-hid/surface_hid.c
++++ b/drivers/hid/surface-hid/surface_hid.c
+@@ -230,7 +230,7 @@ static void surface_hid_remove(struct ssam_device *sdev)
+ }
+ 
+ static const struct ssam_device_id surface_hid_match[] = {
+-	{ SSAM_SDEV(HID, SSAM_ANY_TID, SSAM_ANY_IID, 0x00) },
++	{ SSAM_SDEV(HID, ANY, SSAM_SSH_IID_ANY, 0x00) },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(ssam, surface_hid_match);
+diff --git a/drivers/platform/surface/surface_aggregator_hub.c b/drivers/platform/surface/surface_aggregator_hub.c
+index 62f27cdb6ca8..6abd1efe2088 100644
+--- a/drivers/platform/surface/surface_aggregator_hub.c
++++ b/drivers/platform/surface/surface_aggregator_hub.c
+@@ -348,8 +348,8 @@ static const struct ssam_hub_desc kip_hub = {
+ /* -- Driver registration. -------------------------------------------------- */
+ 
+ static const struct ssam_device_id ssam_hub_match[] = {
+-	{ SSAM_VDEV(HUB, 0x01, SSAM_SSH_TC_KIP, 0x00), (unsigned long)&kip_hub  },
+-	{ SSAM_VDEV(HUB, 0x02, SSAM_SSH_TC_BAS, 0x00), (unsigned long)&base_hub },
++	{ SSAM_VDEV(HUB, SAM, SSAM_SSH_TC_KIP, 0x00), (unsigned long)&kip_hub  },
++	{ SSAM_VDEV(HUB, KIP, SSAM_SSH_TC_BAS, 0x00), (unsigned long)&base_hub },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(ssam, ssam_hub_match);
+diff --git a/drivers/platform/surface/surface_aggregator_tabletsw.c b/drivers/platform/surface/surface_aggregator_tabletsw.c
+index bd8cd453c393..6147aa887939 100644
+--- a/drivers/platform/surface/surface_aggregator_tabletsw.c
++++ b/drivers/platform/surface/surface_aggregator_tabletsw.c
+@@ -510,8 +510,8 @@ static const struct ssam_tablet_sw_desc ssam_pos_sw_desc = {
+ /* -- Driver registration. -------------------------------------------------- */
+ 
+ static const struct ssam_device_id ssam_tablet_sw_match[] = {
+-	{ SSAM_SDEV(KIP, 0x01, 0x00, 0x01), (unsigned long)&ssam_kip_sw_desc },
+-	{ SSAM_SDEV(POS, 0x01, 0x00, 0x01), (unsigned long)&ssam_pos_sw_desc },
++	{ SSAM_SDEV(KIP, SAM, 0x00, 0x01), (unsigned long)&ssam_kip_sw_desc },
++	{ SSAM_SDEV(POS, SAM, 0x00, 0x01), (unsigned long)&ssam_pos_sw_desc },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(ssam, ssam_tablet_sw_match);
+diff --git a/drivers/platform/surface/surface_dtx.c b/drivers/platform/surface/surface_dtx.c
+index 0de76a784a35..30cbde278c59 100644
+--- a/drivers/platform/surface/surface_dtx.c
++++ b/drivers/platform/surface/surface_dtx.c
+@@ -1214,7 +1214,7 @@ static void surface_dtx_ssam_remove(struct ssam_device *sdev)
+ }
+ 
+ static const struct ssam_device_id surface_dtx_ssam_match[] = {
+-	{ SSAM_SDEV(BAS, 0x01, 0x00, 0x00) },
++	{ SSAM_SDEV(BAS, SAM, 0x00, 0x00) },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(ssam, surface_dtx_ssam_match);
+diff --git a/drivers/platform/surface/surface_platform_profile.c b/drivers/platform/surface/surface_platform_profile.c
+index fbf2e11fd6ce..f433a13c3689 100644
+--- a/drivers/platform/surface/surface_platform_profile.c
++++ b/drivers/platform/surface/surface_platform_profile.c
+@@ -169,7 +169,7 @@ static void surface_platform_profile_remove(struct ssam_device *sdev)
+ }
+ 
+ static const struct ssam_device_id ssam_platform_profile_match[] = {
+-	{ SSAM_SDEV(TMP, 0x01, 0x00, 0x01) },
++	{ SSAM_SDEV(TMP, SAM, 0x00, 0x01) },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(ssam, ssam_platform_profile_match);
+diff --git a/drivers/power/supply/surface_battery.c b/drivers/power/supply/surface_battery.c
+index 540707882bb0..19d2f8834e56 100644
+--- a/drivers/power/supply/surface_battery.c
++++ b/drivers/power/supply/surface_battery.c
+@@ -852,8 +852,8 @@ static const struct spwr_psy_properties spwr_psy_props_bat2_sb3 = {
+ };
+ 
+ static const struct ssam_device_id surface_battery_match[] = {
+-	{ SSAM_SDEV(BAT, 0x01, 0x01, 0x00), (unsigned long)&spwr_psy_props_bat1     },
+-	{ SSAM_SDEV(BAT, 0x02, 0x01, 0x00), (unsigned long)&spwr_psy_props_bat2_sb3 },
++	{ SSAM_SDEV(BAT, SAM, 0x01, 0x00), (unsigned long)&spwr_psy_props_bat1     },
++	{ SSAM_SDEV(BAT, KIP, 0x01, 0x00), (unsigned long)&spwr_psy_props_bat2_sb3 },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(ssam, surface_battery_match);
+diff --git a/drivers/power/supply/surface_charger.c b/drivers/power/supply/surface_charger.c
+index 59182d55742d..cabdd8da12d0 100644
+--- a/drivers/power/supply/surface_charger.c
++++ b/drivers/power/supply/surface_charger.c
+@@ -260,7 +260,7 @@ static const struct spwr_psy_properties spwr_psy_props_adp1 = {
+ };
+ 
+ static const struct ssam_device_id surface_ac_match[] = {
+-	{ SSAM_SDEV(BAT, 0x01, 0x01, 0x01), (unsigned long)&spwr_psy_props_adp1 },
++	{ SSAM_SDEV(BAT, SAM, 0x01, 0x01), (unsigned long)&spwr_psy_props_adp1 },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(ssam, surface_ac_match);
+diff --git a/include/linux/surface_aggregator/device.h b/include/linux/surface_aggregator/device.h
+index 46c45d1b6368..4da20b7a0ee5 100644
+--- a/include/linux/surface_aggregator/device.h
++++ b/include/linux/surface_aggregator/device.h
+@@ -68,9 +68,9 @@ struct ssam_device_uid {
+  * match_flags member of the device ID structure. Do not use them directly
+  * with struct ssam_device_id or struct ssam_device_uid.
+  */
+-#define SSAM_ANY_TID		0xffff
+-#define SSAM_ANY_IID		0xffff
+-#define SSAM_ANY_FUN		0xffff
++#define SSAM_SSH_TID_ANY	0xffff
++#define SSAM_SSH_IID_ANY	0xffff
++#define SSAM_SSH_FUN_ANY	0xffff
+ 
+ /**
+  * SSAM_DEVICE() - Initialize a &struct ssam_device_id with the given
+@@ -83,25 +83,25 @@ struct ssam_device_uid {
+  *
+  * Initializes a &struct ssam_device_id with the given parameters. See &struct
+  * ssam_device_uid for details regarding the parameters. The special values
+- * %SSAM_ANY_TID, %SSAM_ANY_IID, and %SSAM_ANY_FUN can be used to specify that
++ * %SSAM_SSH_TID_ANY, %SSAM_SSH_IID_ANY, and %SSAM_SSH_FUN_ANY can be used to specify that
+  * matching should ignore target ID, instance ID, and/or sub-function,
+  * respectively. This macro initializes the ``match_flags`` field based on the
+  * given parameters.
+  *
+  * Note: The parameters @d and @cat must be valid &u8 values, the parameters
+- * @tid, @iid, and @fun must be either valid &u8 values or %SSAM_ANY_TID,
+- * %SSAM_ANY_IID, or %SSAM_ANY_FUN, respectively. Other non-&u8 values are not
++ * @tid, @iid, and @fun must be either valid &u8 values or %SSAM_SSH_TID_ANY,
++ * %SSAM_SSH_IID_ANY, or %SSAM_SSH_FUN_ANY, respectively. Other non-&u8 values are not
+  * allowed.
+  */
+ #define SSAM_DEVICE(d, cat, tid, iid, fun)					\
+-	.match_flags = (((tid) != SSAM_ANY_TID) ? SSAM_MATCH_TARGET : 0)	\
+-		     | (((iid) != SSAM_ANY_IID) ? SSAM_MATCH_INSTANCE : 0)	\
+-		     | (((fun) != SSAM_ANY_FUN) ? SSAM_MATCH_FUNCTION : 0),	\
++	.match_flags = (((tid) != SSAM_SSH_TID_ANY) ? SSAM_MATCH_TARGET : 0)	\
++		     | (((iid) != SSAM_SSH_IID_ANY) ? SSAM_MATCH_INSTANCE : 0)	\
++		     | (((fun) != SSAM_SSH_FUN_ANY) ? SSAM_MATCH_FUNCTION : 0),	\
+ 	.domain   = d,								\
+ 	.category = cat,							\
+-	.target   = __builtin_choose_expr((tid) != SSAM_ANY_TID, (tid), 0),	\
+-	.instance = __builtin_choose_expr((iid) != SSAM_ANY_IID, (iid), 0),	\
+-	.function = __builtin_choose_expr((fun) != SSAM_ANY_FUN, (fun), 0)
++	.target   = __builtin_choose_expr((tid) != SSAM_SSH_TID_ANY, (tid), 0),	\
++	.instance = __builtin_choose_expr((iid) != SSAM_SSH_IID_ANY, (iid), 0),	\
++	.function = __builtin_choose_expr((fun) != SSAM_SSH_FUN_ANY, (fun), 0)
+ 
+ /**
+  * SSAM_VDEV() - Initialize a &struct ssam_device_id as virtual device with
+@@ -113,18 +113,18 @@ struct ssam_device_uid {
+  *
+  * Initializes a &struct ssam_device_id with the given parameters in the
+  * virtual domain. See &struct ssam_device_uid for details regarding the
+- * parameters. The special values %SSAM_ANY_TID, %SSAM_ANY_IID, and
+- * %SSAM_ANY_FUN can be used to specify that matching should ignore target ID,
++ * parameters. The special values %SSAM_SSH_TID_ANY, %SSAM_SSH_IID_ANY, and
++ * %SSAM_SSH_FUN_ANY can be used to specify that matching should ignore target ID,
+  * instance ID, and/or sub-function, respectively. This macro initializes the
+  * ``match_flags`` field based on the given parameters.
+  *
+  * Note: The parameter @cat must be a valid &u8 value, the parameters @tid,
+- * @iid, and @fun must be either valid &u8 values or %SSAM_ANY_TID,
+- * %SSAM_ANY_IID, or %SSAM_ANY_FUN, respectively. Other non-&u8 values are not
++ * @iid, and @fun must be either valid &u8 values or %SSAM_SSH_TID_ANY,
++ * %SSAM_SSH_IID_ANY, or %SSAM_SSH_FUN_ANY, respectively. Other non-&u8 values are not
+  * allowed.
+  */
+ #define SSAM_VDEV(cat, tid, iid, fun) \
+-	SSAM_DEVICE(SSAM_DOMAIN_VIRTUAL, SSAM_VIRTUAL_TC_##cat, tid, iid, fun)
++	SSAM_DEVICE(SSAM_DOMAIN_VIRTUAL, SSAM_VIRTUAL_TC_##cat, SSAM_SSH_TID_##tid, iid, fun)
+ 
+ /**
+  * SSAM_SDEV() - Initialize a &struct ssam_device_id as physical SSH device
+@@ -136,18 +136,18 @@ struct ssam_device_uid {
+  *
+  * Initializes a &struct ssam_device_id with the given parameters in the SSH
+  * domain. See &struct ssam_device_uid for details regarding the parameters.
+- * The special values %SSAM_ANY_TID, %SSAM_ANY_IID, and %SSAM_ANY_FUN can be
+- * used to specify that matching should ignore target ID, instance ID, and/or
+- * sub-function, respectively. This macro initializes the ``match_flags``
+- * field based on the given parameters.
++ * The special values %SSAM_SSH_TID_ANY, %SSAM_SSH_IID_ANY, and
++ * %SSAM_SSH_FUN_ANY can be used to specify that matching should ignore target
++ * ID, instance ID, and/or sub-function, respectively. This macro initializes
++ * the ``match_flags`` field based on the given parameters.
+  *
+  * Note: The parameter @cat must be a valid &u8 value, the parameters @tid,
+- * @iid, and @fun must be either valid &u8 values or %SSAM_ANY_TID,
+- * %SSAM_ANY_IID, or %SSAM_ANY_FUN, respectively. Other non-&u8 values are not
+- * allowed.
++ * @iid, and @fun must be either valid &u8 values or %SSAM_SSH_TID_ANY,
++ * %SSAM_SSH_IID_ANY, or %SSAM_SSH_FUN_ANY, respectively. Other non-&u8 values
++ * are not allowed.
+  */
+ #define SSAM_SDEV(cat, tid, iid, fun) \
+-	SSAM_DEVICE(SSAM_DOMAIN_SERIALHUB, SSAM_SSH_TC_##cat, tid, iid, fun)
++	SSAM_DEVICE(SSAM_DOMAIN_SERIALHUB, SSAM_SSH_TC_##cat, SSAM_SSH_TID_##tid, iid, fun)
+ 
+ /*
+  * enum ssam_device_flags - Flags for SSAM client devices.
+-- 
+2.38.1
+
+From 479a9507b55927c8f51442b2be657789feb35de0 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 5 Nov 2022 21:46:37 +0100
+Subject: [PATCH] platform/surface: aggregator_registry: Fix target-ID of
+ base-hub
+
+The target ID of the base hub is currently set to KIP (keyboard/
+peripherals). However, even though it manages such devices with the KIP
+target ID, the base hub itself is actually accessed via the SAM target
+ID. So set it accordingly.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam
+---
+ drivers/platform/surface/surface_aggregator_hub.c      | 2 +-
+ drivers/platform/surface/surface_aggregator_registry.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/platform/surface/surface_aggregator_hub.c b/drivers/platform/surface/surface_aggregator_hub.c
+index 6abd1efe2088..8b8b80228c14 100644
+--- a/drivers/platform/surface/surface_aggregator_hub.c
++++ b/drivers/platform/surface/surface_aggregator_hub.c
+@@ -349,7 +349,7 @@ static const struct ssam_hub_desc kip_hub = {
+ 
+ static const struct ssam_device_id ssam_hub_match[] = {
+ 	{ SSAM_VDEV(HUB, SAM, SSAM_SSH_TC_KIP, 0x00), (unsigned long)&kip_hub  },
+-	{ SSAM_VDEV(HUB, KIP, SSAM_SSH_TC_BAS, 0x00), (unsigned long)&base_hub },
++	{ SSAM_VDEV(HUB, SAM, SSAM_SSH_TC_BAS, 0x00), (unsigned long)&base_hub },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(ssam, ssam_hub_match);
+diff --git a/drivers/platform/surface/surface_aggregator_registry.c b/drivers/platform/surface/surface_aggregator_registry.c
+index 023f126121d7..296f72d52e6a 100644
+--- a/drivers/platform/surface/surface_aggregator_registry.c
++++ b/drivers/platform/surface/surface_aggregator_registry.c
+@@ -46,7 +46,7 @@ static const struct software_node ssam_node_hub_kip = {
+ 
+ /* Base device hub (devices attached to Surface Book 3 base). */
+ static const struct software_node ssam_node_hub_base = {
+-	.name = "ssam:00:00:02:11:00",
++	.name = "ssam:00:00:01:11:00",
+ 	.parent = &ssam_node_root,
+ };
+ 
+-- 
+2.38.1
+
+From 430fe28030f16e71a425b45c5a4a9d95964a1024 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 25 Jul 2020 17:19:53 +0200
+Subject: [PATCH] i2c: acpi: Implement RawBytes read access
+
+Microsoft Surface Pro 4 and Book 1 devices access the MSHW0030 I2C
+device via a generic serial bus operation region and RawBytes read
+access. On the Surface Book 1, this access is required to turn on (and
+off) the discrete GPU.
+
+Multiple things are to note here:
+
+a) The RawBytes access is device/driver dependent. The ACPI
+   specification states:
+
+   > Raw accesses assume that the writer has knowledge of the bus that
+   > the access is made over and the device that is being accessed. The
+   > protocol may only ensure that the buffer is transmitted to the
+   > appropriate driver, but the driver must be able to interpret the
+   > buffer to communicate to a register.
+
+   Thus this implementation may likely not work on other devices
+   accessing I2C via the RawBytes accessor type.
+
+b) The MSHW0030 I2C device is an HID-over-I2C device which seems to
+   serve multiple functions:
+
+   1. It is the main access point for the legacy-type Surface Aggregator
+      Module (also referred to as SAM-over-HID, as opposed to the newer
+      SAM-over-SSH/UART). It has currently not been determined on how
+      support for the legacy SAM should be implemented. Likely via a
+      custom HID driver.
+
+   2. It seems to serve as the HID device for the Integrated Sensor Hub.
+      This might complicate matters with regards to implementing a
+      SAM-over-HID driver required by legacy SAM.
+
+In light of this, the simplest approach has been chosen for now.
+However, it may make more sense regarding breakage and compatibility to
+either provide functionality for replacing or enhancing the default
+operation region handler via some additional API functions, or even to
+completely blacklist MSHW0030 from the I2C core and provide a custom
+driver for it.
+
+Replacing/enhancing the default operation region handler would, however,
+either require some sort of secondary driver and access point for it,
+from which the new API functions would be called and the new handler
+(part) would be installed, or hard-coding them via some sort of
+quirk-like interface into the I2C core.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: surface-sam-over-hid
+---
+ drivers/i2c/i2c-core-acpi.c | 35 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/drivers/i2c/i2c-core-acpi.c b/drivers/i2c/i2c-core-acpi.c
+index 08b561f0709d..d7c397bce0f0 100644
+--- a/drivers/i2c/i2c-core-acpi.c
++++ b/drivers/i2c/i2c-core-acpi.c
+@@ -619,6 +619,28 @@ static int acpi_gsb_i2c_write_bytes(struct i2c_client *client,
+ 	return (ret == 1) ? 0 : -EIO;
+ }
+ 
++static int acpi_gsb_i2c_write_raw_bytes(struct i2c_client *client,
++		u8 *data, u8 data_len)
++{
++	struct i2c_msg msgs[1];
++	int ret = AE_OK;
++
++	msgs[0].addr = client->addr;
++	msgs[0].flags = client->flags;
++	msgs[0].len = data_len + 1;
++	msgs[0].buf = data;
++
++	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
++
++	if (ret < 0) {
++		dev_err(&client->adapter->dev, "i2c write failed: %d\n", ret);
++		return ret;
++	}
++
++	/* 1 transfer must have completed successfully */
++	return (ret == 1) ? 0 : -EIO;
++}
++
+ static acpi_status
+ i2c_acpi_space_handler(u32 function, acpi_physical_address command,
+ 			u32 bits, u64 *value64,
+@@ -720,6 +742,19 @@ i2c_acpi_space_handler(u32 function, acpi_physical_address command,
+ 		}
+ 		break;
+ 
++	case ACPI_GSB_ACCESS_ATTRIB_RAW_BYTES:
++		if (action == ACPI_READ) {
++			dev_warn(&adapter->dev,
++				 "protocol 0x%02x not supported for client 0x%02x\n",
++				 accessor_type, client->addr);
++			ret = AE_BAD_PARAMETER;
++			goto err;
++		} else {
++			status = acpi_gsb_i2c_write_raw_bytes(client,
++					gsb->data, info->access_length);
++		}
++		break;
++
+ 	default:
+ 		dev_warn(&adapter->dev, "protocol 0x%02x not supported for client 0x%02x\n",
+ 			 accessor_type, client->addr);
+-- 
+2.38.1
+
+From 2062f0aef4b131f18609b615d1530f42a07fa5c3 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Sat, 13 Feb 2021 16:41:18 +0100
+Subject: [PATCH] platform/surface: Add driver for Surface Book 1 dGPU switch
+
+Add driver exposing the discrete GPU power-switch of the  Microsoft
+Surface Book 1 to user-space.
+
+On the Surface Book 1, the dGPU power is controlled via the Surface
+System Aggregator Module (SAM). The specific SAM-over-HID command for
+this is exposed via ACPI. This module provides a simple driver exposing
+the ACPI call via a sysfs parameter to user-space, so that users can
+easily power-on/-off the dGPU.
+
+Patchset: surface-sam-over-hid
+---
+ drivers/platform/surface/Kconfig              |   7 +
+ drivers/platform/surface/Makefile             |   1 +
+ .../surface/surfacebook1_dgpu_switch.c        | 162 ++++++++++++++++++
+ 3 files changed, 170 insertions(+)
+ create mode 100644 drivers/platform/surface/surfacebook1_dgpu_switch.c
+
+diff --git a/drivers/platform/surface/Kconfig b/drivers/platform/surface/Kconfig
+index b629e82af97c..68656e8f309e 100644
+--- a/drivers/platform/surface/Kconfig
++++ b/drivers/platform/surface/Kconfig
+@@ -149,6 +149,13 @@ config SURFACE_AGGREGATOR_TABLET_SWITCH
+ 	  Select M or Y here, if you want to provide tablet-mode switch input
+ 	  events on the Surface Pro 8, Surface Pro X, and Surface Laptop Studio.
+ 
++config SURFACE_BOOK1_DGPU_SWITCH
++	tristate "Surface Book 1 dGPU Switch Driver"
++	depends on SYSFS
++	help
++	  This driver provides a sysfs switch to set the power-state of the
++	  discrete GPU found on the Microsoft Surface Book 1.
++
+ config SURFACE_DTX
+ 	tristate "Surface DTX (Detachment System) Driver"
+ 	depends on SURFACE_AGGREGATOR
+diff --git a/drivers/platform/surface/Makefile b/drivers/platform/surface/Makefile
+index 53344330939b..7efcd0cdb532 100644
+--- a/drivers/platform/surface/Makefile
++++ b/drivers/platform/surface/Makefile
+@@ -12,6 +12,7 @@ obj-$(CONFIG_SURFACE_AGGREGATOR_CDEV)	+= surface_aggregator_cdev.o
+ obj-$(CONFIG_SURFACE_AGGREGATOR_HUB)	+= surface_aggregator_hub.o
+ obj-$(CONFIG_SURFACE_AGGREGATOR_REGISTRY) += surface_aggregator_registry.o
+ obj-$(CONFIG_SURFACE_AGGREGATOR_TABLET_SWITCH) += surface_aggregator_tabletsw.o
++obj-$(CONFIG_SURFACE_BOOK1_DGPU_SWITCH) += surfacebook1_dgpu_switch.o
+ obj-$(CONFIG_SURFACE_DTX)		+= surface_dtx.o
+ obj-$(CONFIG_SURFACE_GPE)		+= surface_gpe.o
+ obj-$(CONFIG_SURFACE_HOTPLUG)		+= surface_hotplug.o
+diff --git a/drivers/platform/surface/surfacebook1_dgpu_switch.c b/drivers/platform/surface/surfacebook1_dgpu_switch.c
+new file mode 100644
+index 000000000000..8b816ed8f35c
+--- /dev/null
++++ b/drivers/platform/surface/surfacebook1_dgpu_switch.c
+@@ -0,0 +1,162 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/acpi.h>
++#include <linux/platform_device.h>
++
++
++#ifdef pr_fmt
++#undef pr_fmt
++#endif
++#define pr_fmt(fmt) "%s:%s: " fmt, KBUILD_MODNAME, __func__
++
++
++static const guid_t dgpu_sw_guid = GUID_INIT(0x6fd05c69, 0xcde3, 0x49f4,
++	0x95, 0xed, 0xab, 0x16, 0x65, 0x49, 0x80, 0x35);
++
++#define DGPUSW_ACPI_PATH_DSM	"\\_SB_.PCI0.LPCB.EC0_.VGBI"
++#define DGPUSW_ACPI_PATH_HGON	"\\_SB_.PCI0.RP05.HGON"
++#define DGPUSW_ACPI_PATH_HGOF	"\\_SB_.PCI0.RP05.HGOF"
++
++
++static int sb1_dgpu_sw_dsmcall(void)
++{
++	union acpi_object *ret;
++	acpi_handle handle;
++	acpi_status status;
++
++	status = acpi_get_handle(NULL, DGPUSW_ACPI_PATH_DSM, &handle);
++	if (status)
++		return -EINVAL;
++
++	ret = acpi_evaluate_dsm_typed(handle, &dgpu_sw_guid, 1, 1, NULL, ACPI_TYPE_BUFFER);
++	if (!ret)
++		return -EINVAL;
++
++	ACPI_FREE(ret);
++	return 0;
++}
++
++static int sb1_dgpu_sw_hgon(void)
++{
++	struct acpi_buffer buf = {ACPI_ALLOCATE_BUFFER, NULL};
++	acpi_status status;
++
++	status = acpi_evaluate_object(NULL, DGPUSW_ACPI_PATH_HGON, NULL, &buf);
++	if (status) {
++		pr_err("failed to run HGON: %d\n", status);
++		return -EINVAL;
++	}
++
++	if (buf.pointer)
++		ACPI_FREE(buf.pointer);
++
++	pr_info("turned-on dGPU via HGON\n");
++	return 0;
++}
++
++static int sb1_dgpu_sw_hgof(void)
++{
++	struct acpi_buffer buf = {ACPI_ALLOCATE_BUFFER, NULL};
++	acpi_status status;
++
++	status = acpi_evaluate_object(NULL, DGPUSW_ACPI_PATH_HGOF, NULL, &buf);
++	if (status) {
++		pr_err("failed to run HGOF: %d\n", status);
++		return -EINVAL;
++	}
++
++	if (buf.pointer)
++		ACPI_FREE(buf.pointer);
++
++	pr_info("turned-off dGPU via HGOF\n");
++	return 0;
++}
++
++
++static ssize_t dgpu_dsmcall_store(struct device *dev, struct device_attribute *attr,
++				  const char *buf, size_t len)
++{
++	int status, value;
++
++	status = kstrtoint(buf, 0, &value);
++	if (status < 0)
++		return status;
++
++	if (value != 1)
++		return -EINVAL;
++
++	status = sb1_dgpu_sw_dsmcall();
++
++	return status < 0 ? status : len;
++}
++
++static ssize_t dgpu_power_store(struct device *dev, struct device_attribute *attr,
++				const char *buf, size_t len)
++{
++	bool power;
++	int status;
++
++	status = kstrtobool(buf, &power);
++	if (status < 0)
++		return status;
++
++	if (power)
++		status = sb1_dgpu_sw_hgon();
++	else
++		status = sb1_dgpu_sw_hgof();
++
++	return status < 0 ? status : len;
++}
++
++static DEVICE_ATTR_WO(dgpu_dsmcall);
++static DEVICE_ATTR_WO(dgpu_power);
++
++static struct attribute *sb1_dgpu_sw_attrs[] = {
++	&dev_attr_dgpu_dsmcall.attr,
++	&dev_attr_dgpu_power.attr,
++	NULL,
++};
++
++static const struct attribute_group sb1_dgpu_sw_attr_group = {
++	.attrs = sb1_dgpu_sw_attrs,
++};
++
++
++static int sb1_dgpu_sw_probe(struct platform_device *pdev)
++{
++	return sysfs_create_group(&pdev->dev.kobj, &sb1_dgpu_sw_attr_group);
++}
++
++static int sb1_dgpu_sw_remove(struct platform_device *pdev)
++{
++	sysfs_remove_group(&pdev->dev.kobj, &sb1_dgpu_sw_attr_group);
++	return 0;
++}
++
++/*
++ * The dGPU power seems to be actually handled by MSHW0040. However, that is
++ * also the power-/volume-button device with a mainline driver. So let's use
++ * MSHW0041 instead for now, which seems to be the LTCH (latch/DTX) device.
++ */
++static const struct acpi_device_id sb1_dgpu_sw_match[] = {
++	{ "MSHW0041", },
++	{ },
++};
++MODULE_DEVICE_TABLE(acpi, sb1_dgpu_sw_match);
++
++static struct platform_driver sb1_dgpu_sw = {
++	.probe = sb1_dgpu_sw_probe,
++	.remove = sb1_dgpu_sw_remove,
++	.driver = {
++		.name = "surfacebook1_dgpu_switch",
++		.acpi_match_table = sb1_dgpu_sw_match,
++		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
++	},
++};
++module_platform_driver(sb1_dgpu_sw);
++
++MODULE_AUTHOR("Maximilian Luz <luzmaximilian@gmail.com>");
++MODULE_DESCRIPTION("Discrete GPU Power-Switch for Surface Book 1");
++MODULE_LICENSE("GPL");
+-- 
+2.38.1
+
+From 815f2e9b4675edbbfe63d97e68a1d9484b7789b6 Mon Sep 17 00:00:00 2001
+From: Sachi King <nakato@nakato.io>
+Date: Tue, 5 Oct 2021 00:05:09 +1100
+Subject: [PATCH] Input: soc_button_array - support AMD variant Surface devices
+
+The power button on the AMD variant of the Surface Laptop uses the
+same MSHW0040 device ID as the 5th and later generation of Surface
+devices, however they report 0 for their OEM platform revision.  As the
+_DSM does not exist on the devices requiring special casing, check for
+the existance of the _DSM to determine if soc_button_array should be
+loaded.
+
+Fixes: c394159310d0 ("Input: soc_button_array - add support for newer surface devices")
+Co-developed-by: Maximilian Luz <luzmaximilian@gmail.com>
+
+Signed-off-by: Sachi King <nakato@nakato.io>
+Patchset: surface-button
+---
+ drivers/input/misc/soc_button_array.c | 33 +++++++--------------------
+ 1 file changed, 8 insertions(+), 25 deletions(-)
+
+diff --git a/drivers/input/misc/soc_button_array.c b/drivers/input/misc/soc_button_array.c
+index 09489380afda..0f02411a60f1 100644
+--- a/drivers/input/misc/soc_button_array.c
++++ b/drivers/input/misc/soc_button_array.c
+@@ -507,8 +507,8 @@ static const struct soc_device_data soc_device_MSHW0028 = {
+  * Both, the Surface Pro 4 (surfacepro3_button.c) and the above mentioned
+  * devices use MSHW0040 for power and volume buttons, however the way they
+  * have to be addressed differs. Make sure that we only load this drivers
+- * for the correct devices by checking the OEM Platform Revision provided by
+- * the _DSM method.
++ * for the correct devices by checking if the OEM Platform Revision DSM call
++ * exists.
+  */
+ #define MSHW0040_DSM_REVISION		0x01
+ #define MSHW0040_DSM_GET_OMPR		0x02	// get OEM Platform Revision
+@@ -519,31 +519,14 @@ static const guid_t MSHW0040_DSM_UUID =
+ static int soc_device_check_MSHW0040(struct device *dev)
+ {
+ 	acpi_handle handle = ACPI_HANDLE(dev);
+-	union acpi_object *result;
+-	u64 oem_platform_rev = 0;	// valid revisions are nonzero
+-
+-	// get OEM platform revision
+-	result = acpi_evaluate_dsm_typed(handle, &MSHW0040_DSM_UUID,
+-					 MSHW0040_DSM_REVISION,
+-					 MSHW0040_DSM_GET_OMPR, NULL,
+-					 ACPI_TYPE_INTEGER);
+-
+-	if (result) {
+-		oem_platform_rev = result->integer.value;
+-		ACPI_FREE(result);
+-	}
+-
+-	/*
+-	 * If the revision is zero here, the _DSM evaluation has failed. This
+-	 * indicates that we have a Pro 4 or Book 1 and this driver should not
+-	 * be used.
+-	 */
+-	if (oem_platform_rev == 0)
+-		return -ENODEV;
++	bool exists;
+ 
+-	dev_dbg(dev, "OEM Platform Revision %llu\n", oem_platform_rev);
++	// check if OEM platform revision DSM call exists
++	exists = acpi_check_dsm(handle, &MSHW0040_DSM_UUID,
++				MSHW0040_DSM_REVISION,
++				BIT(MSHW0040_DSM_GET_OMPR));
+ 
+-	return 0;
++	return exists ? 0 : -ENODEV;
+ }
+ 
+ /*
+-- 
+2.38.1
+
+From fe28f0103a42060e7dcb5a5597c569febfe1bd57 Mon Sep 17 00:00:00 2001
+From: Sachi King <nakato@nakato.io>
+Date: Tue, 5 Oct 2021 00:22:57 +1100
+Subject: [PATCH] platform/surface: surfacepro3_button: don't load on amd
+ variant
+
+The AMD variant of the Surface Laptop report 0 for their OEM platform
+revision.  The Surface devices that require the surfacepro3_button
+driver do not have the _DSM that gets the OEM platform revision.  If the
+method does not exist, load surfacepro3_button.
+
+Fixes: 64dd243d7356 ("platform/x86: surfacepro3_button: Fix device check")
+Co-developed-by: Maximilian Luz <luzmaximilian@gmail.com>
+
+Signed-off-by: Sachi King <nakato@nakato.io>
+Patchset: surface-button
+---
+ drivers/platform/surface/surfacepro3_button.c | 30 ++++---------------
+ 1 file changed, 6 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/platform/surface/surfacepro3_button.c b/drivers/platform/surface/surfacepro3_button.c
+index 242fb690dcaf..30eea54dbb47 100644
+--- a/drivers/platform/surface/surfacepro3_button.c
++++ b/drivers/platform/surface/surfacepro3_button.c
+@@ -149,7 +149,8 @@ static int surface_button_resume(struct device *dev)
+ /*
+  * Surface Pro 4 and Surface Book 2 / Surface Pro 2017 use the same device
+  * ID (MSHW0040) for the power/volume buttons. Make sure this is the right
+- * device by checking for the _DSM method and OEM Platform Revision.
++ * device by checking for the _DSM method and OEM Platform Revision DSM
++ * function.
+  *
+  * Returns true if the driver should bind to this device, i.e. the device is
+  * either MSWH0028 (Pro 3) or MSHW0040 on a Pro 4 or Book 1.
+@@ -157,30 +158,11 @@ static int surface_button_resume(struct device *dev)
+ static bool surface_button_check_MSHW0040(struct acpi_device *dev)
+ {
+ 	acpi_handle handle = dev->handle;
+-	union acpi_object *result;
+-	u64 oem_platform_rev = 0;	// valid revisions are nonzero
+-
+-	// get OEM platform revision
+-	result = acpi_evaluate_dsm_typed(handle, &MSHW0040_DSM_UUID,
+-					 MSHW0040_DSM_REVISION,
+-					 MSHW0040_DSM_GET_OMPR,
+-					 NULL, ACPI_TYPE_INTEGER);
+-
+-	/*
+-	 * If evaluating the _DSM fails, the method is not present. This means
+-	 * that we have either MSHW0028 or MSHW0040 on Pro 4 or Book 1, so we
+-	 * should use this driver. We use revision 0 indicating it is
+-	 * unavailable.
+-	 */
+-
+-	if (result) {
+-		oem_platform_rev = result->integer.value;
+-		ACPI_FREE(result);
+-	}
+-
+-	dev_dbg(&dev->dev, "OEM Platform Revision %llu\n", oem_platform_rev);
+ 
+-	return oem_platform_rev == 0;
++	// make sure that OEM platform revision DSM call does not exist
++	return !acpi_check_dsm(handle, &MSHW0040_DSM_UUID,
++			       MSHW0040_DSM_REVISION,
++			       BIT(MSHW0040_DSM_GET_OMPR));
+ }
+ 
+ 
+-- 
+2.38.1
+
+From 541e1e15be33eaa56fa5c4a94a962e07dde70afe Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Thu, 5 Nov 2020 13:09:45 +0100
+Subject: [PATCH] hid/multitouch: Turn off Type Cover keyboard backlight when
+ suspending
+
+The Type Cover for Microsoft Surface devices supports a special usb
+control request to disable or enable the built-in keyboard backlight.
+On Windows, this request happens when putting the device into suspend or
+resuming it, without it the backlight of the Type Cover will remain
+enabled for some time even though the computer is suspended, which looks
+weird to the user.
+
+So add support for this special usb control request to hid-multitouch,
+which is the driver that's handling the Type Cover.
+
+The reason we have to use a pm_notifier for this instead of the usual
+suspend/resume methods is that those won't get called in case the usb
+device is already autosuspended.
+
+Also, if the device is autosuspended, we have to briefly autoresume it
+in order to send the request. Doing that should be fine, the usb-core
+driver does something similar during suspend inside choose_wakeup().
+
+To make sure we don't send that request to every device but only to
+devices which support it, add a new quirk
+MT_CLS_WIN_8_MS_SURFACE_TYPE_COVER to hid-multitouch. For now this quirk
+is only enabled for the usb id of the Surface Pro 2017 Type Cover, which
+is where I confirmed that it's working.
+
+Patchset: surface-typecover
+---
+ drivers/hid/hid-multitouch.c | 100 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 98 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
+index 91a4d3fc30e0..458537bf4a8e 100644
+--- a/drivers/hid/hid-multitouch.c
++++ b/drivers/hid/hid-multitouch.c
+@@ -34,7 +34,10 @@
+ #include <linux/device.h>
+ #include <linux/hid.h>
+ #include <linux/module.h>
++#include <linux/pm_runtime.h>
+ #include <linux/slab.h>
++#include <linux/suspend.h>
++#include <linux/usb.h>
+ #include <linux/input/mt.h>
+ #include <linux/jiffies.h>
+ #include <linux/string.h>
+@@ -47,6 +50,7 @@ MODULE_DESCRIPTION("HID multitouch panels");
+ MODULE_LICENSE("GPL");
+ 
+ #include "hid-ids.h"
++#include "usbhid/usbhid.h"
+ 
+ /* quirks to control the device */
+ #define MT_QUIRK_NOT_SEEN_MEANS_UP	BIT(0)
+@@ -71,12 +75,15 @@ MODULE_LICENSE("GPL");
+ #define MT_QUIRK_SEPARATE_APP_REPORT	BIT(19)
+ #define MT_QUIRK_FORCE_MULTI_INPUT	BIT(20)
+ #define MT_QUIRK_DISABLE_WAKEUP		BIT(21)
++#define MT_QUIRK_HAS_TYPE_COVER_BACKLIGHT	BIT(22)
+ 
+ #define MT_INPUTMODE_TOUCHSCREEN	0x02
+ #define MT_INPUTMODE_TOUCHPAD		0x03
+ 
+ #define MT_BUTTONTYPE_CLICKPAD		0
+ 
++#define MS_TYPE_COVER_FEATURE_REPORT_USAGE	0xff050086
++
+ enum latency_mode {
+ 	HID_LATENCY_NORMAL = 0,
+ 	HID_LATENCY_HIGH = 1,
+@@ -168,6 +175,8 @@ struct mt_device {
+ 
+ 	struct list_head applications;
+ 	struct list_head reports;
++
++	struct notifier_block pm_notifier;
+ };
+ 
+ static void mt_post_parse_default_settings(struct mt_device *td,
+@@ -212,6 +221,7 @@ static void mt_post_parse(struct mt_device *td, struct mt_application *app);
+ #define MT_CLS_GOOGLE				0x0111
+ #define MT_CLS_RAZER_BLADE_STEALTH		0x0112
+ #define MT_CLS_SMART_TECH			0x0113
++#define MT_CLS_WIN_8_MS_SURFACE_TYPE_COVER	0x0114
+ 
+ #define MT_DEFAULT_MAXCONTACT	10
+ #define MT_MAX_MAXCONTACT	250
+@@ -396,6 +406,16 @@ static const struct mt_class mt_classes[] = {
+ 			MT_QUIRK_CONTACT_CNT_ACCURATE |
+ 			MT_QUIRK_SEPARATE_APP_REPORT,
+ 	},
++	{ .name = MT_CLS_WIN_8_MS_SURFACE_TYPE_COVER,
++		.quirks = MT_QUIRK_HAS_TYPE_COVER_BACKLIGHT |
++			MT_QUIRK_ALWAYS_VALID |
++			MT_QUIRK_IGNORE_DUPLICATES |
++			MT_QUIRK_HOVERING |
++			MT_QUIRK_CONTACT_CNT_ACCURATE |
++			MT_QUIRK_STICKY_FINGERS |
++			MT_QUIRK_WIN8_PTP_BUTTONS,
++		.export_all_inputs = true
++	},
+ 	{ }
+ };
+ 
+@@ -1706,6 +1726,69 @@ static void mt_expired_timeout(struct timer_list *t)
+ 	clear_bit_unlock(MT_IO_FLAGS_RUNNING, &td->mt_io_flags);
+ }
+ 
++static void get_type_cover_backlight_field(struct hid_device *hdev,
++					   struct hid_field **field)
++{
++	struct hid_report_enum *rep_enum;
++	struct hid_report *rep;
++	struct hid_field *cur_field;
++	int i, j;
++
++	rep_enum = &hdev->report_enum[HID_FEATURE_REPORT];
++	list_for_each_entry(rep, &rep_enum->report_list, list) {
++		for (i = 0; i < rep->maxfield; i++) {
++			cur_field = rep->field[i];
++
++			for (j = 0; j < cur_field->maxusage; j++) {
++				if (cur_field->usage[j].hid
++				    == MS_TYPE_COVER_FEATURE_REPORT_USAGE) {
++					*field = cur_field;
++					return;
++				}
++			}
++		}
++	}
++}
++
++static void update_keyboard_backlight(struct hid_device *hdev, bool enabled)
++{
++	struct usb_device *udev = hid_to_usb_dev(hdev);
++	struct hid_field *field = NULL;
++
++	/* Wake up the device in case it's already suspended */
++	pm_runtime_get_sync(&udev->dev);
++
++	get_type_cover_backlight_field(hdev, &field);
++	if (!field) {
++		hid_err(hdev, "couldn't find backlight field\n");
++		goto out;
++	}
++
++	field->value[field->index] = enabled ? 0x01ff00ff : 0x00ff00ff;
++	hid_hw_request(hdev, field->report, HID_REQ_SET_REPORT);
++
++out:
++	pm_runtime_put_sync(&udev->dev);
++}
++
++static int mt_pm_notifier(struct notifier_block *notifier,
++			  unsigned long pm_event,
++			  void *unused)
++{
++	struct mt_device *td =
++		container_of(notifier, struct mt_device, pm_notifier);
++	struct hid_device *hdev = td->hdev;
++
++	if (td->mtclass.quirks & MT_QUIRK_HAS_TYPE_COVER_BACKLIGHT) {
++		if (pm_event == PM_SUSPEND_PREPARE)
++			update_keyboard_backlight(hdev, 0);
++		else if (pm_event == PM_POST_SUSPEND)
++			update_keyboard_backlight(hdev, 1);
++	}
++
++	return NOTIFY_DONE;
++}
++
+ static int mt_probe(struct hid_device *hdev, const struct hid_device_id *id)
+ {
+ 	int ret, i;
+@@ -1729,6 +1812,9 @@ static int mt_probe(struct hid_device *hdev, const struct hid_device_id *id)
+ 	td->inputmode_value = MT_INPUTMODE_TOUCHSCREEN;
+ 	hid_set_drvdata(hdev, td);
+ 
++	td->pm_notifier.notifier_call = mt_pm_notifier;
++	register_pm_notifier(&td->pm_notifier);
++
+ 	INIT_LIST_HEAD(&td->applications);
+ 	INIT_LIST_HEAD(&td->reports);
+ 
+@@ -1758,15 +1844,19 @@ static int mt_probe(struct hid_device *hdev, const struct hid_device_id *id)
+ 	timer_setup(&td->release_timer, mt_expired_timeout, 0);
+ 
+ 	ret = hid_parse(hdev);
+-	if (ret != 0)
++	if (ret != 0) {
++		unregister_pm_notifier(&td->pm_notifier);
+ 		return ret;
++	}
+ 
+ 	if (mtclass->quirks & MT_QUIRK_FIX_CONST_CONTACT_ID)
+ 		mt_fix_const_fields(hdev, HID_DG_CONTACTID);
+ 
+ 	ret = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
+-	if (ret)
++	if (ret) {
++		unregister_pm_notifier(&td->pm_notifier);
+ 		return ret;
++	}
+ 
+ 	ret = sysfs_create_group(&hdev->dev.kobj, &mt_attribute_group);
+ 	if (ret)
+@@ -1818,6 +1908,7 @@ static void mt_remove(struct hid_device *hdev)
+ {
+ 	struct mt_device *td = hid_get_drvdata(hdev);
+ 
++	unregister_pm_notifier(&td->pm_notifier);
+ 	del_timer_sync(&td->release_timer);
+ 
+ 	sysfs_remove_group(&hdev->dev.kobj, &mt_attribute_group);
+@@ -2191,6 +2282,11 @@ static const struct hid_device_id mt_devices[] = {
+ 		MT_USB_DEVICE(USB_VENDOR_ID_XIROKU,
+ 			USB_DEVICE_ID_XIROKU_CSR2) },
+ 
++	/* Microsoft Surface type cover */
++	{ .driver_data = MT_CLS_WIN_8_MS_SURFACE_TYPE_COVER,
++		HID_DEVICE(HID_BUS_ANY, HID_GROUP_ANY,
++			USB_VENDOR_ID_MICROSOFT, 0x09c0) },
++
+ 	/* Google MT devices */
+ 	{ .driver_data = MT_CLS_GOOGLE,
+ 		HID_DEVICE(HID_BUS_ANY, HID_GROUP_ANY, USB_VENDOR_ID_GOOGLE,
+-- 
+2.38.1
+
+From 58dad80e62fcdf744ac814db4ff1474f2d988863 Mon Sep 17 00:00:00 2001
+From: PJungkamp <p.jungkamp@gmail.com>
+Date: Fri, 25 Feb 2022 12:04:25 +0100
+Subject: [PATCH] hid/multitouch: Add support for surface pro type cover tablet
+ switch
+
+The Surface Pro Type Cover has several non standard HID usages in it's
+hid report descriptor.
+I noticed that, upon folding the typecover back, a vendor specific range
+of 4 32 bit integer hid usages is transmitted.
+Only the first byte of the message seems to convey reliable information
+about the keyboard state.
+
+0x22 => Normal (keys enabled)
+0x33 => Folded back (keys disabled)
+0x53 => Rotated left/right side up (keys disabled)
+0x13 => Cover closed (keys disabled)
+0x43 => Folded back and Tablet upside down (keys disabled)
+This list may not be exhaustive.
+
+The tablet mode switch will be disabled for a value of 0x22 and enabled
+on any other value.
+
+Patchset: surface-typecover
+---
+ drivers/hid/hid-multitouch.c | 148 +++++++++++++++++++++++++++++------
+ 1 file changed, 122 insertions(+), 26 deletions(-)
+
+diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
+index 458537bf4a8e..3d7d002a662f 100644
+--- a/drivers/hid/hid-multitouch.c
++++ b/drivers/hid/hid-multitouch.c
+@@ -76,6 +76,7 @@ MODULE_LICENSE("GPL");
+ #define MT_QUIRK_FORCE_MULTI_INPUT	BIT(20)
+ #define MT_QUIRK_DISABLE_WAKEUP		BIT(21)
+ #define MT_QUIRK_HAS_TYPE_COVER_BACKLIGHT	BIT(22)
++#define MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH	BIT(23)
+ 
+ #define MT_INPUTMODE_TOUCHSCREEN	0x02
+ #define MT_INPUTMODE_TOUCHPAD		0x03
+@@ -83,6 +84,8 @@ MODULE_LICENSE("GPL");
+ #define MT_BUTTONTYPE_CLICKPAD		0
+ 
+ #define MS_TYPE_COVER_FEATURE_REPORT_USAGE	0xff050086
++#define MS_TYPE_COVER_TABLET_MODE_SWITCH_USAGE	0xff050072
++#define MS_TYPE_COVER_APPLICATION	0xff050050
+ 
+ enum latency_mode {
+ 	HID_LATENCY_NORMAL = 0,
+@@ -408,6 +411,7 @@ static const struct mt_class mt_classes[] = {
+ 	},
+ 	{ .name = MT_CLS_WIN_8_MS_SURFACE_TYPE_COVER,
+ 		.quirks = MT_QUIRK_HAS_TYPE_COVER_BACKLIGHT |
++			MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH |
+ 			MT_QUIRK_ALWAYS_VALID |
+ 			MT_QUIRK_IGNORE_DUPLICATES |
+ 			MT_QUIRK_HOVERING |
+@@ -1368,6 +1372,9 @@ static int mt_input_mapping(struct hid_device *hdev, struct hid_input *hi,
+ 	    field->application != HID_CP_CONSUMER_CONTROL &&
+ 	    field->application != HID_GD_WIRELESS_RADIO_CTLS &&
+ 	    field->application != HID_GD_SYSTEM_MULTIAXIS &&
++	    !(field->application == MS_TYPE_COVER_APPLICATION &&
++	      application->quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH &&
++	      usage->hid == MS_TYPE_COVER_TABLET_MODE_SWITCH_USAGE) &&
+ 	    !(field->application == HID_VD_ASUS_CUSTOM_MEDIA_KEYS &&
+ 	      application->quirks & MT_QUIRK_ASUS_CUSTOM_UP))
+ 		return -1;
+@@ -1395,6 +1402,21 @@ static int mt_input_mapping(struct hid_device *hdev, struct hid_input *hi,
+ 		return 1;
+ 	}
+ 
++	/*
++	 * The Microsoft Surface Pro Typecover has a non-standard HID
++	 * tablet mode switch on a vendor specific usage page with vendor
++	 * specific usage.
++	 */
++	if (field->application == MS_TYPE_COVER_APPLICATION &&
++	    application->quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH &&
++	    usage->hid == MS_TYPE_COVER_TABLET_MODE_SWITCH_USAGE) {
++		usage->type = EV_SW;
++		usage->code = SW_TABLET_MODE;
++		*max = SW_MAX;
++		*bit = hi->input->swbit;
++		return 1;
++	}
++
+ 	if (rdata->is_mt_collection)
+ 		return mt_touch_input_mapping(hdev, hi, field, usage, bit, max,
+ 					      application);
+@@ -1416,6 +1438,7 @@ static int mt_input_mapped(struct hid_device *hdev, struct hid_input *hi,
+ {
+ 	struct mt_device *td = hid_get_drvdata(hdev);
+ 	struct mt_report_data *rdata;
++	struct input_dev *input;
+ 
+ 	rdata = mt_find_report_data(td, field->report);
+ 	if (rdata && rdata->is_mt_collection) {
+@@ -1423,6 +1446,19 @@ static int mt_input_mapped(struct hid_device *hdev, struct hid_input *hi,
+ 		return -1;
+ 	}
+ 
++	/*
++	 * We own an input device which acts as a tablet mode switch for
++	 * the Surface Pro Typecover.
++	 */
++	if (field->application == MS_TYPE_COVER_APPLICATION &&
++	    rdata->application->quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH &&
++	    usage->hid == MS_TYPE_COVER_TABLET_MODE_SWITCH_USAGE) {
++		input = hi->input;
++		input_set_capability(input, EV_SW, SW_TABLET_MODE);
++		input_report_switch(input, SW_TABLET_MODE, 0);
++		return -1;
++	}
++
+ 	/* let hid-core decide for the others */
+ 	return 0;
+ }
+@@ -1432,11 +1468,21 @@ static int mt_event(struct hid_device *hid, struct hid_field *field,
+ {
+ 	struct mt_device *td = hid_get_drvdata(hid);
+ 	struct mt_report_data *rdata;
++	struct input_dev *input;
+ 
+ 	rdata = mt_find_report_data(td, field->report);
+ 	if (rdata && rdata->is_mt_collection)
+ 		return mt_touch_event(hid, field, usage, value);
+ 
++	if (field->application == MS_TYPE_COVER_APPLICATION &&
++	    rdata->application->quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH &&
++	    usage->hid == MS_TYPE_COVER_TABLET_MODE_SWITCH_USAGE) {
++		input = field->hidinput->input;
++		input_report_switch(input, SW_TABLET_MODE, (value & 0xFF) != 0x22);
++		input_sync(input);
++		return 1;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -1589,6 +1635,42 @@ static void mt_post_parse(struct mt_device *td, struct mt_application *app)
+ 		app->quirks &= ~MT_QUIRK_CONTACT_CNT_ACCURATE;
+ }
+ 
++static int get_type_cover_field(struct hid_report_enum *rep_enum,
++				struct hid_field **field, int usage)
++{
++	struct hid_report *rep;
++	struct hid_field *cur_field;
++	int i, j;
++
++	list_for_each_entry(rep, &rep_enum->report_list, list) {
++		for (i = 0; i < rep->maxfield; i++) {
++			cur_field = rep->field[i];
++			if (cur_field->application != MS_TYPE_COVER_APPLICATION)
++				continue;
++			for (j = 0; j < cur_field->maxusage; j++) {
++				if (cur_field->usage[j].hid == usage) {
++					*field = cur_field;
++					return true;
++				}
++			}
++		}
++	}
++	return false;
++}
++
++static void request_type_cover_tablet_mode_switch(struct hid_device *hdev)
++{
++	struct hid_field *field;
++
++	if (get_type_cover_field(&hdev->report_enum[HID_INPUT_REPORT],
++				 &field,
++				 MS_TYPE_COVER_TABLET_MODE_SWITCH_USAGE)) {
++		hid_hw_request(hdev, field->report, HID_REQ_GET_REPORT);
++	} else {
++		hid_err(hdev, "couldn't find tablet mode field\n");
++	}
++}
++
+ static int mt_input_configured(struct hid_device *hdev, struct hid_input *hi)
+ {
+ 	struct mt_device *td = hid_get_drvdata(hdev);
+@@ -1638,6 +1720,13 @@ static int mt_input_configured(struct hid_device *hdev, struct hid_input *hi)
+ 		/* force BTN_STYLUS to allow tablet matching in udev */
+ 		__set_bit(BTN_STYLUS, hi->input->keybit);
+ 		break;
++	case MS_TYPE_COVER_APPLICATION:
++		if (td->mtclass.quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH) {
++			suffix = "Tablet Mode Switch";
++			request_type_cover_tablet_mode_switch(hdev);
++			break;
++		}
++		fallthrough;
+ 	default:
+ 		suffix = "UNKNOWN";
+ 		break;
+@@ -1726,30 +1815,6 @@ static void mt_expired_timeout(struct timer_list *t)
+ 	clear_bit_unlock(MT_IO_FLAGS_RUNNING, &td->mt_io_flags);
+ }
+ 
+-static void get_type_cover_backlight_field(struct hid_device *hdev,
+-					   struct hid_field **field)
+-{
+-	struct hid_report_enum *rep_enum;
+-	struct hid_report *rep;
+-	struct hid_field *cur_field;
+-	int i, j;
+-
+-	rep_enum = &hdev->report_enum[HID_FEATURE_REPORT];
+-	list_for_each_entry(rep, &rep_enum->report_list, list) {
+-		for (i = 0; i < rep->maxfield; i++) {
+-			cur_field = rep->field[i];
+-
+-			for (j = 0; j < cur_field->maxusage; j++) {
+-				if (cur_field->usage[j].hid
+-				    == MS_TYPE_COVER_FEATURE_REPORT_USAGE) {
+-					*field = cur_field;
+-					return;
+-				}
+-			}
+-		}
+-	}
+-}
+-
+ static void update_keyboard_backlight(struct hid_device *hdev, bool enabled)
+ {
+ 	struct usb_device *udev = hid_to_usb_dev(hdev);
+@@ -1758,8 +1823,9 @@ static void update_keyboard_backlight(struct hid_device *hdev, bool enabled)
+ 	/* Wake up the device in case it's already suspended */
+ 	pm_runtime_get_sync(&udev->dev);
+ 
+-	get_type_cover_backlight_field(hdev, &field);
+-	if (!field) {
++	if (!get_type_cover_field(&hdev->report_enum[HID_FEATURE_REPORT],
++				  &field,
++				  MS_TYPE_COVER_FEATURE_REPORT_USAGE)) {
+ 		hid_err(hdev, "couldn't find backlight field\n");
+ 		goto out;
+ 	}
+@@ -1885,13 +1951,24 @@ static int mt_suspend(struct hid_device *hdev, pm_message_t state)
+ 
+ static int mt_reset_resume(struct hid_device *hdev)
+ {
++	struct mt_device *td = hid_get_drvdata(hdev);
++
+ 	mt_release_contacts(hdev);
+ 	mt_set_modes(hdev, HID_LATENCY_NORMAL, true, true);
++
++	/* Request an update on the typecover folding state on resume
++	 * after reset.
++	 */
++	if (td->mtclass.quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH)
++		request_type_cover_tablet_mode_switch(hdev);
++
+ 	return 0;
+ }
+ 
+ static int mt_resume(struct hid_device *hdev)
+ {
++	struct mt_device *td = hid_get_drvdata(hdev);
++
+ 	/* Some Elan legacy devices require SET_IDLE to be set on resume.
+ 	 * It should be safe to send it to other devices too.
+ 	 * Tested on 3M, Stantum, Cypress, Zytronic, eGalax, and Elan panels. */
+@@ -1900,6 +1977,10 @@ static int mt_resume(struct hid_device *hdev)
+ 
+ 	mt_set_modes(hdev, HID_LATENCY_NORMAL, true, true);
+ 
++	/* Request an update on the typecover folding state on resume. */
++	if (td->mtclass.quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH)
++		request_type_cover_tablet_mode_switch(hdev);
++
+ 	return 0;
+ }
+ #endif
+@@ -1907,6 +1988,21 @@ static int mt_resume(struct hid_device *hdev)
+ static void mt_remove(struct hid_device *hdev)
+ {
+ 	struct mt_device *td = hid_get_drvdata(hdev);
++	struct hid_field *field;
++	struct input_dev *input;
++
++	/* Reset tablet mode switch on disconnect. */
++	if (td->mtclass.quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH) {
++		if (get_type_cover_field(&hdev->report_enum[HID_INPUT_REPORT],
++					 &field,
++					 MS_TYPE_COVER_TABLET_MODE_SWITCH_USAGE)) {
++			input = field->hidinput->input;
++			input_report_switch(input, SW_TABLET_MODE, 0);
++			input_sync(input);
++		} else {
++			hid_err(hdev, "couldn't find tablet mode field\n");
++		}
++	}
+ 
+ 	unregister_pm_notifier(&td->pm_notifier);
+ 	del_timer_sync(&td->release_timer);
+-- 
+2.38.1
+
+From 54d11a345900161774cb54aed54f1c8d306b299f Mon Sep 17 00:00:00 2001
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Sun, 10 Oct 2021 20:56:57 +0200
+Subject: [PATCH] ACPI: delay enumeration of devices with a _DEP pointing to an
+ INT3472 device
+
+The clk and regulator frameworks expect clk/regulator consumer-devices
+to have info about the consumed clks/regulators described in the device's
+fw_node.
+
+To work around cases where this info is not present in the firmware tables,
+which is often the case on x86/ACPI devices, both frameworks allow the
+provider-driver to attach info about consumers to the clks/regulators
+when registering these.
+
+This causes problems with the probe ordering wrt drivers for consumers
+of these clks/regulators. Since the lookups are only registered when the
+provider-driver binds, trying to get these clks/regulators before then
+results in a -ENOENT error for clks and a dummy regulator for regulators.
+
+One case where we hit this issue is camera sensors such as e.g. the OV8865
+sensor found on the Microsoft Surface Go. The sensor uses clks, regulators
+and GPIOs provided by a TPS68470 PMIC which is described in an INT3472
+ACPI device. There is special platform code handling this and setting
+platform_data with the necessary consumer info on the MFD cells
+instantiated for the PMIC under: drivers/platform/x86/intel/int3472.
+
+For this to work properly the ov8865 driver must not bind to the I2C-client
+for the OV8865 sensor until after the TPS68470 PMIC gpio, regulator and
+clk MFD cells have all been fully setup.
+
+The OV8865 on the Microsoft Surface Go is just one example, all X86
+devices using the Intel IPU3 camera block found on recent Intel SoCs
+have similar issues where there is an INT3472 HID ACPI-device, which
+describes the clks and regulators, and the driver for this INT3472 device
+must be fully initialized before the sensor driver (any sensor driver)
+binds for things to work properly.
+
+On these devices the ACPI nodes describing the sensors all have a _DEP
+dependency on the matching INT3472 ACPI device (there is one per sensor).
+
+This allows solving the probe-ordering problem by delaying the enumeration
+(instantiation of the I2C-client in the ov8865 example) of ACPI-devices
+which have a _DEP dependency on an INT3472 device.
+
+The new acpi_dev_ready_for_enumeration() helper used for this is also
+exported because for devices, which have the enumeration_by_parent flag
+set, the parent-driver will do its own scan of child ACPI devices and
+it will try to enumerate those during its probe(). Code doing this such
+as e.g. the i2c-core-acpi.c code must call this new helper to ensure
+that it too delays the enumeration until all the _DEP dependencies are
+met on devices which have the new honor_deps flag set.
+
+Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+Patchset: cameras
+---
+ drivers/acpi/scan.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/acpi/scan.c b/drivers/acpi/scan.c
+index adfeb5770efd..a355c64899f8 100644
+--- a/drivers/acpi/scan.c
++++ b/drivers/acpi/scan.c
+@@ -2109,6 +2109,9 @@ static acpi_status acpi_bus_check_add_2(acpi_handle handle, u32 lvl_not_used,
+ 
+ static void acpi_default_enumeration(struct acpi_device *device)
+ {
++	if (!acpi_dev_ready_for_enumeration(device))
++		return;
++
+ 	/*
+ 	 * Do not enumerate devices with enumeration_by_parent flag set as
+ 	 * they will be enumerated by their respective parents.
+-- 
+2.38.1
+
+From b80b4f41092ad66d4b56f8f80f38085b2ccbc415 Mon Sep 17 00:00:00 2001
+From: zouxiaoh <xiaohong.zou@intel.com>
+Date: Fri, 25 Jun 2021 08:52:59 +0800
+Subject: [PATCH] iommu: intel-ipu: use IOMMU passthrough mode for Intel IPUs
+
+Intel IPU(Image Processing Unit) has its own (IO)MMU hardware,
+The IPU driver allocates its own page table that is not mapped
+via the DMA, and thus the Intel IOMMU driver blocks access giving
+this error: DMAR: DRHD: handling fault status reg 3 DMAR:
+[DMA Read] Request device [00:05.0] PASID ffffffff
+fault addr 76406000 [fault reason 06] PTE Read access is not set
+As IPU is not an external facing device which is not risky, so use
+IOMMU passthrough mode for Intel IPUs.
+
+Change-Id: I6dcccdadac308cf42e20a18e1b593381391e3e6b
+Depends-On: Iacd67578e8c6a9b9ac73285f52b4081b72fb68a6
+Tracked-On: #JIITL8-411
+Signed-off-by: Bingbu Cao <bingbu.cao@intel.com>
+Signed-off-by: zouxiaoh <xiaohong.zou@intel.com>
+Signed-off-by: Xu Chongyang <chongyang.xu@intel.com>
+Patchset: cameras
+---
+ drivers/iommu/intel/iommu.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/drivers/iommu/intel/iommu.c b/drivers/iommu/intel/iommu.c
+index 5246e3f25ac1..646a84a545e6 100644
+--- a/drivers/iommu/intel/iommu.c
++++ b/drivers/iommu/intel/iommu.c
+@@ -37,6 +37,12 @@
+ #define IS_GFX_DEVICE(pdev) ((pdev->class >> 16) == PCI_BASE_CLASS_DISPLAY)
+ #define IS_USB_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_SERIAL_USB)
+ #define IS_ISA_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_BRIDGE_ISA)
++#define IS_INTEL_IPU(pdev) ((pdev)->vendor == PCI_VENDOR_ID_INTEL &&	\
++			   ((pdev)->device == 0x9a19 ||		\
++			    (pdev)->device == 0x9a39 ||		\
++			    (pdev)->device == 0x4e19 ||		\
++			    (pdev)->device == 0x465d ||		\
++			    (pdev)->device == 0x1919))
+ #define IS_IPTS(pdev) ((pdev)->vendor == PCI_VENDOR_ID_INTEL &&	\
+ 			    ((pdev)->device == 0x9d3e))
+ #define IS_AZALIA(pdev) ((pdev)->vendor == 0x8086 && (pdev)->device == 0x3a3e)
+@@ -284,12 +290,14 @@ EXPORT_SYMBOL_GPL(intel_iommu_enabled);
+ 
+ static int dmar_map_gfx = 1;
+ static int dmar_map_ipts = 1;
++static int dmar_map_ipu = 1;
+ static int intel_iommu_superpage = 1;
+ static int iommu_identity_mapping;
+ static int iommu_skip_te_disable;
+ 
+ #define IDENTMAP_GFX		2
+ #define IDENTMAP_AZALIA		4
++#define IDENTMAP_IPU		8
+ #define IDENTMAP_IPTS		16
+ 
+ const struct iommu_ops intel_iommu_ops;
+@@ -2606,6 +2614,9 @@ static int device_def_domain_type(struct device *dev)
+ 		if ((iommu_identity_mapping & IDENTMAP_GFX) && IS_GFX_DEVICE(pdev))
+ 			return IOMMU_DOMAIN_IDENTITY;
+ 
++		if ((iommu_identity_mapping & IDENTMAP_IPU) && IS_INTEL_IPU(pdev))
++			return IOMMU_DOMAIN_IDENTITY;
++
+ 		if ((iommu_identity_mapping & IDENTMAP_IPTS) && IS_IPTS(pdev))
+ 			return IOMMU_DOMAIN_IDENTITY;
+ 	}
+@@ -2997,6 +3008,9 @@ static int __init init_dmars(void)
+ 	if (!dmar_map_gfx)
+ 		iommu_identity_mapping |= IDENTMAP_GFX;
+ 
++	if (!dmar_map_ipu)
++		iommu_identity_mapping |= IDENTMAP_IPU;
++
+ 	if (!dmar_map_ipts)
+ 		iommu_identity_mapping |= IDENTMAP_IPTS;
+ 
+@@ -4803,6 +4817,18 @@ static void quirk_iommu_igfx(struct pci_dev *dev)
+ 	dmar_map_gfx = 0;
+ }
+ 
++static void quirk_iommu_ipu(struct pci_dev *dev)
++{
++	if (!IS_INTEL_IPU(dev))
++		return;
++
++	if (risky_device(dev))
++		return;
++
++	pci_info(dev, "Passthrough IOMMU for integrated Intel IPU\n");
++	dmar_map_ipu = 0;
++}
++
+ static void quirk_iommu_ipts(struct pci_dev *dev)
+ {
+ 	if (!IS_IPTS(dev))
+@@ -4814,6 +4840,7 @@ static void quirk_iommu_ipts(struct pci_dev *dev)
+ 	pci_info(dev, "Passthrough IOMMU for IPTS\n");
+ 	dmar_map_ipts = 0;
+ }
++
+ /* G4x/GM45 integrated gfx dmar support is totally busted. */
+ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x2a40, quirk_iommu_igfx);
+ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x2e00, quirk_iommu_igfx);
+@@ -4849,6 +4876,9 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x1632, quirk_iommu_igfx);
+ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x163A, quirk_iommu_igfx);
+ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x163D, quirk_iommu_igfx);
+ 
++/* disable IPU dmar support */
++DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, PCI_ANY_ID, quirk_iommu_ipu);
++
+ /* disable IPTS dmar support */
+ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x9D3E, quirk_iommu_ipts);
+ 
+-- 
+2.38.1
+
+From cdc76dfa3d621ac8be39f870cd2b9dcd72b46347 Mon Sep 17 00:00:00 2001
+From: Daniel Scally <djrscally@gmail.com>
+Date: Sun, 10 Oct 2021 20:57:02 +0200
+Subject: [PATCH] platform/x86: int3472: Enable I2c daisy chain
+
+The TPS68470 PMIC has an I2C passthrough mode through which I2C traffic
+can be forwarded to a device connected to the PMIC as though it were
+connected directly to the system bus. Enable this mode when the chip
+is initialised.
+
+Signed-off-by: Daniel Scally <djrscally@gmail.com>
+Patchset: cameras
+---
+ drivers/platform/x86/intel/int3472/tps68470.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/platform/x86/intel/int3472/tps68470.c b/drivers/platform/x86/intel/int3472/tps68470.c
+index 22f61b47f9e5..e1de1ff40bba 100644
+--- a/drivers/platform/x86/intel/int3472/tps68470.c
++++ b/drivers/platform/x86/intel/int3472/tps68470.c
+@@ -45,6 +45,13 @@ static int tps68470_chip_init(struct device *dev, struct regmap *regmap)
+ 		return ret;
+ 	}
+ 
++	/* Enable I2C daisy chain */
++	ret = regmap_write(regmap, TPS68470_REG_S_I2C_CTL, 0x03);
++	if (ret) {
++		dev_err(dev, "Failed to enable i2c daisy chain\n");
++		return ret;
++	}
++
+ 	dev_info(dev, "TPS68470 REVID: 0x%02x\n", version);
+ 
+ 	return 0;
+-- 
+2.38.1
+
+From d3b627d83ca0652b6967626e3159215ce0dfa2b9 Mon Sep 17 00:00:00 2001
+From: Daniel Scally <djrscally@gmail.com>
+Date: Thu, 28 Oct 2021 21:55:16 +0100
+Subject: [PATCH] media: i2c: Add driver for DW9719 VCM
+
+Add a driver for the DW9719 VCM. The driver creates a v4l2 subdevice
+and registers a control to set the desired focus.
+
+Signed-off-by: Daniel Scally <djrscally@gmail.com>
+Patchset: cameras
+---
+ MAINTAINERS                |   7 +
+ drivers/media/i2c/Kconfig  |  11 +
+ drivers/media/i2c/Makefile |   1 +
+ drivers/media/i2c/dw9719.c | 427 +++++++++++++++++++++++++++++++++++++
+ 4 files changed, 446 insertions(+)
+ create mode 100644 drivers/media/i2c/dw9719.c
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 72b9654f764c..cecb621a6581 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -6250,6 +6250,13 @@ T:	git git://linuxtv.org/media_tree.git
+ F:	Documentation/devicetree/bindings/media/i2c/dongwoon,dw9714.txt
+ F:	drivers/media/i2c/dw9714.c
+ 
++DONGWOON DW9719 LENS VOICE COIL DRIVER
++M:	Daniel Scally <djrscally@gmail.com>
++L:	linux-media@vger.kernel.org
++S:	Maintained
++T:	git git://linuxtv.org/media_tree.git
++F:	drivers/media/i2c/dw9719.c
++
+ DONGWOON DW9768 LENS VOICE COIL DRIVER
+ M:	Dongchun Zhu <dongchun.zhu@mediatek.com>
+ L:	linux-media@vger.kernel.org
+diff --git a/drivers/media/i2c/Kconfig b/drivers/media/i2c/Kconfig
+index 7806d4b81716..98d081efeef7 100644
+--- a/drivers/media/i2c/Kconfig
++++ b/drivers/media/i2c/Kconfig
+@@ -821,6 +821,17 @@ config VIDEO_DW9714
+ 	  capability. This is designed for linear control of
+ 	  voice coil motors, controlled via I2C serial interface.
+ 
++config VIDEO_DW9719
++	tristate "DW9719 lens voice coil support"
++	depends on I2C && VIDEO_V4L2
++	select MEDIA_CONTROLLER
++	select VIDEO_V4L2_SUBDEV_API
++	select V4L2_ASYNC
++	help
++	  This is a driver for the DW9719 camera lens voice coil.
++	  This is designed for linear control of  voice coil motors,
++	  controlled via I2C serial interface.
++
+ config VIDEO_DW9768
+ 	tristate "DW9768 lens voice coil support"
+ 	depends on I2C && VIDEO_DEV
+diff --git a/drivers/media/i2c/Makefile b/drivers/media/i2c/Makefile
+index 0a2933103dd9..b82a07c76388 100644
+--- a/drivers/media/i2c/Makefile
++++ b/drivers/media/i2c/Makefile
+@@ -30,6 +30,7 @@ obj-$(CONFIG_VIDEO_CS5345) += cs5345.o
+ obj-$(CONFIG_VIDEO_CS53L32A) += cs53l32a.o
+ obj-$(CONFIG_VIDEO_CX25840) += cx25840/
+ obj-$(CONFIG_VIDEO_DW9714) += dw9714.o
++obj-$(CONFIG_VIDEO_DW9719) += dw9719.o
+ obj-$(CONFIG_VIDEO_DW9768) += dw9768.o
+ obj-$(CONFIG_VIDEO_DW9807_VCM) += dw9807-vcm.o
+ obj-$(CONFIG_VIDEO_ET8EK8) += et8ek8/
+diff --git a/drivers/media/i2c/dw9719.c b/drivers/media/i2c/dw9719.c
+new file mode 100644
+index 000000000000..8451c75b696b
+--- /dev/null
++++ b/drivers/media/i2c/dw9719.c
+@@ -0,0 +1,427 @@
++// SPDX-License-Identifier: GPL-2.0
++// Copyright (c) 2012 Intel Corporation
++
++/*
++ * Based on linux/modules/camera/drivers/media/i2c/imx/dw9719.c in this repo:
++ * https://github.com/ZenfoneArea/android_kernel_asus_zenfone5
++ */
++
++#include <asm/unaligned.h>
++
++#include <linux/delay.h>
++#include <linux/i2c.h>
++#include <linux/pm_runtime.h>
++#include <linux/regulator/consumer.h>
++#include <linux/types.h>
++
++#include <media/v4l2-common.h>
++#include <media/v4l2-ctrls.h>
++#include <media/v4l2-subdev.h>
++
++#define DW9719_MAX_FOCUS_POS	1023
++#define DW9719_CTRL_STEPS	16
++#define DW9719_CTRL_DELAY_US	1000
++#define DELAY_MAX_PER_STEP_NS	(1000000 * 1023)
++
++#define DW9719_INFO			0
++#define DW9719_ID			0xF1
++#define DW9719_CONTROL			2
++#define DW9719_VCM_CURRENT		3
++
++#define DW9719_MODE			6
++#define DW9719_VCM_FREQ			7
++
++#define DW9719_MODE_SAC3		0x40
++#define DW9719_DEFAULT_VCM_FREQ		0x60
++#define DW9719_ENABLE_RINGING		0x02
++
++#define NUM_REGULATORS			2
++
++#define to_dw9719_device(x) container_of(x, struct dw9719_device, sd)
++
++struct dw9719_device {
++	struct device *dev;
++	struct i2c_client *client;
++	struct regulator_bulk_data regulators[NUM_REGULATORS];
++	struct v4l2_subdev sd;
++
++	struct dw9719_v4l2_ctrls {
++		struct v4l2_ctrl_handler handler;
++		struct v4l2_ctrl *focus;
++	} ctrls;
++};
++
++static int dw9719_i2c_rd8(struct i2c_client *client, u8 reg, u8 *val)
++{
++	struct i2c_msg msg[2];
++	u8 buf[2] = { reg };
++	int ret;
++
++	msg[0].addr = client->addr;
++	msg[0].flags = 0;
++	msg[0].len = 1;
++	msg[0].buf = buf;
++
++	msg[1].addr = client->addr;
++	msg[1].flags = I2C_M_RD;
++	msg[1].len = 1;
++	msg[1].buf = &buf[1];
++	*val = 0;
++
++	ret = i2c_transfer(client->adapter, msg, 2);
++	if (ret < 0)
++		return ret;
++
++	*val = buf[1];
++
++	return 0;
++}
++
++static int dw9719_i2c_wr8(struct i2c_client *client, u8 reg, u8 val)
++{
++	struct i2c_msg msg;
++	int ret;
++
++	u8 buf[2] = { reg, val };
++
++	msg.addr = client->addr;
++	msg.flags = 0;
++	msg.len = sizeof(buf);
++	msg.buf = buf;
++
++	ret = i2c_transfer(client->adapter, &msg, 1);
++
++	return ret < 0 ? ret : 0;
++}
++
++static int dw9719_i2c_wr16(struct i2c_client *client, u8 reg, u16 val)
++{
++	struct i2c_msg msg;
++	u8 buf[3] = { reg };
++	int ret;
++
++	put_unaligned_be16(val, buf + 1);
++
++	msg.addr = client->addr;
++	msg.flags = 0;
++	msg.len = sizeof(buf);
++	msg.buf = buf;
++
++	ret = i2c_transfer(client->adapter, &msg, 1);
++
++	return ret < 0 ? ret : 0;
++}
++
++static int dw9719_detect(struct dw9719_device *dw9719)
++{
++	int ret;
++	u8 val;
++
++	ret = dw9719_i2c_rd8(dw9719->client, DW9719_INFO, &val);
++	if (ret < 0)
++		return ret;
++
++	if (val != DW9719_ID) {
++		dev_err(dw9719->dev, "Failed to detect correct id\n");
++		ret = -ENXIO;
++	}
++
++	return 0;
++}
++
++static int dw9719_power_down(struct dw9719_device *dw9719)
++{
++	return regulator_bulk_disable(NUM_REGULATORS, dw9719->regulators);
++}
++
++static int dw9719_power_up(struct dw9719_device *dw9719)
++{
++	int ret;
++
++	ret = regulator_bulk_enable(NUM_REGULATORS, dw9719->regulators);
++	if (ret)
++		return ret;
++
++	/* Jiggle SCL pin to wake up device */
++	ret = dw9719_i2c_wr8(dw9719->client, DW9719_CONTROL, 1);
++
++	/* Need 100us to transit from SHUTDOWN to STANDBY*/
++	usleep_range(100, 1000);
++
++	ret = dw9719_i2c_wr8(dw9719->client, DW9719_CONTROL,
++			     DW9719_ENABLE_RINGING);
++	if (ret < 0)
++		goto fail_powerdown;
++
++	ret = dw9719_i2c_wr8(dw9719->client, DW9719_MODE, DW9719_MODE_SAC3);
++	if (ret < 0)
++		goto fail_powerdown;
++
++	ret = dw9719_i2c_wr8(dw9719->client, DW9719_VCM_FREQ,
++			     DW9719_DEFAULT_VCM_FREQ);
++	if (ret < 0)
++		goto fail_powerdown;
++
++	return 0;
++
++fail_powerdown:
++	dw9719_power_down(dw9719);
++	return ret;
++}
++
++static int dw9719_t_focus_abs(struct dw9719_device *dw9719, s32 value)
++{
++	int ret;
++
++	value = clamp(value, 0, DW9719_MAX_FOCUS_POS);
++	ret = dw9719_i2c_wr16(dw9719->client, DW9719_VCM_CURRENT, value);
++	if (ret < 0)
++		return ret;
++
++	return 0;
++}
++
++static int dw9719_set_ctrl(struct v4l2_ctrl *ctrl)
++{
++	struct dw9719_device *dw9719 = container_of(ctrl->handler,
++						    struct dw9719_device,
++						    ctrls.handler);
++	int ret;
++
++	/* Only apply changes to the controls if the device is powered up */
++	if (!pm_runtime_get_if_in_use(dw9719->dev))
++		return 0;
++
++	switch (ctrl->id) {
++	case V4L2_CID_FOCUS_ABSOLUTE:
++		ret = dw9719_t_focus_abs(dw9719, ctrl->val);
++		break;
++	default:
++		ret = -EINVAL;
++	}
++
++	pm_runtime_put(dw9719->dev);
++
++	return ret;
++}
++
++static const struct v4l2_ctrl_ops dw9719_ctrl_ops = {
++	.s_ctrl = dw9719_set_ctrl,
++};
++
++static int __maybe_unused dw9719_suspend(struct device *dev)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct dw9719_device *dw9719 = to_dw9719_device(sd);
++	int ret;
++	int val;
++
++	for (val = dw9719->ctrls.focus->val; val >= 0;
++	     val -= DW9719_CTRL_STEPS) {
++		ret = dw9719_t_focus_abs(dw9719, val);
++		if (ret)
++			return ret;
++
++		usleep_range(DW9719_CTRL_DELAY_US, DW9719_CTRL_DELAY_US + 10);
++	}
++
++	return dw9719_power_down(dw9719);
++}
++
++static int __maybe_unused dw9719_resume(struct device *dev)
++{
++	struct v4l2_subdev *sd = dev_get_drvdata(dev);
++	struct dw9719_device *dw9719 = to_dw9719_device(sd);
++	int current_focus = dw9719->ctrls.focus->val;
++	int ret;
++	int val;
++
++	ret = dw9719_power_up(dw9719);
++	if (ret)
++		return ret;
++
++	for (val = current_focus % DW9719_CTRL_STEPS; val < current_focus;
++	     val += DW9719_CTRL_STEPS) {
++		ret = dw9719_t_focus_abs(dw9719, val);
++		if (ret)
++			goto err_power_down;
++
++		usleep_range(DW9719_CTRL_DELAY_US, DW9719_CTRL_DELAY_US + 10);
++	}
++
++	return 0;
++
++err_power_down:
++	dw9719_power_down(dw9719);
++	return ret;
++}
++
++static int dw9719_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
++{
++	return pm_runtime_resume_and_get(sd->dev);
++}
++
++static int dw9719_close(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
++{
++	pm_runtime_put(sd->dev);
++
++	return 0;
++}
++
++static const struct v4l2_subdev_internal_ops dw9719_internal_ops = {
++	.open = dw9719_open,
++	.close = dw9719_close,
++};
++
++static int dw9719_init_controls(struct dw9719_device *dw9719)
++{
++	const struct v4l2_ctrl_ops *ops = &dw9719_ctrl_ops;
++	int ret;
++
++	ret = v4l2_ctrl_handler_init(&dw9719->ctrls.handler, 1);
++	if (ret)
++		return ret;
++
++	dw9719->ctrls.focus = v4l2_ctrl_new_std(&dw9719->ctrls.handler, ops,
++						V4L2_CID_FOCUS_ABSOLUTE, 0,
++						DW9719_MAX_FOCUS_POS, 1, 0);
++
++	if (dw9719->ctrls.handler.error) {
++		dev_err(dw9719->dev, "Error initialising v4l2 ctrls\n");
++		ret = dw9719->ctrls.handler.error;
++		goto err_free_handler;
++	}
++
++	dw9719->sd.ctrl_handler = &dw9719->ctrls.handler;
++
++	return ret;
++
++err_free_handler:
++	v4l2_ctrl_handler_free(&dw9719->ctrls.handler);
++	return ret;
++}
++
++static const struct v4l2_subdev_ops dw9719_ops = { };
++
++static int dw9719_probe(struct i2c_client *client)
++{
++	struct dw9719_device *dw9719;
++	int ret;
++
++	dw9719 = devm_kzalloc(&client->dev, sizeof(*dw9719), GFP_KERNEL);
++	if (!dw9719)
++		return -ENOMEM;
++
++	dw9719->client = client;
++	dw9719->dev = &client->dev;
++
++	dw9719->regulators[0].supply = "vdd";
++	/*
++	 * The DW9719 has only the 1 VDD voltage input, but some PMICs such as
++	 * the TPS68470 PMIC have I2C passthrough capability, to disconnect the
++	 * sensor's I2C pins from the I2C bus when the sensors VSIO (Sensor-IO)
++	 * is off, because some sensors then short these pins to ground;
++	 * and the DW9719 might sit behind this passthrough, this it needs to
++	 * enable VSIO as that will also enable the I2C passthrough.
++	 */
++	dw9719->regulators[1].supply = "vsio";
++
++	ret = devm_regulator_bulk_get(&client->dev, NUM_REGULATORS,
++				      dw9719->regulators);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "getting regulators\n");
++
++	v4l2_i2c_subdev_init(&dw9719->sd, client, &dw9719_ops);
++	dw9719->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
++	dw9719->sd.internal_ops = &dw9719_internal_ops;
++
++	ret = dw9719_init_controls(dw9719);
++	if (ret)
++		return ret;
++
++	ret = media_entity_pads_init(&dw9719->sd.entity, 0, NULL);
++	if (ret < 0)
++		goto err_free_ctrl_handler;
++
++	dw9719->sd.entity.function = MEDIA_ENT_F_LENS;
++
++	/*
++	 * We need the driver to work in the event that pm runtime is disable in
++	 * the kernel, so power up and verify the chip now. In the event that
++	 * runtime pm is disabled this will leave the chip on, so that the lens
++	 * will work.
++	 */
++
++	ret = dw9719_power_up(dw9719);
++	if (ret)
++		goto err_cleanup_media;
++
++	ret = dw9719_detect(dw9719);
++	if (ret)
++		goto err_powerdown;
++
++	pm_runtime_set_active(&client->dev);
++	pm_runtime_get_noresume(&client->dev);
++	pm_runtime_enable(&client->dev);
++
++	ret = v4l2_async_register_subdev(&dw9719->sd);
++	if (ret < 0)
++		goto err_pm_runtime;
++
++	pm_runtime_set_autosuspend_delay(&client->dev, 1000);
++	pm_runtime_use_autosuspend(&client->dev);
++	pm_runtime_put_autosuspend(&client->dev);
++
++	return ret;
++
++err_pm_runtime:
++	pm_runtime_disable(&client->dev);
++	pm_runtime_put_noidle(&client->dev);
++err_powerdown:
++	dw9719_power_down(dw9719);
++err_cleanup_media:
++	media_entity_cleanup(&dw9719->sd.entity);
++err_free_ctrl_handler:
++	v4l2_ctrl_handler_free(&dw9719->ctrls.handler);
++
++	return ret;
++}
++
++static int dw9719_remove(struct i2c_client *client)
++{
++	struct v4l2_subdev *sd = i2c_get_clientdata(client);
++	struct dw9719_device *dw9719 = container_of(sd, struct dw9719_device,
++						    sd);
++
++	pm_runtime_disable(&client->dev);
++	v4l2_async_unregister_subdev(sd);
++	v4l2_ctrl_handler_free(&dw9719->ctrls.handler);
++	media_entity_cleanup(&dw9719->sd.entity);
++
++	return 0;
++}
++
++static const struct i2c_device_id dw9719_id_table[] = {
++	{ "dw9719" },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, dw9719_id_table);
++
++static const struct dev_pm_ops dw9719_pm_ops = {
++	SET_RUNTIME_PM_OPS(dw9719_suspend, dw9719_resume, NULL)
++};
++
++static struct i2c_driver dw9719_i2c_driver = {
++	.driver = {
++		.name = "dw9719",
++		.pm = &dw9719_pm_ops,
++	},
++	.probe_new = dw9719_probe,
++	.remove = dw9719_remove,
++	.id_table = dw9719_id_table,
++};
++module_i2c_driver(dw9719_i2c_driver);
++
++MODULE_AUTHOR("Daniel Scally <djrscally@gmail.com>");
++MODULE_DESCRIPTION("DW9719 VCM Driver");
++MODULE_LICENSE("GPL");
+-- 
+2.38.1
+
+From 7547a24f9847af4be31929944288651edcb2a5b1 Mon Sep 17 00:00:00 2001
+From: Daniel Scally <djrscally@gmail.com>
+Date: Wed, 4 May 2022 23:21:45 +0100
+Subject: [PATCH] media: ipu3-cio2: Move functionality from .complete() to
+ .bound()
+
+Creating links and registering subdev nodes during the .complete()
+callback has the unfortunate effect of preventing all cameras that
+connect to a notifier from working if any one of their drivers fails
+to probe. Moving the functionality from .complete() to .bound() allows
+those camera sensor drivers that did probe correctly to work regardless.
+
+Signed-off-by: Daniel Scally <djrscally@gmail.com>
+Patchset: cameras
+---
+ drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 65 +++++++------------
+ 1 file changed, 23 insertions(+), 42 deletions(-)
+
+diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+index a3fe547b7fce..5648f29ced7b 100644
+--- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
++++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+@@ -1383,7 +1383,10 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
+ {
+ 	struct cio2_device *cio2 = to_cio2_device(notifier);
+ 	struct sensor_async_subdev *s_asd = to_sensor_asd(asd);
++	struct device *dev = &cio2->pci_dev->dev;
+ 	struct cio2_queue *q;
++	unsigned int pad;
++	int ret;
+ 
+ 	if (cio2->queue[s_asd->csi2.port].sensor)
+ 		return -EBUSY;
+@@ -1394,7 +1397,26 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
+ 	q->sensor = sd;
+ 	q->csi_rx_base = cio2->base + CIO2_REG_PIPE_BASE(q->csi2.port);
+ 
+-	return 0;
++	for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
++		if (q->sensor->entity.pads[pad].flags &
++					MEDIA_PAD_FL_SOURCE)
++			break;
++
++	if (pad == q->sensor->entity.num_pads) {
++		dev_err(dev, "failed to find src pad for %s\n",
++			q->sensor->name);
++		return -ENXIO;
++	}
++
++	ret = media_create_pad_link(&q->sensor->entity, pad, &q->subdev.entity,
++				    CIO2_PAD_SINK, 0);
++	if (ret) {
++		dev_err(dev, "failed to create link for %s\n",
++			q->sensor->name);
++		return ret;
++	}
++
++	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
+ }
+ 
+ /* The .unbind callback */
+@@ -1408,50 +1430,9 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
+ 	cio2->queue[s_asd->csi2.port].sensor = NULL;
+ }
+ 
+-/* .complete() is called after all subdevices have been located */
+-static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
+-{
+-	struct cio2_device *cio2 = to_cio2_device(notifier);
+-	struct device *dev = &cio2->pci_dev->dev;
+-	struct sensor_async_subdev *s_asd;
+-	struct v4l2_async_subdev *asd;
+-	struct cio2_queue *q;
+-	unsigned int pad;
+-	int ret;
+-
+-	list_for_each_entry(asd, &cio2->notifier.asd_list, asd_list) {
+-		s_asd = to_sensor_asd(asd);
+-		q = &cio2->queue[s_asd->csi2.port];
+-
+-		for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
+-			if (q->sensor->entity.pads[pad].flags &
+-						MEDIA_PAD_FL_SOURCE)
+-				break;
+-
+-		if (pad == q->sensor->entity.num_pads) {
+-			dev_err(dev, "failed to find src pad for %s\n",
+-				q->sensor->name);
+-			return -ENXIO;
+-		}
+-
+-		ret = media_create_pad_link(
+-				&q->sensor->entity, pad,
+-				&q->subdev.entity, CIO2_PAD_SINK,
+-				0);
+-		if (ret) {
+-			dev_err(dev, "failed to create link for %s\n",
+-				q->sensor->name);
+-			return ret;
+-		}
+-	}
+-
+-	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
+-}
+-
+ static const struct v4l2_async_notifier_operations cio2_async_ops = {
+ 	.bound = cio2_notifier_bound,
+ 	.unbind = cio2_notifier_unbind,
+-	.complete = cio2_notifier_complete,
+ };
+ 
+ static int cio2_parse_firmware(struct cio2_device *cio2)
+-- 
+2.38.1
+
+From 9ab39a55389865d73ee103ddac69cee7e46ba00f Mon Sep 17 00:00:00 2001
+From: Daniel Scally <djrscally@gmail.com>
+Date: Thu, 2 Jun 2022 22:15:56 +0100
+Subject: [PATCH] media: ipu3-cio2: Re-add .complete() to ipu3-cio2
+
+Removing the .complete() callback had some unintended consequences.
+Because the VCM driver is not directly linked to the ipu3-cio2
+driver .bound() never gets called for it, which means its devnode
+is never created if it probes late. Because .complete() waits for
+any sub-notifiers to also be complete it is captured in that call.
+
+Signed-off-by: Daniel Scally <djrscally@gmail.com>
+Patchset: cameras
+---
+ drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+index 5648f29ced7b..957a30cd369d 100644
+--- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
++++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+@@ -1430,9 +1430,18 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
+ 	cio2->queue[s_asd->csi2.port].sensor = NULL;
+ }
+ 
++/* .complete() is called after all subdevices have been located */
++static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
++{
++	struct cio2_device *cio2 = to_cio2_device(notifier);
++
++	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
++}
++
+ static const struct v4l2_async_notifier_operations cio2_async_ops = {
+ 	.bound = cio2_notifier_bound,
+ 	.unbind = cio2_notifier_unbind,
++	.complete = cio2_notifier_complete,
+ };
+ 
+ static int cio2_parse_firmware(struct cio2_device *cio2)
+-- 
+2.38.1
+
+From 169807fe7763ece3cd34571025a10b5e98a1c364 Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Fri, 15 Jul 2022 23:48:00 +0200
+Subject: [PATCH] drivers/media/i2c: Fix DW9719 dependencies
+
+It should depend on VIDEO_DEV instead of VIDEO_V4L2.
+
+Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
+Patchset: cameras
+---
+ drivers/media/i2c/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/Kconfig b/drivers/media/i2c/Kconfig
+index 98d081efeef7..c67966cafe10 100644
+--- a/drivers/media/i2c/Kconfig
++++ b/drivers/media/i2c/Kconfig
+@@ -823,7 +823,7 @@ config VIDEO_DW9714
+ 
+ config VIDEO_DW9719
+ 	tristate "DW9719 lens voice coil support"
+-	depends on I2C && VIDEO_V4L2
++	depends on I2C && VIDEO_DEV
+ 	select MEDIA_CONTROLLER
+ 	select VIDEO_V4L2_SUBDEV_API
+ 	select V4L2_ASYNC
+-- 
+2.38.1
+
+From 3a7230b78be9ca5728a697475348c597b0a009c9 Mon Sep 17 00:00:00 2001
+From: Sachi King <nakato@nakato.io>
+Date: Sat, 29 May 2021 17:47:38 +1000
+Subject: [PATCH] ACPI: Add quirk for Surface Laptop 4 AMD missing irq 7
+ override
+
+This patch is the work of Thomas Gleixner <tglx@linutronix.de> and is
+copied from:
+https://lore.kernel.org/lkml/87lf8ddjqx.ffs@nanos.tec.linutronix.de/
+
+This patch adds a quirk to the ACPI setup to patch in the the irq 7 pin
+setup that is missing in the laptops ACPI table.
+
+This patch was used for validation of the issue, and is not a proper
+fix, but is probably a better temporary hack than continuing to probe
+the Legacy PIC and run with the PIC in an unknown state.
+
+Patchset: amd-gpio
+---
+ arch/x86/kernel/acpi/boot.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
+index 907cc98b1938..0116d27b29ea 100644
+--- a/arch/x86/kernel/acpi/boot.c
++++ b/arch/x86/kernel/acpi/boot.c
+@@ -22,6 +22,7 @@
+ #include <linux/efi-bgrt.h>
+ #include <linux/serial_core.h>
+ #include <linux/pgtable.h>
++#include <linux/dmi.h>
+ 
+ #include <asm/e820/api.h>
+ #include <asm/irqdomain.h>
+@@ -1234,6 +1235,17 @@ static void __init mp_config_acpi_legacy_irqs(void)
+ 	}
+ }
+ 
++static const struct dmi_system_id surface_quirk[] __initconst = {
++	{
++		.ident = "Microsoft Surface Laptop 4 (AMD)",
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
++			DMI_MATCH(DMI_PRODUCT_SKU, "Surface_Laptop_4_1952:1953")
++		},
++	},
++	{}
++};
++
+ /*
+  * Parse IOAPIC related entries in MADT
+  * returns 0 on success, < 0 on error
+@@ -1289,6 +1301,11 @@ static int __init acpi_parse_madt_ioapic_entries(void)
+ 		acpi_sci_ioapic_setup(acpi_gbl_FADT.sci_interrupt, 0, 0,
+ 				      acpi_gbl_FADT.sci_interrupt);
+ 
++	if (dmi_check_system(surface_quirk)) {
++		pr_warn("Surface hack: Override irq 7\n");
++		mp_override_legacy_irq(7, 3, 3, 7);
++	}
++
+ 	/* Fill in identity legacy mappings where no override */
+ 	mp_config_acpi_legacy_irqs();
+ 
+-- 
+2.38.1
+
+From c99bd04e18c88e53b7dd7cede7cc749e33ca6b4f Mon Sep 17 00:00:00 2001
+From: Maximilian Luz <luzmaximilian@gmail.com>
+Date: Thu, 3 Jun 2021 14:04:26 +0200
+Subject: [PATCH] ACPI: Add AMD 13" Surface Laptop 4 model to irq 7 override
+ quirk
+
+The 13" version of the Surface Laptop 4 has the same problem as the 15"
+version, but uses a different SKU. Add that SKU to the quirk as well.
+
+Patchset: amd-gpio
+---
+ arch/x86/kernel/acpi/boot.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
+index 0116d27b29ea..af102c6f8e5b 100644
+--- a/arch/x86/kernel/acpi/boot.c
++++ b/arch/x86/kernel/acpi/boot.c
+@@ -1237,12 +1237,19 @@ static void __init mp_config_acpi_legacy_irqs(void)
+ 
+ static const struct dmi_system_id surface_quirk[] __initconst = {
+ 	{
+-		.ident = "Microsoft Surface Laptop 4 (AMD)",
++		.ident = "Microsoft Surface Laptop 4 (AMD 15\")",
+ 		.matches = {
+ 			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+ 			DMI_MATCH(DMI_PRODUCT_SKU, "Surface_Laptop_4_1952:1953")
+ 		},
+ 	},
++	{
++		.ident = "Microsoft Surface Laptop 4 (AMD 13\")",
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
++			DMI_MATCH(DMI_PRODUCT_SKU, "Surface_Laptop_4_1958:1959")
++		},
++	},
+ 	{}
+ };
+ 
+-- 
+2.38.1
+
+From 34ce3fbdd26485e00bb7cb4e89e3951e35dafba8 Mon Sep 17 00:00:00 2001
+From: "Bart Groeneveld | GPX Solutions B.V" <bart@gpxbv.nl>
+Date: Mon, 5 Dec 2022 16:08:46 +0100
+Subject: [PATCH] acpi: allow usage of acpi_tad on HW-reduced platforms
+
+The specification [1] allows so-called HW-reduced platforms,
+which do not implement everything, especially the wakeup related stuff.
+
+In that case, it is still usable as a RTC. This is helpful for [2]
+and [3], which is about a device with no other working RTC,
+but it does have an HW-reduced TAD, which can be used as a RTC instead.
+
+[1]: https://uefi.org/specs/ACPI/6.5/09_ACPI_Defined_Devices_and_Device_Specific_Objects.html#time-and-alarm-device
+[2]: https://bugzilla.kernel.org/show_bug.cgi?id=212313
+[3]: https://github.com/linux-surface/linux-surface/issues/415
+
+Signed-off-by: Bart Groeneveld | GPX Solutions B.V. <bart@gpxbv.nl>
+Patchset: rtc
+---
+ drivers/acpi/acpi_tad.c | 35 ++++++++++++++++++++++++-----------
+ 1 file changed, 24 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
+index e9b8e8305e23..944276934e7e 100644
+--- a/drivers/acpi/acpi_tad.c
++++ b/drivers/acpi/acpi_tad.c
+@@ -432,6 +432,14 @@ static ssize_t caps_show(struct device *dev, struct device_attribute *attr,
+ 
+ static DEVICE_ATTR_RO(caps);
+ 
++static struct attribute *acpi_tad_attrs[] = {
++	&dev_attr_caps.attr,
++	NULL,
++};
++static const struct attribute_group acpi_tad_attr_group = {
++	.attrs	= acpi_tad_attrs,
++};
++
+ static ssize_t ac_alarm_store(struct device *dev, struct device_attribute *attr,
+ 			      const char *buf, size_t count)
+ {
+@@ -480,15 +488,14 @@ static ssize_t ac_status_show(struct device *dev, struct device_attribute *attr,
+ 
+ static DEVICE_ATTR_RW(ac_status);
+ 
+-static struct attribute *acpi_tad_attrs[] = {
+-	&dev_attr_caps.attr,
++static struct attribute *acpi_tad_ac_attrs[] = {
+ 	&dev_attr_ac_alarm.attr,
+ 	&dev_attr_ac_policy.attr,
+ 	&dev_attr_ac_status.attr,
+ 	NULL,
+ };
+-static const struct attribute_group acpi_tad_attr_group = {
+-	.attrs	= acpi_tad_attrs,
++static const struct attribute_group acpi_tad_ac_attr_group = {
++	.attrs	= acpi_tad_ac_attrs,
+ };
+ 
+ static ssize_t dc_alarm_store(struct device *dev, struct device_attribute *attr,
+@@ -563,13 +570,18 @@ static int acpi_tad_remove(struct platform_device *pdev)
+ 
+ 	pm_runtime_get_sync(dev);
+ 
++	if (dd->capabilities & ACPI_TAD_AC_WAKE)
++		sysfs_remove_group(&dev->kobj, &acpi_tad_ac_attr_group);
++
+ 	if (dd->capabilities & ACPI_TAD_DC_WAKE)
+ 		sysfs_remove_group(&dev->kobj, &acpi_tad_dc_attr_group);
+ 
+ 	sysfs_remove_group(&dev->kobj, &acpi_tad_attr_group);
+ 
+-	acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
+-	acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
++	if (dd->capabilities & ACPI_TAD_AC_WAKE) {
++		acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
++		acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
++	}
+ 	if (dd->capabilities & ACPI_TAD_DC_WAKE) {
+ 		acpi_tad_disable_timer(dev, ACPI_TAD_DC_TIMER);
+ 		acpi_tad_clear_status(dev, ACPI_TAD_DC_TIMER);
+@@ -604,11 +616,6 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 		return -ENODEV;
+ 	}
+ 
+-	if (!acpi_has_method(handle, "_PRW")) {
+-		dev_info(dev, "Missing _PRW\n");
+-		return -ENODEV;
+-	}
+-
+ 	dd = devm_kzalloc(dev, sizeof(*dd), GFP_KERNEL);
+ 	if (!dd)
+ 		return -ENOMEM;
+@@ -637,6 +644,12 @@ static int acpi_tad_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto fail;
+ 
++	if (caps & ACPI_TAD_AC_WAKE) {
++		ret = sysfs_create_group(&dev->kobj, &acpi_tad_ac_attr_group);
++		if (ret)
++			goto fail;
++	}
++
+ 	if (caps & ACPI_TAD_DC_WAKE) {
+ 		ret = sysfs_create_group(&dev->kobj, &acpi_tad_dc_attr_group);
+ 		if (ret)
+-- 
+2.38.1
