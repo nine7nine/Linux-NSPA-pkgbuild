@@ -33,6 +33,10 @@ _localmodcfg=
 # a new kernel is released, but again, convenient for package bumps.
 _use_current=
 
+# Microsoft Surface 7 specific config
+# unset =y to use generic kernel config (builds everything)
+_config_Surface7=y
+
 ### Disable MQ-Deadline I/O scheduler
 _mq_deadline_disable=y
 
@@ -75,7 +79,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.2-rc3-rt1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=13
+pkgrel=14
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -84,7 +88,7 @@ makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz
 source=(
   "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.2-rc3-rt1.tar.gz"
   "config"
-  "config_generic_nspa"
+  "config_surface7"
   "auto-cpu-optimization.sh"
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0001-ClearLinux-patchwork.patch"
@@ -157,7 +161,12 @@ prepare() {
   done
 
   echo "Setting config..."
-  cp ../config .config
+
+  if [ -n "$_config_Surface7" ]; then
+      cp ../config_surface7 .config
+  else
+      cp ../config .config
+  fi 
 
     if [ -n "$_use_auto_optimization" ]; then
         "${srcdir}"/auto-cpu-optimization.sh
@@ -469,8 +478,8 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
+            '7d2984504a61ec26d82fec0f7c25ab8d2fe7d82546f1d4a39cc85dd0301d9bf9'
             'ccf3861eefa7174c01356fbfaa07d2bd442066c31618351ac355a83ba69fa563'
-            '9abdc6c5f40b81c044f5549e8f29d474dc51e2765ee2b5e9a5fba9e62499dd9e'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
