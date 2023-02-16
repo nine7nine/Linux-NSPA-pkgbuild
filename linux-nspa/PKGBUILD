@@ -75,7 +75,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.2-rc3-rt1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=12
+pkgrel=13
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -124,12 +124,14 @@ source=(
   "0037-pm-cpuidle_vs_preempt_rt.patch"  
   "0039-sched-Fix-put_task_struct-calls-under-PREEMPT_RT.patch"
   "0040-exit-Detect_and_fix_irq_disabled_state_in_oops.patch"
+  "0041-locking-rwsem-Fix_rwsem_bugs.patch"
   "0042-iwlwifi-Add_missing_check_for_alloc_ordered_workqueue.patch"
   "0043-linux-6.2-rc4-incremental.patch"
   "0044-linux-6.2-rc5-incremental.patch"
   "0046-linux-6.2-rc7-incremental.patch"    
   "0047-linux-6.2-rc-git-updates_1.patch"
   "0048-linux-6.2-rc-git-updates_2.patch"
+  "0049-sched-rt_pick_next_rt_entity-check list_entry.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -508,10 +510,12 @@ sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
             '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
             '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413'
             '1304b96f81d568aa7745cc0039fe5c7ed51531ef73456d29c409b906e27d5647'
+            '28c7f25a3e6bd2d6b381b37e6a869f74224aa08b8e8b38c2c256875f218a6dad'
             '182c50f8a2c913a7dd4bd3844a25b696798cb08456ba7d49d265efb17cad3195'
             'c9de81b9fb7cacef08c300090de80b7708d8443d07152b64eb627c181235d7ac'
             '49df27a0148cd54b5566938dd53eed9cdc1b605dcdda68a98a26f4c98445b7fa'
             '3775cf0781d8809c1ff2a85b27a429a4626dd24c1ff377508591afbf1614b27c'
             'a8985ecb407934e980709c0a4a73e851001ff3781ae6d8222740759c1a5be115'
-            'b68091128cebde85455f6d24c5048447e33b1e32b2fcc104a6aa942b95de871c')
+            'b68091128cebde85455f6d24c5048447e33b1e32b2fcc104a6aa942b95de871c'
+            '68a007213f4c82d34890d8ebcae31385976d046ffb663ec9e30716d8e7695cdc')
 
