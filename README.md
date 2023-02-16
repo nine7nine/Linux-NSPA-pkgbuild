@@ -24,9 +24,18 @@ Google, KernelToast, Mainline/Upstream and various other sources.
 * Subset KernelToast's kernel patchwork
 * Misc fixes/changes
 
-SPECIAL NOTE: the included kernel config is specifically for my laptop. If
-anyone is using these packages, you will need to have a look at the 
-'config_generic_nspa' config file included. -- you can use it directly, use it as a 
-reference OR use it in combination with modprobed-db + make localmodconfig.
+SPECIAL NOTE:
 
-see commit: https://github.com/nine7nine/Linux-NSPA-pkgbuild/commit/10b12669a7086c3ed9634569171e9b4fa448000b
+The pkgbuild by default will use a kernel config for my Microsoft Surface 7.
+This can be overriden and the generic kernel config can be used instead, but
+that means that all modules will be build, increasing compile time 
+significantly.
+
+A generic config can be used by (un-)setting (in PKGUBILD):
+
+_config_Surface7=
+
+Ideally though, you will want to use your own localmodconfig via:
+
+https://wiki.archlinux.org/title/Modprobed-db
+
