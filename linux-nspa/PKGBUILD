@@ -11,11 +11,6 @@
 ### Tweak kernel options prior to a build via nconfig
 _makemenuconfig=
 
-# NUMA is optimized for multi-socket motherboards.
-# A single multi-core CPU actually runs slower with NUMA enabled.
-# See, https://bugs.archlinux.org/task/31187
-_NUMAdisable=y
-
 # Compile ONLY used modules to VASTLY reduce the number of modules built
 # and the build time.
 #
@@ -36,6 +31,11 @@ _use_current=
 # Microsoft Surface 7 specific config
 # unset =y to use generic kernel config (builds everything)
 _config_Surface7=y
+
+# NUMA is optimized for multi-socket motherboards.
+# A single multi-core CPU actually runs slower with NUMA enabled.
+# See, https://bugs.archlinux.org/task/31187
+_NUMAdisable=y
 
 ### Disable MQ-Deadline I/O scheduler
 _mq_deadline_disable=y
@@ -76,17 +76,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-rt-devel-6.2-rc3-rt1
+_srcname=linux-rt-devel-6.2-rt3
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=14
+pkgrel=15
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.2-rc3-rt1.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.2-rt3.tar.gz"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -118,23 +118,16 @@ source=(
   "0025-workqueue-destroy_worker_vs_isolated_CPUs.patch"
   "0026-Add_support_for_epoll_min_wait.patch"
   "0027-cgroup-cpuset-Task_migration_optimization.patch"
-  "0028-Surface-import_ipts_driver.patch"
-  "0029-Surface-ipts-update_to_commit-596fc42.patch"
-  "0030-Microsoft_Surface_Support-6.0.patch"
-  "0033-i2c-designware-Fix_unbalanced_suspended_flag.patch" 
+  "0030-Microsoft_Surface_Support-6.1.patch"
   "0034-qspinlock-Optimize_pending_state_waiting_for_unlock.patch"
-  "0035-softirq-wake_up_ktimer_thread_in_softirq_context.patch"
   "0036-locking-rwbase-Mitigate_indefinite_writer_starvation_v4.patch"
   "0037-pm-cpuidle_vs_preempt_rt.patch"  
   "0039-sched-Fix-put_task_struct-calls-under-PREEMPT_RT.patch"
   "0040-exit-Detect_and_fix_irq_disabled_state_in_oops.patch"
   "0041-locking-rwsem-Fix_rwsem_bugs.patch"
   "0042-iwlwifi-Add_missing_check_for_alloc_ordered_workqueue.patch"
-  "0043-linux-6.2-rc4-incremental.patch"
-  "0044-linux-6.2-rc5-incremental.patch"
-  "0046-linux-6.2-rc7-incremental.patch"    
-  "0047-linux-6.2-rc-git-updates_1.patch"
-  "0048-linux-6.2-rc-git-updates_2.patch"
+  "0047-linux-git-updates_1.patch"
+  "0048-linux-git-updates_2.patch"
   "0049-sched-rt_pick_next_rt_entity-check list_entry.patch"
 )
 
@@ -477,7 +470,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
+sha256sums=('c565a2e5f363fcf1cad30c722982524e92efecb7c53e15f704df35b477831389'
             '7d2984504a61ec26d82fec0f7c25ab8d2fe7d82546f1d4a39cc85dd0301d9bf9'
             'ccf3861eefa7174c01356fbfaa07d2bd442066c31618351ac355a83ba69fa563'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -509,22 +502,15 @@ sha256sums=('097c1710c6325ff317644085781d4a8318777e38ca440983736aa4730f79e1ea'
             '3e77a086f598ae68b8271aff793d6bc0c4734c62a7bd394e1942925065b406d6'
             '9fca36d6492c6ab4244f197f3cf5771d50b8bdad6061987a36bdc9a91cec0aa8'
             'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13'
-            'dbdfe22d7eb1a603fda7620dd9559c872177da29b35377c7c715722c8fca718a'
-            '943a79445e1139e28250cc359b90b3b12cdcb616c498e17cc719922a786640f7'
-            '119a14ebc1c486e5b688b42897e0d9bc2378f72d15ca582205b1c72b2082149c'
-            '20957e713d21d8e23614510f9299cff0dc4cfbf85ee4b826b7efcfc80b460f5a'
+            '6266b4f5bef3dd5e11439505ede25edf400caf65447b35aeea0f045f1466860d'
             'b516980c9d6c26c4bc214a9543f8727a601305fb67adc715c937f33b12c8defb'
-            '9d1833e412ca375420a2d7dc0ab343e86210df8d1e49b751c3b0ddf32b948837'
             'f80256e4c09cba4f2f48dcfca1f75e393189c9eabdcbcaef252b9b16546c2ad5'
             '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
             '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413'
             '1304b96f81d568aa7745cc0039fe5c7ed51531ef73456d29c409b906e27d5647'
             '28c7f25a3e6bd2d6b381b37e6a869f74224aa08b8e8b38c2c256875f218a6dad'
             '182c50f8a2c913a7dd4bd3844a25b696798cb08456ba7d49d265efb17cad3195'
-            'c9de81b9fb7cacef08c300090de80b7708d8443d07152b64eb627c181235d7ac'
-            '49df27a0148cd54b5566938dd53eed9cdc1b605dcdda68a98a26f4c98445b7fa'
-            '3775cf0781d8809c1ff2a85b27a429a4626dd24c1ff377508591afbf1614b27c'
-            'a8985ecb407934e980709c0a4a73e851001ff3781ae6d8222740759c1a5be115'
+            'fb093df4ece2422864c7d7f038e1d06dc49e32c78d6499cbad3ff0a9d771045f'
             'b68091128cebde85455f6d24c5048447e33b1e32b2fcc104a6aa942b95de871c'
             '68a007213f4c82d34890d8ebcae31385976d046ffb663ec9e30716d8e7695cdc')
 
