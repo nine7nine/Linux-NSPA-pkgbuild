@@ -79,7 +79,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.2-rt3
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=15
+pkgrel=16
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -129,6 +129,7 @@ source=(
   "0047-linux-git-updates_1.patch"
   "0048-linux-git-updates_2.patch"
   "0049-sched-rt_pick_next_rt_entity-check list_entry.patch"
+  "0050-sched-fair-Wake-short-task-on-current-CPU-v6.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -492,7 +493,7 @@ sha256sums=('c565a2e5f363fcf1cad30c722982524e92efecb7c53e15f704df35b477831389'
             'da259147de1c555f52558a1a6f6070e96b5f868713a274ffb78381baa9047af7'
             'e22faa7811a3de10affe5f7e6d671f263599c75f9f78cca6e3cdf7a9e36d71de'
             'ba640b93b7d4bce58b15ad2232f0547007b725c2f518a8b19902d45632da0a47'
-            '4b64b1876a92096f165868095d3638b5664681662410afbb2af34543a597f792'
+            '1051e30482111b87debb7fbea00bacc972fe74778d1c27c6f7b3d7ef78bb96c4'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '7f6f1c4b6c79cc033af9059ff3c400252220cf2747b66e1ffc51375c8dfcb4c5'
             '8511cff3907b1d688182dcab8a2378dcd16deabba3c4e02884ee56f9e32fcb86'
@@ -512,5 +513,6 @@ sha256sums=('c565a2e5f363fcf1cad30c722982524e92efecb7c53e15f704df35b477831389'
             '182c50f8a2c913a7dd4bd3844a25b696798cb08456ba7d49d265efb17cad3195'
             'fb093df4ece2422864c7d7f038e1d06dc49e32c78d6499cbad3ff0a9d771045f'
             'b68091128cebde85455f6d24c5048447e33b1e32b2fcc104a6aa942b95de871c'
-            '68a007213f4c82d34890d8ebcae31385976d046ffb663ec9e30716d8e7695cdc')
+            '68a007213f4c82d34890d8ebcae31385976d046ffb663ec9e30716d8e7695cdc'
+            '8fb02de2fcc82386041e0350c17762235462d1d858e6555695761074b1ffe5a8')
 
