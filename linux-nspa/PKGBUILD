@@ -79,7 +79,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.3-rc3-rt5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=1
+pkgrel=2
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -120,6 +120,7 @@ source=(
   "0030-Microsoft_Surface_Support-6.2.patch"
   "0037-pm-cpuidle_vs_preempt_rt.patch"  
   "0039-sched-Fix-put_task_struct-calls-under-PREEMPT_RT.patch"
+  "0052-sched-Introduce-mm_cid-runqueue-cache.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -492,5 +493,6 @@ sha256sums=('3d9204c8fa3f4bc6c048f970c65be558cd351a8f7e3e4c3e9fa1a25de3435e4a'
             'd39a84348d7ecdef83262f708c5ef3676f0f6d5bfafc9d6e9ae01026cebddf13'
             '60653b558112faef9c0cd759614f9c0b42cb421247bb9af63d49060b313106e6'
             '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
-            '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413')
+            '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413'
+            'ce4365c27afdec8749c71f163e93c61031e02764afc945a91bb737c07f1dbc34')
 
