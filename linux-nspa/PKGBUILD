@@ -76,7 +76,7 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-rt-devel-6.3-rc3-rt5
+_srcname=linux-rt-devel-6.3-rc5-rt7
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
 pkgrel=2
@@ -86,7 +86,7 @@ license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.3-rc3-rt5.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.3-rc5-rt7.tar.gz"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -460,7 +460,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('3d9204c8fa3f4bc6c048f970c65be558cd351a8f7e3e4c3e9fa1a25de3435e4a'
+sha256sums=('69ce53dfd955b37191ca3ae6feda0283143371f8968b251209e6fabdc00b499a'
             'b46d9ad0b119a227f754c2aa8803daf328dc7cafa15280252b5b6a6ae163980f'
             '0f33b112f98312fde160254bcb0da7e143862f6b0863277ad85bde9588226537'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
