@@ -1562,7 +1562,7 @@ index 0000000000000..2f61500b5119c
 +	/*
 +	 * Give the sensor some time to come back from resetting
 +	 */
-+	msleep(1000);
++	msleep(1500);
 +
 +	ret = ipts_control_start(ipts);
 +	if (ret)
@@ -2623,9 +2623,9 @@ index 0000000000000..77234f9e0e178
 +	 * n seconds, sleep longer to avoid wasting CPU cycles.
 +	 */
 +	if (last + n > ktime_get_seconds())
-+		msleep(20);
++		msleep(10);
 +	else
-+		msleep(200);
++		msleep(150);
 +}
 +
 +static int ipts_receiver_event_loop(struct ipts_thread *thread)

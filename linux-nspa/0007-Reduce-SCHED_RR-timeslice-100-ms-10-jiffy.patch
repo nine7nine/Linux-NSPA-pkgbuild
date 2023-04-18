@@ -23,7 +23,7 @@ index e5af028c08b4..425f99f07876 100644
   * Timeslices get refilled after they expire.
   */
 -#define RR_TIMESLICE		(100 * HZ / 1000)
-+#define RR_TIMESLICE		(10)
++#define RR_TIMESLICE		(60)
  
  #endif /* _LINUX_SCHED_RT_H */
 -- 
