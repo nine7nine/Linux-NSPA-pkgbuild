@@ -68,7 +68,7 @@ _nf_cone=y
 
  pkgbase=linux-nspa
 _major=6.3
-#_minor=4
+_minor=1
 #_minorc=$((_minor+1))
 #_rcver=rc8
 pkgver=${_major}
@@ -76,20 +76,21 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-rt-devel-6.3-rt11
+_srcname=linux-6.3.1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=8
+pkgrel=9
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.3-rt11.tar.gz"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.3.1.tar.xz"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
+  "0000-patch-6.3-rt11.patch"
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
@@ -458,10 +459,11 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('5a399d3318f99ee2ddb7ebb61ac27b296509f637df36598adc3177408998f80d'
+sha256sums=('78620fb4a7d5e0db1d4eb8d5b1c6e207ba5d19564efa63967a59b6daf89b3f2a'
             'b46d9ad0b119a227f754c2aa8803daf328dc7cafa15280252b5b6a6ae163980f'
             '0f33b112f98312fde160254bcb0da7e143862f6b0863277ad85bde9588226537'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
+            'e8242141ff1fb79f531d92f4ed24b1bcc52dbe69f1a9524ed922db074682b4b0'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
