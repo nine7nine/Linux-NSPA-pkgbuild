@@ -3174,7 +3174,7 @@ index 63d242164b1a9..593d7e7c2e4c7 100644
   * cond_resched() and cond_resched_lock(): latency reduction via
   * explicit rescheduling in places that are safe. The return
 diff --git a/include/linux/sched/signal.h b/include/linux/sched/signal.h
-index 20099268fa257..a39be9f9ba966 100644
+index 20099268fa257..b38ce53576000 100644
 --- a/include/linux/sched/signal.h
 +++ b/include/linux/sched/signal.h
 @@ -22,6 +22,7 @@ struct sighand_struct {
@@ -3185,6 +3185,15 @@ index 20099268fa257..a39be9f9ba966 100644
  };
  
  /*
+@@ -135,7 +136,7 @@ struct signal_struct {
+ #ifdef CONFIG_POSIX_TIMERS
+ 
+ 	/* POSIX.1b Interval Timers */
+-	int			posix_timer_id;
++	unsigned int		next_posix_timer_id;
+ 	struct list_head	posix_timers;
+ 
+ 	/* ITIMER_REAL timer for the process */
 @@ -349,6 +350,7 @@ extern int send_sig(int, struct task_struct *, int);
  extern int zap_other_threads(struct task_struct *p);
  extern struct sigqueue *sigqueue_alloc(void);
@@ -7287,10 +7296,60 @@ index 8cb28f1df2941..138d68cfc204d 100644
  	cgroup_leave_frozen(true);
  
 diff --git a/kernel/softirq.c b/kernel/softirq.c
-index c8a6913c067d9..82f3e68fbe220 100644
+index c8a6913c067d9..af9e879bbbf75 100644
 --- a/kernel/softirq.c
 +++ b/kernel/softirq.c
-@@ -637,6 +637,24 @@ static inline void tick_irq_exit(void)
+@@ -80,21 +80,6 @@ static void wakeup_softirqd(void)
+ 		wake_up_process(tsk);
+ }
+ 
+-/*
+- * If ksoftirqd is scheduled, we do not want to process pending softirqs
+- * right now. Let ksoftirqd handle this at its own rate, to get fairness,
+- * unless we're doing some of the synchronous softirqs.
+- */
+-#define SOFTIRQ_NOW_MASK ((1 << HI_SOFTIRQ) | (1 << TASKLET_SOFTIRQ))
+-static bool ksoftirqd_running(unsigned long pending)
+-{
+-	struct task_struct *tsk = __this_cpu_read(ksoftirqd);
+-
+-	if (pending & SOFTIRQ_NOW_MASK)
+-		return false;
+-	return tsk && task_is_running(tsk) && !__kthread_should_park(tsk);
+-}
+-
+ #ifdef CONFIG_TRACE_IRQFLAGS
+ DEFINE_PER_CPU(int, hardirqs_enabled);
+ DEFINE_PER_CPU(int, hardirq_context);
+@@ -236,7 +221,7 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
+ 		goto out;
+ 
+ 	pending = local_softirq_pending();
+-	if (!pending || ksoftirqd_running(pending))
++	if (!pending)
+ 		goto out;
+ 
+ 	/*
+@@ -432,9 +417,6 @@ static inline bool should_wake_ksoftirqd(void)
+ 
+ static inline void invoke_softirq(void)
+ {
+-	if (ksoftirqd_running(local_softirq_pending()))
+-		return;
+-
+ 	if (!force_irqthreads() || !__this_cpu_read(ksoftirqd)) {
+ #ifdef CONFIG_HAVE_IRQ_EXIT_ON_IRQ_STACK
+ 		/*
+@@ -468,7 +450,7 @@ asmlinkage __visible void do_softirq(void)
+ 
+ 	pending = local_softirq_pending();
+ 
+-	if (pending && !ksoftirqd_running(pending))
++	if (pending)
+ 		do_softirq_own_stack();
+ 
+ 	local_irq_restore(flags);
+@@ -637,6 +619,24 @@ static inline void tick_irq_exit(void)
  #endif
  }
  
@@ -7315,7 +7374,7 @@ index c8a6913c067d9..82f3e68fbe220 100644
  static inline void __irq_exit_rcu(void)
  {
  #ifndef __ARCH_IRQ_EXIT_IRQS_DISABLED
-@@ -649,6 +667,10 @@ static inline void __irq_exit_rcu(void)
+@@ -649,6 +649,10 @@ static inline void __irq_exit_rcu(void)
  	if (!in_interrupt() && local_softirq_pending())
  		invoke_softirq();
  
@@ -7326,7 +7385,7 @@ index c8a6913c067d9..82f3e68fbe220 100644
  	tick_irq_exit();
  }
  
-@@ -976,12 +998,70 @@ static struct smp_hotplug_thread softirq_threads = {
+@@ -976,12 +980,70 @@ static struct smp_hotplug_thread softirq_threads = {
  	.thread_comm		= "ksoftirqd/%u",
  };
  
@@ -7420,31 +7479,134 @@ index e8c08292defcb..10c1246cdba76 100644
  	}
  
  	__hrtimer_run_queues(cpu_base, now, flags, HRTIMER_ACTIVE_HARD);
-diff --git a/kernel/time/tick-common.c b/kernel/time/tick-common.c
-index 46789356f856e..65b8658da829e 100644
---- a/kernel/time/tick-common.c
-+++ b/kernel/time/tick-common.c
-@@ -218,9 +218,19 @@ static void tick_setup_device(struct tick_device *td,
- 		 * this cpu:
- 		 */
- 		if (tick_do_timer_cpu == TICK_DO_TIMER_BOOT) {
-+			ktime_t next_p;
-+			u32 rem;
-+
- 			tick_do_timer_cpu = cpu;
+diff --git a/kernel/time/posix-timers.c b/kernel/time/posix-timers.c
+index 0c8a87a11b39d..863b8ac073c30 100644
+--- a/kernel/time/posix-timers.c
++++ b/kernel/time/posix-timers.c
+@@ -140,25 +140,29 @@ static struct k_itimer *posix_timer_by_id(timer_t id)
+ static int posix_timer_add(struct k_itimer *timer)
+ {
+ 	struct signal_struct *sig = current->signal;
+-	int first_free_id = sig->posix_timer_id;
+ 	struct hlist_head *head;
+-	int ret = -ENOENT;
++	unsigned int start, id;
  
--			tick_next_period = ktime_get();
-+			next_p = ktime_get();
-+			div_u64_rem(next_p, TICK_NSEC, &rem);
-+			if (rem) {
-+				next_p -= rem;
-+				next_p += TICK_NSEC;
-+			}
+-	do {
++	/* Can be written by a different task concurrently in the loop below */
++	start = READ_ONCE(sig->next_posix_timer_id);
 +
-+			tick_next_period = next_p;
- #ifdef CONFIG_NO_HZ_FULL
- 			/*
- 			 * The boot CPU may be nohz_full, in which case set
++	for (id = ~start; start != id; id++) {
+ 		spin_lock(&hash_lock);
+-		head = &posix_timers_hashtable[hash(sig, sig->posix_timer_id)];
+-		if (!__posix_timers_find(head, sig, sig->posix_timer_id)) {
++		id = sig->next_posix_timer_id;
++
++		/* Write the next ID back. Clamp it to the positive space */
++		WRITE_ONCE(sig->next_posix_timer_id, (id + 1) & INT_MAX);
++
++		head = &posix_timers_hashtable[hash(sig, id)];
++		if (!__posix_timers_find(head, sig, id)) {
+ 			hlist_add_head_rcu(&timer->t_hash, head);
+-			ret = sig->posix_timer_id;
++			spin_unlock(&hash_lock);
++			return id;
+ 		}
+-		if (++sig->posix_timer_id < 0)
+-			sig->posix_timer_id = 0;
+-		if ((sig->posix_timer_id == first_free_id) && (ret == -ENOENT))
+-			/* Loop over all possible ids completed */
+-			ret = -EAGAIN;
+ 		spin_unlock(&hash_lock);
+-	} while (ret == -ENOENT);
+-	return ret;
++	}
++	/* POSIX return code when no timer ID could be allocated */
++	return -EAGAIN;
+ }
+ 
+ static inline void unlock_timer(struct k_itimer *timr, unsigned long flags)
+@@ -1033,27 +1037,59 @@ SYSCALL_DEFINE1(timer_delete, timer_t, timer_id)
+ }
+ 
+ /*
+- * return timer owned by the process, used by exit_itimers
++ * Delete a timer if it is armed, remove it from the hash and schedule it
++ * for RCU freeing.
+  */
+ static void itimer_delete(struct k_itimer *timer)
+ {
+-retry_delete:
+-	spin_lock_irq(&timer->it_lock);
++	unsigned long flags;
+ 
++retry_delete:
++	/*
++	 * irqsave is required to make timer_wait_running() work.
++	 */
++	spin_lock_irqsave(&timer->it_lock, flags);
++
++	/*
++	 * Even if the timer is not longer accessible from other tasks
++	 * it still might be armed and queued in the underlying timer
++	 * mechanism. Worse, that timer mechanism might run the expiry
++	 * function concurrently.
++	 */
+ 	if (timer_delete_hook(timer) == TIMER_RETRY) {
+-		spin_unlock_irq(&timer->it_lock);
++		/*
++		 * Timer is expired concurrently, prevent livelocks
++		 * and pointless spinning on RT.
++		 *
++		 * The CONFIG_POSIX_CPU_TIMERS_TASK_WORK=y case is
++		 * irrelevant here because obviously the exiting task
++		 * cannot be expiring timer in task work concurrently.
++		 * Ditto for CONFIG_POSIX_CPU_TIMERS_TASK_WORK=n as the
++		 * tick interrupt cannot run on this CPU because the above
++		 * spin_lock disabled interrupts.
++		 *
++		 * timer_wait_running() drops timer::it_lock, which opens
++		 * the possibility for another task to delete the timer.
++		 *
++		 * That's not possible here because this is invoked from
++		 * do_exit() only for the last thread of the thread group.
++		 * So no other task can access that timer.
++		 */
++		if (WARN_ON_ONCE(timer_wait_running(timer, &flags) != timer))
++			return;
++
+ 		goto retry_delete;
+ 	}
+ 	list_del(&timer->list);
+ 
+-	spin_unlock_irq(&timer->it_lock);
++	spin_unlock_irqrestore(&timer->it_lock, flags);
+ 	release_posix_timer(timer, IT_ID_SET);
+ }
+ 
+ /*
+- * This is called by do_exit or de_thread, only when nobody else can
+- * modify the signal->posix_timers list. Yet we need sighand->siglock
+- * to prevent the race with /proc/pid/timers.
++ * Invoked from do_exit() when the last thread of a thread group exits.
++ * At that point no other task can access the timers of the dying
++ * task anymore.
+  */
+ void exit_itimers(struct task_struct *tsk)
+ {
+@@ -1063,10 +1099,12 @@ void exit_itimers(struct task_struct *tsk)
+ 	if (list_empty(&tsk->signal->posix_timers))
+ 		return;
+ 
++	/* Protect against concurrent read via /proc/$PID/timers */
+ 	spin_lock_irq(&tsk->sighand->siglock);
+ 	list_replace_init(&tsk->signal->posix_timers, &timers);
+ 	spin_unlock_irq(&tsk->sighand->siglock);
+ 
++	/* The timers are not longer accessible via tsk::signal */
+ 	while (!list_empty(&timers)) {
+ 		tmr = list_first_entry(&timers, struct k_itimer, list);
+ 		itimer_delete(tmr);
 diff --git a/kernel/time/tick-sched.c b/kernel/time/tick-sched.c
 index b0e3c9205946f..133e4160ed54b 100644
 --- a/kernel/time/tick-sched.c
@@ -7626,11 +7788,11 @@ index bd475a00f96d1..89d4a3bfdc6d5 100644
  	else
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..05c35cb580779
+index 0000000000000..9f7d0bdbffb18
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt11
++-rt13
 diff --git a/net/core/dev.c b/net/core/dev.c
 index 1488f700bf819..8c3b70160be8c 100644
 --- a/net/core/dev.c
