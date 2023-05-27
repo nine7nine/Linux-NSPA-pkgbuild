@@ -1046,7 +1046,7 @@ index 2c430c0c3badd..7ec828637d622 100644
  #else
  # define _WAIT_FOR_ATOMIC_CHECK(ATOMIC) do { } while (0)
 diff --git a/drivers/tty/serial/8250/8250.h b/drivers/tty/serial/8250/8250.h
-index 287153d325365..d834fbc0c9135 100644
+index 1e8fe44a7099f..b336d00d7988e 100644
 --- a/drivers/tty/serial/8250/8250.h
 +++ b/drivers/tty/serial/8250/8250.h
 @@ -177,12 +177,277 @@ static inline void serial_dl_write(struct uart_8250_port *up, int value)
@@ -1351,7 +1351,7 @@ index 9d2a7856784f7..7cc6b527c088b 100644
  static void aspeed_vuart_set_throttle(struct uart_port *port, bool throttle)
  {
 diff --git a/drivers/tty/serial/8250/8250_bcm7271.c b/drivers/tty/serial/8250/8250_bcm7271.c
-index ed5a947476920..c6f2cd3f19b5d 100644
+index f801b1f5b46c0..a29f5f45d22f2 100644
 --- a/drivers/tty/serial/8250/8250_bcm7271.c
 +++ b/drivers/tty/serial/8250/8250_bcm7271.c
 @@ -606,8 +606,10 @@ static int brcmuart_startup(struct uart_port *port)
@@ -1741,10 +1741,10 @@ index 734f092ef839a..bfa50a26349dd 100644
  	schedule_work(&priv->qos_work);
  	return 0;
 diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_port.c
-index 3ba9c8b93ae6c..8cf27f857efae 100644
+index fe8d79c4ae95e..68f01f8bdf64b 100644
 --- a/drivers/tty/serial/8250/8250_port.c
 +++ b/drivers/tty/serial/8250/8250_port.c
-@@ -744,6 +744,7 @@ static void serial8250_set_sleep(struct uart_8250_port *p, int sleep)
+@@ -745,6 +745,7 @@ static void serial8250_set_sleep(struct uart_8250_port *p, int sleep)
  	serial8250_rpm_get(p);
  
  	if (p->capabilities & UART_CAP_SLEEP) {
@@ -1752,7 +1752,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  		if (p->capabilities & UART_CAP_EFR) {
  			lcr = serial_in(p, UART_LCR);
  			efr = serial_in(p, UART_EFR);
-@@ -751,25 +752,18 @@ static void serial8250_set_sleep(struct uart_8250_port *p, int sleep)
+@@ -752,25 +753,18 @@ static void serial8250_set_sleep(struct uart_8250_port *p, int sleep)
  			serial_out(p, UART_EFR, UART_EFR_ECB);
  			serial_out(p, UART_LCR, 0);
  		}
@@ -1780,7 +1780,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  #ifdef CONFIG_SERIAL_8250_RSA
  /*
   * Attempts to turn on the RSA FIFO.  Returns zero on failure.
-@@ -1033,8 +1027,10 @@ static int broken_efr(struct uart_8250_port *up)
+@@ -1034,8 +1028,10 @@ static int broken_efr(struct uart_8250_port *up)
   */
  static void autoconfig_16550a(struct uart_8250_port *up)
  {
@@ -1791,7 +1791,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	up->port.type = PORT_16550A;
  	up->capabilities |= UART_CAP_FIFO;
-@@ -1150,6 +1146,11 @@ static void autoconfig_16550a(struct uart_8250_port *up)
+@@ -1151,6 +1147,11 @@ static void autoconfig_16550a(struct uart_8250_port *up)
  		return;
  	}
  
@@ -1803,7 +1803,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	/*
  	 * Try writing and reading the UART_IER_UUE bit (b6).
  	 * If it works, this is probably one of the Xscale platform's
-@@ -1185,6 +1186,9 @@ static void autoconfig_16550a(struct uart_8250_port *up)
+@@ -1186,6 +1187,9 @@ static void autoconfig_16550a(struct uart_8250_port *up)
  	}
  	serial_out(up, UART_IER, iersave);
  
@@ -1813,7 +1813,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	/*
  	 * We distinguish between 16550A and U6 16550A by counting
  	 * how many bytes are in the FIFO.
-@@ -1226,6 +1230,13 @@ static void autoconfig(struct uart_8250_port *up)
+@@ -1227,6 +1231,13 @@ static void autoconfig(struct uart_8250_port *up)
  	up->bugs = 0;
  
  	if (!(port->flags & UPF_BUGGY_UART)) {
@@ -1827,7 +1827,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  		/*
  		 * Do a simple existence test first; if we fail this,
  		 * there's no point trying anything else.
-@@ -1255,6 +1266,10 @@ static void autoconfig(struct uart_8250_port *up)
+@@ -1256,6 +1267,10 @@ static void autoconfig(struct uart_8250_port *up)
  #endif
  		scratch3 = serial_in(up, UART_IER) & UART_IER_ALL_INTR;
  		serial_out(up, UART_IER, scratch);
@@ -1838,7 +1838,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  		if (scratch2 != 0 || scratch3 != UART_IER_ALL_INTR) {
  			/*
  			 * We failed; there's nothing here
-@@ -1376,6 +1391,7 @@ static void autoconfig_irq(struct uart_8250_port *up)
+@@ -1377,6 +1392,7 @@ static void autoconfig_irq(struct uart_8250_port *up)
  	unsigned char save_ICP = 0;
  	unsigned int ICP = 0;
  	unsigned long irqs;
@@ -1846,7 +1846,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	int irq;
  
  	if (port->flags & UPF_FOURPORT) {
-@@ -1385,8 +1401,12 @@ static void autoconfig_irq(struct uart_8250_port *up)
+@@ -1386,8 +1402,12 @@ static void autoconfig_irq(struct uart_8250_port *up)
  		inb_p(ICP);
  	}
  
@@ -1860,7 +1860,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	/* forget possible initially masked and pending IRQ */
  	probe_irq_off(probe_irq_on());
-@@ -1418,8 +1438,10 @@ static void autoconfig_irq(struct uart_8250_port *up)
+@@ -1419,8 +1439,10 @@ static void autoconfig_irq(struct uart_8250_port *up)
  	if (port->flags & UPF_FOURPORT)
  		outb_p(save_ICP, ICP);
  
@@ -1872,7 +1872,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	port->irq = (irq > 0) ? irq : 0;
  }
-@@ -1432,7 +1454,7 @@ static void serial8250_stop_rx(struct uart_port *port)
+@@ -1433,7 +1455,7 @@ static void serial8250_stop_rx(struct uart_port *port)
  
  	up->ier &= ~(UART_IER_RLSI | UART_IER_RDI);
  	up->port.read_status_mask &= ~UART_LSR_DR;
@@ -1881,7 +1881,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	serial8250_rpm_put(up);
  }
-@@ -1462,7 +1484,7 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p)
+@@ -1463,7 +1485,7 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p)
  		serial8250_clear_and_reinit_fifos(p);
  
  		p->ier |= UART_IER_RLSI | UART_IER_RDI;
@@ -1890,7 +1890,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	}
  }
  EXPORT_SYMBOL_GPL(serial8250_em485_stop_tx);
-@@ -1709,7 +1731,7 @@ static void serial8250_disable_ms(struct uart_port *port)
+@@ -1710,7 +1732,7 @@ static void serial8250_disable_ms(struct uart_port *port)
  	mctrl_gpio_disable_ms(up->gpios);
  
  	up->ier &= ~UART_IER_MSI;
@@ -1899,7 +1899,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  }
  
  static void serial8250_enable_ms(struct uart_port *port)
-@@ -1725,7 +1747,7 @@ static void serial8250_enable_ms(struct uart_port *port)
+@@ -1726,7 +1748,7 @@ static void serial8250_enable_ms(struct uart_port *port)
  	up->ier |= UART_IER_MSI;
  
  	serial8250_rpm_get(up);
@@ -1908,7 +1908,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	serial8250_rpm_put(up);
  }
  
-@@ -2171,9 +2193,10 @@ static void serial8250_put_poll_char(struct uart_port *port,
+@@ -2176,9 +2198,10 @@ static void serial8250_put_poll_char(struct uart_port *port,
  	serial8250_rpm_get(up);
  	/*
  	 *	First save the IER then disable the interrupts
@@ -1921,7 +1921,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	wait_for_xmitr(up, UART_LSR_BOTH_EMPTY);
  	/*
-@@ -2186,7 +2209,7 @@ static void serial8250_put_poll_char(struct uart_port *port,
+@@ -2191,7 +2214,7 @@ static void serial8250_put_poll_char(struct uart_port *port,
  	 *	and restore the IER
  	 */
  	wait_for_xmitr(up, UART_LSR_BOTH_EMPTY);
@@ -1930,7 +1930,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	serial8250_rpm_put(up);
  }
  
-@@ -2197,6 +2220,7 @@ int serial8250_do_startup(struct uart_port *port)
+@@ -2202,6 +2225,7 @@ int serial8250_do_startup(struct uart_port *port)
  	struct uart_8250_port *up = up_to_u8250p(port);
  	unsigned long flags;
  	unsigned char iir;
@@ -1938,7 +1938,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	int retval;
  	u16 lsr;
  
-@@ -2214,21 +2238,25 @@ int serial8250_do_startup(struct uart_port *port)
+@@ -2219,21 +2243,25 @@ int serial8250_do_startup(struct uart_port *port)
  	serial8250_rpm_get(up);
  	if (port->type == PORT_16C950) {
  		/* Wake up and initialize UART */
@@ -1966,7 +1966,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  		mdelay(10);
  
  		/* Enable Tx, Rx and free run mode */
-@@ -2326,6 +2354,8 @@ int serial8250_do_startup(struct uart_port *port)
+@@ -2331,6 +2359,8 @@ int serial8250_do_startup(struct uart_port *port)
  	if (retval)
  		goto out;
  
@@ -1975,7 +1975,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	if (port->irq && !(up->port.flags & UPF_NO_THRE_TEST)) {
  		unsigned char iir1;
  
-@@ -2342,6 +2372,9 @@ int serial8250_do_startup(struct uart_port *port)
+@@ -2347,6 +2377,9 @@ int serial8250_do_startup(struct uart_port *port)
  		 */
  		spin_lock_irqsave(&port->lock, flags);
  
@@ -1985,7 +1985,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  		wait_for_xmitr(up, UART_LSR_THRE);
  		serial_port_out_sync(port, UART_IER, UART_IER_THRI);
  		udelay(1); /* allow THRE to set */
-@@ -2352,6 +2385,9 @@ int serial8250_do_startup(struct uart_port *port)
+@@ -2357,6 +2390,9 @@ int serial8250_do_startup(struct uart_port *port)
  		iir = serial_port_in(port, UART_IIR);
  		serial_port_out(port, UART_IER, 0);
  
@@ -1995,7 +1995,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  		spin_unlock_irqrestore(&port->lock, flags);
  
  		if (port->irqflags & IRQF_SHARED)
-@@ -2406,10 +2442,14 @@ int serial8250_do_startup(struct uart_port *port)
+@@ -2411,10 +2447,14 @@ int serial8250_do_startup(struct uart_port *port)
  	 * Do a quick test to see if we receive an interrupt when we enable
  	 * the TX irq.
  	 */
@@ -2010,7 +2010,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	if (lsr & UART_LSR_TEMT && iir & UART_IIR_NO_INT) {
  		if (!(up->bugs & UART_BUG_TXEN)) {
-@@ -2441,7 +2481,7 @@ int serial8250_do_startup(struct uart_port *port)
+@@ -2446,7 +2486,7 @@ int serial8250_do_startup(struct uart_port *port)
  	if (up->dma) {
  		const char *msg = NULL;
  
@@ -2019,7 +2019,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  			msg = "forbid DMA for kernel console";
  		else if (serial8250_request_dma(up))
  			msg = "failed to request DMA";
-@@ -2492,7 +2532,7 @@ void serial8250_do_shutdown(struct uart_port *port)
+@@ -2497,7 +2537,7 @@ void serial8250_do_shutdown(struct uart_port *port)
  	 */
  	spin_lock_irqsave(&port->lock, flags);
  	up->ier = 0;
@@ -2028,7 +2028,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	spin_unlock_irqrestore(&port->lock, flags);
  
  	synchronize_irq(port->irq);
-@@ -2858,7 +2898,7 @@ serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
+@@ -2863,7 +2903,7 @@ serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
  	if (up->capabilities & UART_CAP_RTOIE)
  		up->ier |= UART_IER_RTOIE;
  
@@ -2037,7 +2037,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	if (up->capabilities & UART_CAP_EFR) {
  		unsigned char efr = 0;
-@@ -3323,12 +3363,21 @@ EXPORT_SYMBOL_GPL(serial8250_set_defaults);
+@@ -3328,12 +3368,21 @@ EXPORT_SYMBOL_GPL(serial8250_set_defaults);
  
  #ifdef CONFIG_SERIAL_8250_CONSOLE
  
@@ -2060,7 +2060,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  }
  
  /*
-@@ -3357,33 +3406,119 @@ static void serial8250_console_restore(struct uart_8250_port *up)
+@@ -3362,33 +3411,119 @@ static void serial8250_console_restore(struct uart_8250_port *up)
  	serial8250_out_MCR(up, up->mcr | UART_MCR_DTR | UART_MCR_RTS);
  }
  
@@ -2203,7 +2203,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  }
  
  /*
-@@ -3395,78 +3530,116 @@ static void serial8250_console_fifo_write(struct uart_8250_port *up,
+@@ -3400,78 +3535,116 @@ static void serial8250_console_fifo_write(struct uart_8250_port *up,
   *	Doing runtime PM is really a bad idea for the kernel console.
   *	Thus, we assume the function is called when device is powered up.
   */
@@ -2367,7 +2367,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  
  	/*
  	 *	The receive handling will happen properly because the
-@@ -3478,8 +3651,9 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
+@@ -3483,8 +3656,9 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
  	if (up->msr_saved_flags)
  		serial8250_modem_status(up);
  
@@ -2379,7 +2379,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  }
  
  static unsigned int probe_baud(struct uart_port *port)
-@@ -3499,6 +3673,7 @@ static unsigned int probe_baud(struct uart_port *port)
+@@ -3504,6 +3678,7 @@ static unsigned int probe_baud(struct uart_port *port)
  
  int serial8250_console_setup(struct uart_port *port, char *options, bool probe)
  {
@@ -2387,7 +2387,7 @@ index 3ba9c8b93ae6c..8cf27f857efae 100644
  	int baud = 9600;
  	int bits = 8;
  	int parity = 'n';
-@@ -3508,6 +3683,8 @@ int serial8250_console_setup(struct uart_port *port, char *options, bool probe)
+@@ -3513,6 +3688,8 @@ int serial8250_console_setup(struct uart_port *port, char *options, bool probe)
  	if (!port->iobase && !port->membase)
  		return -ENODEV;
  
@@ -2483,7 +2483,7 @@ index 82d35dbbfa6cb..511cf17d87958 100644
  
  static int __init
 diff --git a/drivers/tty/serial/serial_core.c b/drivers/tty/serial/serial_core.c
-index 2bd32c8ece393..9901f916dc1ad 100644
+index 728cb72be0666..409892b777d16 100644
 --- a/drivers/tty/serial/serial_core.c
 +++ b/drivers/tty/serial/serial_core.c
 @@ -2336,8 +2336,11 @@ int uart_suspend_port(struct uart_driver *drv, struct uart_port *uport)
@@ -2513,7 +2513,7 @@ index 2bd32c8ece393..9901f916dc1ad 100644
  			console_start(uport->cons);
  	}
 diff --git a/drivers/tty/tty_io.c b/drivers/tty/tty_io.c
-index 36fb945fdad48..af0f53cec843f 100644
+index 8e3de07f103da..af933c7a61d98 100644
 --- a/drivers/tty/tty_io.c
 +++ b/drivers/tty/tty_io.c
 @@ -3543,8 +3543,13 @@ static ssize_t show_cons_active(struct device *dev,
@@ -3366,7 +3366,7 @@ index 0e373222a6df8..47017fcf5481f 100644
  	TRACE_FLAG_BH_OFF		= 0x80,
  };
 diff --git a/include/trace/events/timer.h b/include/trace/events/timer.h
-index 2e713a7d9aa3a..5d43751a766c6 100644
+index 3e8619c72f774..b4bc2828fa09f 100644
 --- a/include/trace/events/timer.h
 +++ b/include/trace/events/timer.h
 @@ -158,7 +158,11 @@ DEFINE_EVENT(timer_class, timer_cancel,
@@ -3641,7 +3641,7 @@ index c201aadb93017..5be92ca5afabc 100644
  		return -EINTR;
  
 diff --git a/kernel/locking/rwsem.c b/kernel/locking/rwsem.c
-index acb5a50309a18..aca266006ad47 100644
+index 9eabd585ce7af..e304db9ebfd95 100644
 --- a/kernel/locking/rwsem.c
 +++ b/kernel/locking/rwsem.c
 @@ -1415,6 +1415,12 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
@@ -7070,7 +7070,7 @@ index 0d18c3969f904..a57a1a3beeba1 100644
  	 * The idle tasks have their own, simple scheduling class:
  	 */
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 5f6587d94c1dd..78c7702ef83a1 100644
+index ed89be0aa6503..46ffbbfde97b0 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -4948,7 +4948,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
@@ -7480,7 +7480,7 @@ index e8c08292defcb..10c1246cdba76 100644
  
  	__hrtimer_run_queues(cpu_base, now, flags, HRTIMER_ACTIVE_HARD);
 diff --git a/kernel/time/posix-timers.c b/kernel/time/posix-timers.c
-index 0c8a87a11b39d..863b8ac073c30 100644
+index 808a247205a9a..c0a32aab8f276 100644
 --- a/kernel/time/posix-timers.c
 +++ b/kernel/time/posix-timers.c
 @@ -140,25 +140,29 @@ static struct k_itimer *posix_timer_by_id(timer_t id)
@@ -7526,7 +7526,7 @@ index 0c8a87a11b39d..863b8ac073c30 100644
  }
  
  static inline void unlock_timer(struct k_itimer *timr, unsigned long flags)
-@@ -1033,27 +1037,59 @@ SYSCALL_DEFINE1(timer_delete, timer_t, timer_id)
+@@ -1037,27 +1041,59 @@ SYSCALL_DEFINE1(timer_delete, timer_t, timer_id)
  }
  
  /*
@@ -7594,7 +7594,7 @@ index 0c8a87a11b39d..863b8ac073c30 100644
   */
  void exit_itimers(struct task_struct *tsk)
  {
-@@ -1063,10 +1099,12 @@ void exit_itimers(struct task_struct *tsk)
+@@ -1067,10 +1103,12 @@ void exit_itimers(struct task_struct *tsk)
  	if (list_empty(&tsk->signal->posix_timers))
  		return;
  
@@ -7608,10 +7608,10 @@ index 0c8a87a11b39d..863b8ac073c30 100644
  		tmr = list_first_entry(&timers, struct k_itimer, list);
  		itimer_delete(tmr);
 diff --git a/kernel/time/tick-sched.c b/kernel/time/tick-sched.c
-index b0e3c9205946f..133e4160ed54b 100644
+index a46506f7ec6d0..1ae9e4e8a0715 100644
 --- a/kernel/time/tick-sched.c
 +++ b/kernel/time/tick-sched.c
-@@ -779,7 +779,7 @@ static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)
+@@ -789,7 +789,7 @@ static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)
  
  static inline bool local_timer_softirq_pending(void)
  {
@@ -7634,7 +7634,7 @@ index 63a8ce7177dd4..7cad6fe3c035c 100644
  
  /*
 diff --git a/kernel/trace/trace.c b/kernel/trace/trace.c
-index 36a6037823cd9..d7b5e68954c43 100644
+index 5909aaf2f4c08..2867def70f441 100644
 --- a/kernel/trace/trace.c
 +++ b/kernel/trace/trace.c
 @@ -2694,11 +2694,19 @@ unsigned int tracing_gen_ctx_irq_test(unsigned int irqs_status)
@@ -7788,11 +7788,11 @@ index bd475a00f96d1..89d4a3bfdc6d5 100644
  	else
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..9f7d0bdbffb18
+index 0000000000000..18777ec0c27d4
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt13
++-rt15
 diff --git a/net/core/dev.c b/net/core/dev.c
 index 1488f700bf819..8c3b70160be8c 100644
 --- a/net/core/dev.c
@@ -7857,10 +7857,10 @@ index 1488f700bf819..8c3b70160be8c 100644
  
  		init_gro_hash(&sd->backlog);
 diff --git a/net/core/skbuff.c b/net/core/skbuff.c
-index 4c0879798eb8a..84cef11c5f417 100644
+index 14bb41aafee30..3f8dac23205c6 100644
 --- a/net/core/skbuff.c
 +++ b/net/core/skbuff.c
-@@ -6845,6 +6845,11 @@ nodefer:	__kfree_skb(skb);
+@@ -6856,6 +6856,11 @@ nodefer:	__kfree_skb(skb);
  	/* Make sure to trigger NET_RX_SOFTIRQ on the remote CPU
  	 * if we are unlucky enough (this seems very unlikely).
  	 */
