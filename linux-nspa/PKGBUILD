@@ -68,7 +68,7 @@ _nf_cone=y
 
  pkgbase=linux-nspa
 _major=6.3
-_minor=4
+_minor=5
 #_minorc=$((_minor+1))
 #_rcver=rc8
 pkgver=${_major}
@@ -76,21 +76,21 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.3.4
+_srcname=linux-6.3.5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=13
+pkgrel=14
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.3.4.tar.xz"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.3.5.tar.xz"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
-  "0000-patch-6.3.4-rt15.patch"
+  "0000-patch-6.3.5-rt16.patch"
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
@@ -459,7 +459,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('d8627528ed6b3ae607d00b1ef5a46e0e7051ae40b285fd4e82f4ff0bb72b68e8'
+sha256sums=('f5cd478c3d8b908ab606afd1e95a4f8f77e7186b4a82829251d6e6aaafff825e'
             'b46d9ad0b119a227f754c2aa8803daf328dc7cafa15280252b5b6a6ae163980f'
             '0f33b112f98312fde160254bcb0da7e143862f6b0863277ad85bde9588226537'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
