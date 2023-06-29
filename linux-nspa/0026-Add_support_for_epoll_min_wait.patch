@@ -2,35 +2,27 @@ diff --git a/fs/eventpoll.c b/fs/eventpoll.c
 index 52954d4637b5..3061bdde6cba 100644
 --- a/fs/eventpoll.c
 +++ b/fs/eventpoll.c
-@@ -1869,14 +1869,15 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		 * important.
- 		 */
- 		eavail = ep_events_available(ep);
--		if (!eavail)
-+		if (!eavail) {
- 			__add_wait_queue_exclusive(&ep->wq, &wait);
--
--		write_unlock_irq(&ep->lock);
--
--		if (!eavail)
-+			write_unlock_irq(&ep->lock);
- 			timed_out = !schedule_hrtimeout_range(to, slack,
- 							      HRTIMER_MODE_ABS);
-+		} else {
-+			write_unlock_irq(&ep->lock);
-+		}
-+
- 		__set_current_state(TASK_RUNNING);
+@@ -111,6 +111,9 @@ struct eppoll_entry {
+ 	/* The "base" pointer is set to the container "struct epitem" */
+ 	struct epitem *base;
  
- 		/*
--- 
-2.35.1
-
-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index 3061bdde6cba..64d7331353dd 100644
---- a/fs/eventpoll.c
-+++ b/fs/eventpoll.c
-@@ -396,12 +396,12 @@ static bool ep_busy_loop_end(void *p, unsigned long start_time)
++	/* min wait time if (min_wait_ts) & 1 != 0 */
++	ktime_t min_wait_ts;
++
+ 	/*
+ 	 * Wait queue item that will be linked to the target file wait
+ 	 * queue head.
+@@ -224,6 +227,9 @@ struct eventpoll {
+ 	 */
+ 	refcount_t refcount;
+ 
++	/* min wait for epoll_wait() */
++	unsigned int min_wait_ts;
++
+ #ifdef CONFIG_NET_RX_BUSY_POLL
+ 	/* used to track busy poll napi_id */
+ 	unsigned int napi_id;
+@@ -401,12 +407,12 @@ static bool ep_busy_loop_end(void *p, un
   *
   * we must do our busy polling with irqs enabled
   */
@@ -45,7 +37,7 @@ index 3061bdde6cba..64d7331353dd 100644
  			       BUSY_POLL_BUDGET);
  		if (ep_events_available(ep))
  			return true;
-@@ -453,7 +453,7 @@ static inline void ep_set_busy_poll_napi_id(struct epitem *epi)
+@@ -458,7 +464,7 @@ static inline void ep_set_busy_poll_napi
  
  #else
  
@@ -54,269 +46,7 @@ index 3061bdde6cba..64d7331353dd 100644
  {
  	return false;
  }
-@@ -1826,7 +1826,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		if (timed_out)
- 			return 0;
- 
--		eavail = ep_busy_loop(ep, timed_out);
-+		eavail = ep_busy_loop(ep);
- 		if (eavail)
- 			continue;
- 
--- 
-2.35.1
-
-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index 64d7331353dd..888f565d0c5f 100644
---- a/fs/eventpoll.c
-+++ b/fs/eventpoll.c
-@@ -1762,6 +1762,47 @@ static int ep_autoremove_wake_function(struct wait_queue_entry *wq_entry,
- 	return ret;
- }
- 
-+struct epoll_wq {
-+	wait_queue_entry_t wait;
-+	struct hrtimer timer;
-+	bool timed_out;
-+};
-+
-+static enum hrtimer_restart ep_timer(struct hrtimer *timer)
-+{
-+	struct epoll_wq *ewq = container_of(timer, struct epoll_wq, timer);
-+	struct task_struct *task = ewq->wait.private;
-+
-+	ewq->timed_out = true;
-+	wake_up_process(task);
-+	return HRTIMER_NORESTART;
-+}
-+
-+static void ep_schedule(struct eventpoll *ep, struct epoll_wq *ewq, ktime_t *to,
-+			u64 slack)
-+{
-+	if (ewq->timed_out)
-+		return;
-+	if (to && *to == 0) {
-+		ewq->timed_out = true;
-+		return;
-+	}
-+	if (!to) {
-+		schedule();
-+		return;
-+	}
-+
-+	hrtimer_init_on_stack(&ewq->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-+	ewq->timer.function = ep_timer;
-+	hrtimer_set_expires_range_ns(&ewq->timer, *to, slack);
-+	hrtimer_start_expires(&ewq->timer, HRTIMER_MODE_ABS);
-+
-+	schedule();
-+
-+	hrtimer_cancel(&ewq->timer);
-+	destroy_hrtimer_on_stack(&ewq->timer);
-+}
-+
- /**
-  * ep_poll - Retrieves ready events, and delivers them to the caller-supplied
-  *           event buffer.
-@@ -1782,13 +1823,15 @@ static int ep_autoremove_wake_function(struct wait_queue_entry *wq_entry,
- static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		   int maxevents, struct timespec64 *timeout)
- {
--	int res, eavail, timed_out = 0;
-+	int res, eavail;
- 	u64 slack = 0;
--	wait_queue_entry_t wait;
- 	ktime_t expires, *to = NULL;
-+	struct epoll_wq ewq;
- 
- 	lockdep_assert_irqs_enabled();
- 
-+	ewq.timed_out = false;
-+
- 	if (timeout && (timeout->tv_sec | timeout->tv_nsec)) {
- 		slack = select_estimate_accuracy(timeout);
- 		to = &expires;
-@@ -1798,7 +1841,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		 * Avoid the unnecessary trip to the wait queue loop, if the
- 		 * caller specified a non blocking operation.
- 		 */
--		timed_out = 1;
-+		ewq.timed_out = true;
- 	}
- 
- 	/*
-@@ -1823,7 +1866,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 				return res;
- 		}
- 
--		if (timed_out)
-+		if (ewq.timed_out)
- 			return 0;
- 
- 		eavail = ep_busy_loop(ep);
-@@ -1850,8 +1893,8 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		 * performance issue if a process is killed, causing all of its
- 		 * threads to wake up without being removed normally.
- 		 */
--		init_wait(&wait);
--		wait.func = ep_autoremove_wake_function;
-+		init_wait(&ewq.wait);
-+		ewq.wait.func = ep_autoremove_wake_function;
- 
- 		write_lock_irq(&ep->lock);
- 		/*
-@@ -1870,10 +1913,9 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		 */
- 		eavail = ep_events_available(ep);
- 		if (!eavail) {
--			__add_wait_queue_exclusive(&ep->wq, &wait);
-+			__add_wait_queue_exclusive(&ep->wq, &ewq.wait);
- 			write_unlock_irq(&ep->lock);
--			timed_out = !schedule_hrtimeout_range(to, slack,
--							      HRTIMER_MODE_ABS);
-+			ep_schedule(ep, &ewq, to, slack);
- 		} else {
- 			write_unlock_irq(&ep->lock);
- 		}
-@@ -1887,7 +1929,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		 */
- 		eavail = 1;
- 
--		if (!list_empty_careful(&wait.entry)) {
-+		if (!list_empty_careful(&ewq.wait.entry)) {
- 			write_lock_irq(&ep->lock);
- 			/*
- 			 * If the thread timed out and is not on the wait queue,
-@@ -1896,9 +1938,9 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 			 * Thus, when wait.entry is empty, it needs to harvest
- 			 * events.
- 			 */
--			if (timed_out)
--				eavail = list_empty(&wait.entry);
--			__remove_wait_queue(&ep->wq, &wait);
-+			if (ewq.timed_out)
-+				eavail = list_empty(&ewq.wait.entry);
-+			__remove_wait_queue(&ep->wq, &ewq.wait);
- 			write_unlock_irq(&ep->lock);
- 		}
- 	}
--- 
-2.35.1
-
-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index 888f565d0c5f..0994f2eb6adc 100644
---- a/fs/eventpoll.c
-+++ b/fs/eventpoll.c
-@@ -1765,6 +1765,7 @@ static int ep_autoremove_wake_function(struct wait_queue_entry *wq_entry,
- struct epoll_wq {
- 	wait_queue_entry_t wait;
- 	struct hrtimer timer;
-+	ktime_t timeout_ts;
- 	bool timed_out;
- };
- 
-@@ -1825,7 +1826,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- {
- 	int res, eavail;
- 	u64 slack = 0;
--	ktime_t expires, *to = NULL;
-+	ktime_t *to = NULL;
- 	struct epoll_wq ewq;
- 
- 	lockdep_assert_irqs_enabled();
-@@ -1834,7 +1835,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 
- 	if (timeout && (timeout->tv_sec | timeout->tv_nsec)) {
- 		slack = select_estimate_accuracy(timeout);
--		to = &expires;
-+		to = &ewq.timeout_ts;
- 		*to = timespec64_to_ktime(*timeout);
- 	} else if (timeout) {
- 		/*
--- 
-2.35.1
-
-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index 0994f2eb6adc..962d897bbfc6 100644
---- a/fs/eventpoll.c
-+++ b/fs/eventpoll.c
-@@ -2111,6 +2111,20 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
- 	if (!f.file)
- 		goto error_return;
- 
-+	/*
-+	 * We have to check that the file structure underneath the file
-+	 * descriptor the user passed to us _is_ an eventpoll file.
-+	 */
-+	error = -EINVAL;
-+	if (!is_file_epoll(f.file))
-+		goto error_fput;
-+
-+	/*
-+	 * At this point it is safe to assume that the "private_data" contains
-+	 * our own data structure.
-+	 */
-+	ep = f.file->private_data;
-+
- 	/* Get the "struct file *" for the target file */
- 	tf = fdget(fd);
- 	if (!tf.file)
-@@ -2126,12 +2140,10 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
- 		ep_take_care_of_epollwakeup(epds);
- 
- 	/*
--	 * We have to check that the file structure underneath the file descriptor
--	 * the user passed to us _is_ an eventpoll file. And also we do not permit
--	 * adding an epoll file descriptor inside itself.
-+	 * We do not permit adding an epoll file descriptor inside itself.
- 	 */
- 	error = -EINVAL;
--	if (f.file == tf.file || !is_file_epoll(f.file))
-+	if (f.file == tf.file)
- 		goto error_tgt_fput;
- 
- 	/*
-@@ -2147,12 +2159,6 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
- 			goto error_tgt_fput;
- 	}
- 
--	/*
--	 * At this point it is safe to assume that the "private_data" contains
--	 * our own data structure.
--	 */
--	ep = f.file->private_data;
--
- 	/*
- 	 * When we insert an epoll file descriptor inside another epoll file
- 	 * descriptor, there is the chance of creating closed loops, which are
--- 
-2.35.1
-
-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index 962d897bbfc6..daa9885d9c2b 100644
---- a/fs/eventpoll.c
-+++ b/fs/eventpoll.c
-@@ -117,6 +117,9 @@ struct eppoll_entry {
- 	/* The "base" pointer is set to the container "struct epitem" */
- 	struct epitem *base;
- 
-+	/* min wait time if (min_wait_ts) & 1 != 0 */
-+	ktime_t min_wait_ts;
-+
- 	/*
- 	 * Wait queue item that will be linked to the target file wait
- 	 * queue head.
-@@ -217,6 +220,9 @@ struct eventpoll {
- 	u64 gen;
- 	struct hlist_head refs;
- 
-+	/* min wait for epoll_wait() */
-+	unsigned int min_wait_ts;
-+
- #ifdef CONFIG_NET_RX_BUSY_POLL
- 	/* used to track busy poll napi_id */
- 	unsigned int napi_id;
-@@ -1747,6 +1753,32 @@ static struct timespec64 *ep_timeout_to_timespec(struct timespec64 *to, long ms)
+@@ -1794,6 +1800,32 @@ static struct timespec64 *ep_timeout_to_
  	return to;
  }
  
@@ -349,14 +79,14 @@ index 962d897bbfc6..daa9885d9c2b 100644
  /*
   * autoremove_wake_function, but remove even on failure to wake up, because we
   * know that default_wake_function/ttwu will only fail if the thread is already
-@@ -1756,27 +1788,37 @@ static struct timespec64 *ep_timeout_to_timespec(struct timespec64 *to, long ms)
+@@ -1803,7 +1835,16 @@ static struct timespec64 *ep_timeout_to_
  static int ep_autoremove_wake_function(struct wait_queue_entry *wq_entry,
  				       unsigned int mode, int sync, void *key)
  {
 -	int ret = default_wake_function(wq_entry, mode, sync, key);
 +	struct epoll_wq *ewq = container_of(wq_entry, struct epoll_wq, wait);
 +	int ret;
- 
++ 
 +	/*
 +	 * If min wait time hasn't been satisfied yet, keep waiting
 +	 */
@@ -364,21 +94,17 @@ index 962d897bbfc6..daa9885d9c2b 100644
 +		return 0;
 +
 +	ret = default_wake_function(wq_entry, mode, sync, key);
- 	list_del_init(&wq_entry->entry);
+ 
+ 	/*
+ 	 * Pairs with list_empty_careful in ep_poll, and ensures future loop
+@@ -1813,6 +1854,50 @@ static int ep_autoremove_wake_function(s
  	return ret;
  }
  
--struct epoll_wq {
--	wait_queue_entry_t wait;
--	struct hrtimer timer;
--	ktime_t timeout_ts;
--	bool timed_out;
--};
--
- static enum hrtimer_restart ep_timer(struct hrtimer *timer)
- {
- 	struct epoll_wq *ewq = container_of(timer, struct epoll_wq, timer);
- 	struct task_struct *task = ewq->wait.private;
++static enum hrtimer_restart ep_timer(struct hrtimer *timer)
++{
++	struct epoll_wq *ewq = container_of(timer, struct epoll_wq, timer);
++	struct task_struct *task = ewq->wait.private;
 +	const bool is_min_wait = ewq->min_wait_ts & 1;
 +
 +	if (!is_min_wait || ep_events_available(ewq->ep)) {
@@ -388,38 +114,75 @@ index 962d897bbfc6..daa9885d9c2b 100644
 +		wake_up_process(task);
 +		return HRTIMER_NORESTART;
 +	}
- 
--	ewq->timed_out = true;
--	wake_up_process(task);
--	return HRTIMER_NORESTART;
++
 +	ewq->min_wait_ts &= ~(u64) 1;
 +	hrtimer_set_expires_range_ns(&ewq->timer, ewq->timeout_ts, 0);
 +	return HRTIMER_RESTART;
- }
- 
- static void ep_schedule(struct eventpoll *ep, struct epoll_wq *ewq, ktime_t *to,
-@@ -1831,12 +1873,16 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
++}
++
++static void ep_schedule(struct eventpoll *ep, struct epoll_wq *ewq, ktime_t *to,
++			u64 slack)
++{
++	if (ewq->timed_out)
++		return;
++	if (to && *to == 0) {
++		ewq->timed_out = true;
++		return;
++	}
++	if (!to) {
++		schedule();
++		return;
++	}
++
++	hrtimer_init_on_stack(&ewq->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
++	ewq->timer.function = ep_timer;
++	hrtimer_set_expires_range_ns(&ewq->timer, *to, slack);
++	hrtimer_start_expires(&ewq->timer, HRTIMER_MODE_ABS);
++
++	schedule();
++
++	hrtimer_cancel(&ewq->timer);
++	destroy_hrtimer_on_stack(&ewq->timer);
++}
++
+ /**
+  * ep_poll - Retrieves ready events, and delivers them to the caller-supplied
+  *           event buffer.
+@@ -1833,23 +1918,41 @@ static int ep_autoremove_wake_function(s
+ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+ 		   int maxevents, struct timespec64 *timeout)
+ {
+-	int res, eavail, timed_out = 0;
++	int res, eavail;
+ 	u64 slack = 0;
+-	wait_queue_entry_t wait;
+-	ktime_t expires, *to = NULL;
++	ktime_t *to = NULL;
++	struct epoll_wq ewq;
  
  	lockdep_assert_irqs_enabled();
  
 +	ewq.min_wait_ts = 0;
 +	ewq.ep = ep;
 +	ewq.maxevents = maxevents;
- 	ewq.timed_out = false;
++	ewq.timed_out = false;
 +	ewq.wakeups = 0;
- 
++
  	if (timeout && (timeout->tv_sec | timeout->tv_nsec)) {
  		slack = select_estimate_accuracy(timeout);
-+		ewq.timeout_ts = timespec64_to_ktime(*timeout);
- 		to = &ewq.timeout_ts;
+-		to = &expires;
 -		*to = timespec64_to_ktime(*timeout);
++		ewq.timeout_ts = timespec64_to_ktime(*timeout);
++		to = &ewq.timeout_ts;
  	} else if (timeout) {
  		/*
  		 * Avoid the unnecessary trip to the wait queue loop, if the
-@@ -1845,6 +1891,18 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
- 		ewq.timed_out = true;
- 	}
- 
+ 		 * caller specified a non blocking operation.
+ 		 */
+-		timed_out = 1;
++		ewq.timed_out = true;
++	}
++
 +	/*
 +	 * If min_wait is set for this epoll instance, note the min_wait
 +	 * time. Ensure the lowest bit is set in ewq.min_wait_ts, that's
@@ -430,31 +193,95 @@ index 962d897bbfc6..daa9885d9c2b 100644
 +						ep->min_wait_ts);
 +		ewq.min_wait_ts |= (u64) 1;
 +		to = &ewq.min_wait_ts;
-+	}
-+
+ 	}
+ 
  	/*
- 	 * This call is racy: We may or may not see events that are being added
- 	 * to the ready list under the lock (e.g., in IRQ callbacks). For cases
-@@ -1913,7 +1971,7 @@ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
+@@ -1874,10 +1977,10 @@ static int ep_poll(struct eventpoll *ep,
+ 				return res;
+ 		}
+ 
+-		if (timed_out)
++		if (ewq.timed_out)
+ 			return 0;
+ 
+-		eavail = ep_busy_loop(ep, timed_out);
++		eavail = ep_busy_loop(ep);
+ 		if (eavail)
+ 			continue;
+ 
+@@ -1901,8 +2004,8 @@ static int ep_poll(struct eventpoll *ep,
+ 		 * performance issue if a process is killed, causing all of its
+ 		 * threads to wake up without being removed normally.
+ 		 */
+-		init_wait(&wait);
+-		wait.func = ep_autoremove_wake_function;
++		init_wait(&ewq.wait);
++		ewq.wait.func = ep_autoremove_wake_function;
+ 
+ 		write_lock_irq(&ep->lock);
+ 		/*
+@@ -1920,14 +2023,14 @@ static int ep_poll(struct eventpoll *ep,
  		 * important.
  		 */
  		eavail = ep_events_available(ep);
--		if (!eavail) {
+-		if (!eavail)
+-			__add_wait_queue_exclusive(&ep->wq, &wait);
+-
+-		write_unlock_irq(&ep->lock);
 +		if (!eavail || ewq.min_wait_ts & 1) {
- 			__add_wait_queue_exclusive(&ep->wq, &ewq.wait);
- 			write_unlock_irq(&ep->lock);
- 			ep_schedule(ep, &ewq, to, slack);
--- 
-2.35.1
-
-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
-index daa9885d9c2b..ec7ffce8265a 100644
---- a/fs/eventpoll.c
-+++ b/fs/eventpoll.c
-@@ -2183,6 +2183,17 @@ int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
- 	 */
- 	ep = f.file->private_data;
++			__add_wait_queue_exclusive(&ep->wq, &ewq.wait);
++			write_unlock_irq(&ep->lock);
++			ep_schedule(ep, &ewq, to, slack);
++		} else {
++			write_unlock_irq(&ep->lock);
++		}
  
+-		if (!eavail)
+-			timed_out = !schedule_hrtimeout_range(to, slack,
+-							      HRTIMER_MODE_ABS);
+ 		__set_current_state(TASK_RUNNING);
+ 
+ 		/*
+@@ -1937,7 +2040,7 @@ static int ep_poll(struct eventpoll *ep,
+ 		 */
+ 		eavail = 1;
+ 
+-		if (!list_empty_careful(&wait.entry)) {
++		if (!list_empty_careful(&ewq.wait.entry)) {
+ 			write_lock_irq(&ep->lock);
+ 			/*
+ 			 * If the thread timed out and is not on the wait queue,
+@@ -1946,9 +2049,9 @@ static int ep_poll(struct eventpoll *ep,
+ 			 * Thus, when wait.entry is empty, it needs to harvest
+ 			 * events.
+ 			 */
+-			if (timed_out)
+-				eavail = list_empty(&wait.entry);
+-			__remove_wait_queue(&ep->wq, &wait);
++			if (ewq.timed_out)
++				eavail = list_empty(&ewq.wait.entry);
++			__remove_wait_queue(&ep->wq, &ewq.wait);
+ 			write_unlock_irq(&ep->lock);
+ 		}
+ 	}
+@@ -2131,6 +2234,31 @@ int do_epoll_ctl(int epfd, int op, int f
+ 	if (!f.file)
+ 		goto error_return;
+ 
++	/*
++	 * We have to check that the file structure underneath the file
++	 * descriptor the user passed to us _is_ an eventpoll file.
++	 */
++	error = -EINVAL;
++	if (!is_file_epoll(f.file))
++		goto error_fput;
++
++	/*
++	 * At this point it is safe to assume that the "private_data" contains
++	 * our own data structure.
++	 */
++	ep = f.file->private_data;
++
 +	/*
 +	 * Handle EPOLL_CTL_MIN_WAIT upfront as we don't need to care about
 +	 * the fd being passed in.
@@ -469,7 +296,35 @@ index daa9885d9c2b..ec7ffce8265a 100644
  	/* Get the "struct file *" for the target file */
  	tf = fdget(fd);
  	if (!tf.file)
-@@ -2315,7 +2326,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
+@@ -2146,12 +2274,10 @@ int do_epoll_ctl(int epfd, int op, int f
+ 		ep_take_care_of_epollwakeup(epds);
+ 
+ 	/*
+-	 * We have to check that the file structure underneath the file descriptor
+-	 * the user passed to us _is_ an eventpoll file. And also we do not permit
+-	 * adding an epoll file descriptor inside itself.
++	 * We do not permit adding an epoll file descriptor inside itself.
+ 	 */
+ 	error = -EINVAL;
+-	if (f.file == tf.file || !is_file_epoll(f.file))
++	if (f.file == tf.file)
+ 		goto error_tgt_fput;
+ 
+ 	/*
+@@ -2168,12 +2294,6 @@ int do_epoll_ctl(int epfd, int op, int f
+ 	}
+ 
+ 	/*
+-	 * At this point it is safe to assume that the "private_data" contains
+-	 * our own data structure.
+-	 */
+-	ep = f.file->private_data;
+-
+-	/*
+ 	 * When we insert an epoll file descriptor inside another epoll file
+ 	 * descriptor, there is the chance of creating closed loops, which are
+ 	 * better be handled here, than in more critical paths. While we are
+@@ -2277,7 +2397,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, in
  {
  	struct epoll_event epds;
  

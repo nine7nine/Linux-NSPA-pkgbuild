@@ -1,4 +1,4 @@
-From 4143ddc1e0a4eece17f89415103d53ac7a144bcf Mon Sep 17 00:00:00 2001
+From 3b17d057ec5f630fcc08270e8241d07710126642 Mon Sep 17 00:00:00 2001
 From: Tsuchiya Yuto <kitakar@gmail.com>
 Date: Sun, 18 Oct 2020 16:42:44 +0900
 Subject: [PATCH] (surface3-oemb) add DMI matches for Surface 3 with broken DMI
@@ -40,7 +40,7 @@ Patchset: surface3-oemb
  3 files changed, 24 insertions(+)
 
 diff --git a/drivers/platform/surface/surface3-wmi.c b/drivers/platform/surface/surface3-wmi.c
-index ca4602bcc7dea..490b9731068ae 100644
+index ca4602bcc7de..490b9731068a 100644
 --- a/drivers/platform/surface/surface3-wmi.c
 +++ b/drivers/platform/surface/surface3-wmi.c
 @@ -37,6 +37,13 @@ static const struct dmi_system_id surface3_dmi_table[] = {
@@ -58,7 +58,7 @@ index ca4602bcc7dea..490b9731068ae 100644
  	{ }
  };
 diff --git a/sound/soc/codecs/rt5645.c b/sound/soc/codecs/rt5645.c
-index 620ecbfa4a7a8..b07d06d2971a8 100644
+index 7c7cbb6362ea..81a8ff40e86e 100644
 --- a/sound/soc/codecs/rt5645.c
 +++ b/sound/soc/codecs/rt5645.c
 @@ -3717,6 +3717,15 @@ static const struct dmi_system_id dmi_platform_data[] = {
@@ -78,7 +78,7 @@ index 620ecbfa4a7a8..b07d06d2971a8 100644
  		/*
  		 * Match for the GPDwin which unfortunately uses somewhat
 diff --git a/sound/soc/intel/common/soc-acpi-intel-cht-match.c b/sound/soc/intel/common/soc-acpi-intel-cht-match.c
-index 6beb00858c33f..d82d77387a0a6 100644
+index cdcbf04b8832..958305779b12 100644
 --- a/sound/soc/intel/common/soc-acpi-intel-cht-match.c
 +++ b/sound/soc/intel/common/soc-acpi-intel-cht-match.c
 @@ -27,6 +27,14 @@ static const struct dmi_system_id cht_table[] = {
@@ -97,9 +97,9 @@ index 6beb00858c33f..d82d77387a0a6 100644
  };
  
 -- 
-2.39.2
+2.41.0
 
-From 602c7a892181d8c5df79e00bdbb70f5d60129a1b Mon Sep 17 00:00:00 2001
+From fbb3f095828b0449656c018f2452757afecaeb5c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
 Date: Tue, 3 Nov 2020 13:28:04 +0100
 Subject: [PATCH] mwifiex: Add quirk resetting the PCI bridge on MS Surface
@@ -133,7 +133,7 @@ Patchset: mwifiex
  3 files changed, 31 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/net/wireless/marvell/mwifiex/pcie.c b/drivers/net/wireless/marvell/mwifiex/pcie.c
-index 5dcf61761a165..84be9289caa63 100644
+index 9a698a16a8f3..14687342bc81 100644
 --- a/drivers/net/wireless/marvell/mwifiex/pcie.c
 +++ b/drivers/net/wireless/marvell/mwifiex/pcie.c
 @@ -1762,9 +1762,21 @@ mwifiex_pcie_send_boot_cmd(struct mwifiex_adapter *adapter, struct sk_buff *skb)
@@ -159,7 +159,7 @@ index 5dcf61761a165..84be9289caa63 100644
  	if (mwifiex_write_reg(adapter, reg->rx_rdptr, card->rxbd_rdptr |
  			      tx_wrap)) {
 diff --git a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
-index dd6d21f1dbfd7..f46b06f8d6435 100644
+index dd6d21f1dbfd..f46b06f8d643 100644
 --- a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
 +++ b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
 @@ -13,7 +13,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
@@ -252,7 +252,7 @@ index dd6d21f1dbfd7..f46b06f8d6435 100644
  
  static void mwifiex_pcie_set_power_d3cold(struct pci_dev *pdev)
 diff --git a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
-index d6ff964aec5bf..5d30ae39d65ec 100644
+index d6ff964aec5b..5d30ae39d65e 100644
 --- a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
 +++ b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
 @@ -4,6 +4,7 @@
@@ -264,9 +264,9 @@ index d6ff964aec5bf..5d30ae39d65ec 100644
  void mwifiex_initialize_quirks(struct pcie_service_card *card);
  int mwifiex_pcie_reset_d3cold_quirk(struct pci_dev *pdev);
 -- 
-2.39.2
+2.41.0
 
-From f53f8cc6075732f0f7fe9f8654a0315df9295efb Mon Sep 17 00:00:00 2001
+From 9828a9a24b8d9eb62651b2a39f0fb1dd16296acb Mon Sep 17 00:00:00 2001
 From: Tsuchiya Yuto <kitakar@gmail.com>
 Date: Sun, 4 Oct 2020 00:11:49 +0900
 Subject: [PATCH] mwifiex: pcie: disable bridge_d3 for Surface gen4+
@@ -288,7 +288,7 @@ Patchset: mwifiex
  3 files changed, 27 insertions(+), 8 deletions(-)
 
 diff --git a/drivers/net/wireless/marvell/mwifiex/pcie.c b/drivers/net/wireless/marvell/mwifiex/pcie.c
-index 84be9289caa63..98be0d3cc41cf 100644
+index 14687342bc81..5e1a341f63df 100644
 --- a/drivers/net/wireless/marvell/mwifiex/pcie.c
 +++ b/drivers/net/wireless/marvell/mwifiex/pcie.c
 @@ -368,6 +368,7 @@ static int mwifiex_pcie_probe(struct pci_dev *pdev,
@@ -313,7 +313,7 @@ index 84be9289caa63..98be0d3cc41cf 100644
  }
  
 diff --git a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
-index f46b06f8d6435..99b024ecbadea 100644
+index f46b06f8d643..99b024ecbade 100644
 --- a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
 +++ b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.c
 @@ -14,7 +14,8 @@ static const struct dmi_system_id mwifiex_quirk_table[] = {
@@ -407,7 +407,7 @@ index f46b06f8d6435..99b024ecbadea 100644
  
  static void mwifiex_pcie_set_power_d3cold(struct pci_dev *pdev)
 diff --git a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
-index 5d30ae39d65ec..c14eb56eb9118 100644
+index 5d30ae39d65e..c14eb56eb911 100644
 --- a/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
 +++ b/drivers/net/wireless/marvell/mwifiex/pcie_quirks.h
 @@ -5,6 +5,7 @@
@@ -419,9 +419,9 @@ index 5d30ae39d65ec..c14eb56eb9118 100644
  void mwifiex_initialize_quirks(struct pcie_service_card *card);
  int mwifiex_pcie_reset_d3cold_quirk(struct pci_dev *pdev);
 -- 
-2.39.2
+2.41.0
 
-From f891abd4ae978d47ddc73544439c3fdc21892697 Mon Sep 17 00:00:00 2001
+From ccf6126e8749057776e429d92218e59171c036e3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
 Date: Thu, 25 Mar 2021 11:33:02 +0100
 Subject: [PATCH] Bluetooth: btusb: Lower passive lescan interval on Marvell
@@ -457,7 +457,7 @@ Patchset: mwifiex
  1 file changed, 15 insertions(+)
 
 diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
-index 18bc947187115..1d5ff282d347d 100644
+index 0923582299f3..3a2c8e3bc244 100644
 --- a/drivers/bluetooth/btusb.c
 +++ b/drivers/bluetooth/btusb.c
 @@ -65,6 +65,7 @@ static struct usb_driver btusb_driver;
@@ -476,7 +476,7 @@ index 18bc947187115..1d5ff282d347d 100644
  
  	/* Intel Bluetooth devices */
  	{ USB_DEVICE(0x8087, 0x0025), .driver_info = BTUSB_INTEL_COMBINED },
-@@ -4043,6 +4045,19 @@ static int btusb_probe(struct usb_interface *intf,
+@@ -4036,6 +4038,19 @@ static int btusb_probe(struct usb_interface *intf,
  	if (id->driver_info & BTUSB_MARVELL)
  		hdev->set_bdaddr = btusb_set_bdaddr_marvell;
  
@@ -497,9 +497,9 @@ index 18bc947187115..1d5ff282d347d 100644
  	    (id->driver_info & BTUSB_MEDIATEK)) {
  		hdev->setup = btusb_mtk_setup;
 -- 
-2.39.2
+2.41.0
 
-From 2a55ea07586e522cebf3fc25f702b2e758035622 Mon Sep 17 00:00:00 2001
+From 3f9c889993ee523b617f32284c6ad760a1b2ce9b Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Sat, 27 Feb 2021 00:45:52 +0100
 Subject: [PATCH] ath10k: Add module parameters to override board files
@@ -521,7 +521,7 @@ Patchset: ath10k
  1 file changed, 58 insertions(+)
 
 diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
-index 5eb131ab916fd..67f074a126d1f 100644
+index 5eb131ab916f..67f074a126d1 100644
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
 @@ -38,6 +38,9 @@ static bool fw_diag_log;
@@ -618,9 +618,9 @@ index 5eb131ab916fd..67f074a126d1f 100644
  	ret = firmware_request_nowarn(&fw, filename, ar->dev);
  	ath10k_dbg(ar, ATH10K_DBG_BOOT, "boot fw request '%s': %d\n",
 -- 
-2.39.2
+2.41.0
 
-From b3bc32f2dd9526cdbfe33ee96bf1cb216575df53 Mon Sep 17 00:00:00 2001
+From ff06a31c95dbe92ac5969ad971c6b7ac88e4334d Mon Sep 17 00:00:00 2001
 From: Dorian Stoll <dorian.stoll@tmsp.io>
 Date: Thu, 30 Jul 2020 13:21:53 +0200
 Subject: [PATCH] misc: mei: Add missing IPTS device IDs
@@ -632,7 +632,7 @@ Patchset: ipts
  2 files changed, 2 insertions(+)
 
 diff --git a/drivers/misc/mei/hw-me-regs.h b/drivers/misc/mei/hw-me-regs.h
-index bdc65d50b945f..08723c01d7275 100644
+index bdc65d50b945..08723c01d727 100644
 --- a/drivers/misc/mei/hw-me-regs.h
 +++ b/drivers/misc/mei/hw-me-regs.h
 @@ -92,6 +92,7 @@
@@ -644,7 +644,7 @@ index bdc65d50b945f..08723c01d7275 100644
  
  #define MEI_DEV_ID_JSP_N      0x4DE0  /* Jasper Lake Point N */
 diff --git a/drivers/misc/mei/pci-me.c b/drivers/misc/mei/pci-me.c
-index 5bf0d50d55a00..c13864512229f 100644
+index 5bf0d50d55a0..c13864512229 100644
 --- a/drivers/misc/mei/pci-me.c
 +++ b/drivers/misc/mei/pci-me.c
 @@ -97,6 +97,7 @@ static const struct pci_device_id mei_me_pci_tbl[] = {
@@ -656,9 +656,9 @@ index 5bf0d50d55a00..c13864512229f 100644
  
  	{MEI_PCI_DEVICE(MEI_DEV_ID_TGP_LP, MEI_ME_PCH15_CFG)},
 -- 
-2.39.2
+2.41.0
 
-From 0251d76352babdd04c8879356d74ad870903d1a0 Mon Sep 17 00:00:00 2001
+From 88ece7f639e6edfd5baac4dd15c73de95b33c7a6 Mon Sep 17 00:00:00 2001
 From: Liban Hannan <liban.p@gmail.com>
 Date: Tue, 12 Apr 2022 23:31:12 +0100
 Subject: [PATCH] iommu: ipts: use IOMMU passthrough mode for IPTS
@@ -680,7 +680,7 @@ Patchset: ipts
  1 file changed, 24 insertions(+)
 
 diff --git a/drivers/iommu/intel/iommu.c b/drivers/iommu/intel/iommu.c
-index 52afcdaf7c7f1..08e35f9e67a62 100644
+index 7c2f4bd33582..3ebd2260cdab 100644
 --- a/drivers/iommu/intel/iommu.c
 +++ b/drivers/iommu/intel/iommu.c
 @@ -37,6 +37,8 @@
@@ -707,7 +707,7 @@ index 52afcdaf7c7f1..08e35f9e67a62 100644
  
  const struct iommu_ops intel_iommu_ops;
  
-@@ -2584,6 +2588,9 @@ static int device_def_domain_type(struct device *dev)
+@@ -2588,6 +2592,9 @@ static int device_def_domain_type(struct device *dev)
  
  		if ((iommu_identity_mapping & IDENTMAP_GFX) && IS_GFX_DEVICE(pdev))
  			return IOMMU_DOMAIN_IDENTITY;
@@ -717,7 +717,7 @@ index 52afcdaf7c7f1..08e35f9e67a62 100644
  	}
  
  	return 0;
-@@ -2973,6 +2980,9 @@ static int __init init_dmars(void)
+@@ -2977,6 +2984,9 @@ static int __init init_dmars(void)
  	if (!dmar_map_gfx)
  		iommu_identity_mapping |= IDENTMAP_GFX;
  
@@ -727,7 +727,7 @@ index 52afcdaf7c7f1..08e35f9e67a62 100644
  	check_tylersburg_isoch();
  
  	ret = si_domain_init(hw_pass_through);
-@@ -4813,6 +4823,17 @@ static void quirk_iommu_igfx(struct pci_dev *dev)
+@@ -4819,6 +4829,17 @@ static void quirk_iommu_igfx(struct pci_dev *dev)
  	dmar_map_gfx = 0;
  }
  
@@ -745,7 +745,7 @@ index 52afcdaf7c7f1..08e35f9e67a62 100644
  /* G4x/GM45 integrated gfx dmar support is totally busted. */
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x2a40, quirk_iommu_igfx);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x2e00, quirk_iommu_igfx);
-@@ -4848,6 +4869,9 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x1632, quirk_iommu_igfx);
+@@ -4854,6 +4875,9 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x1632, quirk_iommu_igfx);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x163A, quirk_iommu_igfx);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x163D, quirk_iommu_igfx);
  
@@ -756,9 +756,9 @@ index 52afcdaf7c7f1..08e35f9e67a62 100644
  {
  	if (risky_device(dev))
 -- 
-2.39.2
+2.41.0
 
-From 4be07c569cbf78a6b7f8ab628c076b8cce454da7 Mon Sep 17 00:00:00 2001
+From 7acadbc501e914329f232472eecbf6d56784f6bb Mon Sep 17 00:00:00 2001
 From: Dorian Stoll <dorian.stoll@tmsp.io>
 Date: Sun, 11 Dec 2022 12:00:59 +0100
 Subject: [PATCH] hid: Add support for Intel Precise Touch and Stylus
@@ -817,21 +817,21 @@ Patchset: ipts
  create mode 100644 drivers/hid/ipts/thread.h
 
 diff --git a/drivers/hid/Kconfig b/drivers/hid/Kconfig
-index e2a5d30c88956..a4af77fcca209 100644
+index 4ce012f83253..7945cb57f531 100644
 --- a/drivers/hid/Kconfig
 +++ b/drivers/hid/Kconfig
-@@ -1291,4 +1291,6 @@ source "drivers/hid/amd-sfh-hid/Kconfig"
+@@ -1316,4 +1316,6 @@ source "drivers/hid/amd-sfh-hid/Kconfig"
  
  source "drivers/hid/surface-hid/Kconfig"
  
 +source "drivers/hid/ipts/Kconfig"
 +
- endmenu
+ endif # HID_SUPPORT
 diff --git a/drivers/hid/Makefile b/drivers/hid/Makefile
-index e8014c1a2f8b6..e48300bcea9be 100644
+index 5d37cacbde33..285e12d95b0e 100644
 --- a/drivers/hid/Makefile
 +++ b/drivers/hid/Makefile
-@@ -164,3 +164,5 @@ obj-$(INTEL_ISH_FIRMWARE_DOWNLOADER)	+= intel-ish-hid/
+@@ -167,3 +167,5 @@ obj-$(INTEL_ISH_FIRMWARE_DOWNLOADER)	+= intel-ish-hid/
  obj-$(CONFIG_AMD_SFH_HID)       += amd-sfh-hid/
  
  obj-$(CONFIG_SURFACE_HID_CORE)  += surface-hid/
@@ -839,7 +839,7 @@ index e8014c1a2f8b6..e48300bcea9be 100644
 +obj-$(CONFIG_HID_IPTS)          += ipts/
 diff --git a/drivers/hid/ipts/Kconfig b/drivers/hid/ipts/Kconfig
 new file mode 100644
-index 0000000000000..297401bd388dd
+index 000000000000..297401bd388d
 --- /dev/null
 +++ b/drivers/hid/ipts/Kconfig
 @@ -0,0 +1,14 @@
@@ -859,7 +859,7 @@ index 0000000000000..297401bd388dd
 +	  module will be called ipts.
 diff --git a/drivers/hid/ipts/Makefile b/drivers/hid/ipts/Makefile
 new file mode 100644
-index 0000000000000..0fe655bccdc0f
+index 000000000000..0fe655bccdc0
 --- /dev/null
 +++ b/drivers/hid/ipts/Makefile
 @@ -0,0 +1,14 @@
@@ -879,7 +879,7 @@ index 0000000000000..0fe655bccdc0f
 +ipts-objs += thread.o
 diff --git a/drivers/hid/ipts/cmd.c b/drivers/hid/ipts/cmd.c
 new file mode 100644
-index 0000000000000..7fd69271ccd52
+index 000000000000..7fd69271ccd5
 --- /dev/null
 +++ b/drivers/hid/ipts/cmd.c
 @@ -0,0 +1,62 @@
@@ -947,7 +947,7 @@ index 0000000000000..7fd69271ccd52
 +}
 diff --git a/drivers/hid/ipts/cmd.h b/drivers/hid/ipts/cmd.h
 new file mode 100644
-index 0000000000000..924758ffee671
+index 000000000000..924758ffee67
 --- /dev/null
 +++ b/drivers/hid/ipts/cmd.h
 @@ -0,0 +1,61 @@
@@ -1014,7 +1014,7 @@ index 0000000000000..924758ffee671
 +#endif /* IPTS_CMD_H */
 diff --git a/drivers/hid/ipts/context.h b/drivers/hid/ipts/context.h
 new file mode 100644
-index 0000000000000..3450a95e66ee8
+index 000000000000..3450a95e66ee
 --- /dev/null
 +++ b/drivers/hid/ipts/context.h
 @@ -0,0 +1,51 @@
@@ -1071,7 +1071,7 @@ index 0000000000000..3450a95e66ee8
 +#endif /* IPTS_CONTEXT_H */
 diff --git a/drivers/hid/ipts/control.c b/drivers/hid/ipts/control.c
 new file mode 100644
-index 0000000000000..2f61500b5119c
+index 000000000000..2f61500b5119
 --- /dev/null
 +++ b/drivers/hid/ipts/control.c
 @@ -0,0 +1,495 @@
@@ -1562,7 +1562,7 @@ index 0000000000000..2f61500b5119c
 +	/*
 +	 * Give the sensor some time to come back from resetting
 +	 */
-+	msleep(1500);
++	msleep(1000);
 +
 +	ret = ipts_control_start(ipts);
 +	if (ret)
@@ -1572,7 +1572,7 @@ index 0000000000000..2f61500b5119c
 +}
 diff --git a/drivers/hid/ipts/control.h b/drivers/hid/ipts/control.h
 new file mode 100644
-index 0000000000000..744bb92d682a0
+index 000000000000..744bb92d682a
 --- /dev/null
 +++ b/drivers/hid/ipts/control.h
 @@ -0,0 +1,127 @@
@@ -1705,7 +1705,7 @@ index 0000000000000..744bb92d682a0
 +#endif /* IPTS_CONTROL_H */
 diff --git a/drivers/hid/ipts/desc.h b/drivers/hid/ipts/desc.h
 new file mode 100644
-index 0000000000000..c058974a03a1e
+index 000000000000..c058974a03a1
 --- /dev/null
 +++ b/drivers/hid/ipts/desc.h
 @@ -0,0 +1,81 @@
@@ -1792,7 +1792,7 @@ index 0000000000000..c058974a03a1e
 +#endif /* IPTS_DESC_H */
 diff --git a/drivers/hid/ipts/hid.c b/drivers/hid/ipts/hid.c
 new file mode 100644
-index 0000000000000..6782394e8dde3
+index 000000000000..6782394e8dde
 --- /dev/null
 +++ b/drivers/hid/ipts/hid.c
 @@ -0,0 +1,348 @@
@@ -2146,7 +2146,7 @@ index 0000000000000..6782394e8dde3
 +}
 diff --git a/drivers/hid/ipts/hid.h b/drivers/hid/ipts/hid.h
 new file mode 100644
-index 0000000000000..62bf3cd486081
+index 000000000000..62bf3cd48608
 --- /dev/null
 +++ b/drivers/hid/ipts/hid.h
 @@ -0,0 +1,22 @@
@@ -2174,7 +2174,7 @@ index 0000000000000..62bf3cd486081
 +#endif /* IPTS_HID_H */
 diff --git a/drivers/hid/ipts/main.c b/drivers/hid/ipts/main.c
 new file mode 100644
-index 0000000000000..0f20c6c08c38c
+index 000000000000..0f20c6c08c38
 --- /dev/null
 +++ b/drivers/hid/ipts/main.c
 @@ -0,0 +1,127 @@
@@ -2307,7 +2307,7 @@ index 0000000000000..0f20c6c08c38c
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/hid/ipts/mei.c b/drivers/hid/ipts/mei.c
 new file mode 100644
-index 0000000000000..26666fd99b0c7
+index 000000000000..26666fd99b0c
 --- /dev/null
 +++ b/drivers/hid/ipts/mei.c
 @@ -0,0 +1,189 @@
@@ -2502,7 +2502,7 @@ index 0000000000000..26666fd99b0c7
 +}
 diff --git a/drivers/hid/ipts/mei.h b/drivers/hid/ipts/mei.h
 new file mode 100644
-index 0000000000000..eadacae54c400
+index 000000000000..eadacae54c40
 --- /dev/null
 +++ b/drivers/hid/ipts/mei.h
 @@ -0,0 +1,67 @@
@@ -2575,7 +2575,7 @@ index 0000000000000..eadacae54c400
 +#endif /* IPTS_MEI_H */
 diff --git a/drivers/hid/ipts/receiver.c b/drivers/hid/ipts/receiver.c
 new file mode 100644
-index 0000000000000..77234f9e0e178
+index 000000000000..77234f9e0e17
 --- /dev/null
 +++ b/drivers/hid/ipts/receiver.c
 @@ -0,0 +1,249 @@
@@ -2623,9 +2623,9 @@ index 0000000000000..77234f9e0e178
 +	 * n seconds, sleep longer to avoid wasting CPU cycles.
 +	 */
 +	if (last + n > ktime_get_seconds())
-+		msleep(10);
++		msleep(20);
 +	else
-+		msleep(150);
++		msleep(200);
 +}
 +
 +static int ipts_receiver_event_loop(struct ipts_thread *thread)
@@ -2830,7 +2830,7 @@ index 0000000000000..77234f9e0e178
 +}
 diff --git a/drivers/hid/ipts/receiver.h b/drivers/hid/ipts/receiver.h
 new file mode 100644
-index 0000000000000..96070f34fbcaa
+index 000000000000..96070f34fbca
 --- /dev/null
 +++ b/drivers/hid/ipts/receiver.h
 @@ -0,0 +1,17 @@
@@ -2853,7 +2853,7 @@ index 0000000000000..96070f34fbcaa
 +#endif /* IPTS_RECEIVER_H */
 diff --git a/drivers/hid/ipts/resources.c b/drivers/hid/ipts/resources.c
 new file mode 100644
-index 0000000000000..80ba5885bb55d
+index 000000000000..80ba5885bb55
 --- /dev/null
 +++ b/drivers/hid/ipts/resources.c
 @@ -0,0 +1,108 @@
@@ -2967,7 +2967,7 @@ index 0000000000000..80ba5885bb55d
 +}
 diff --git a/drivers/hid/ipts/resources.h b/drivers/hid/ipts/resources.h
 new file mode 100644
-index 0000000000000..6cbb24a8a0543
+index 000000000000..6cbb24a8a054
 --- /dev/null
 +++ b/drivers/hid/ipts/resources.h
 @@ -0,0 +1,39 @@
@@ -3012,7 +3012,7 @@ index 0000000000000..6cbb24a8a0543
 +#endif /* IPTS_RESOURCES_H */
 diff --git a/drivers/hid/ipts/spec-data.h b/drivers/hid/ipts/spec-data.h
 new file mode 100644
-index 0000000000000..e8dd98895a7ee
+index 000000000000..e8dd98895a7e
 --- /dev/null
 +++ b/drivers/hid/ipts/spec-data.h
 @@ -0,0 +1,100 @@
@@ -3118,7 +3118,7 @@ index 0000000000000..e8dd98895a7ee
 +#endif /* IPTS_SPEC_DATA_H */
 diff --git a/drivers/hid/ipts/spec-device.h b/drivers/hid/ipts/spec-device.h
 new file mode 100644
-index 0000000000000..93f673d981f7f
+index 000000000000..93f673d981f7
 --- /dev/null
 +++ b/drivers/hid/ipts/spec-device.h
 @@ -0,0 +1,285 @@
@@ -3409,7 +3409,7 @@ index 0000000000000..93f673d981f7f
 +#endif /* IPTS_SPEC_DEVICE_H */
 diff --git a/drivers/hid/ipts/spec-hid.h b/drivers/hid/ipts/spec-hid.h
 new file mode 100644
-index 0000000000000..ea70f29ff00cb
+index 000000000000..ea70f29ff00c
 --- /dev/null
 +++ b/drivers/hid/ipts/spec-hid.h
 @@ -0,0 +1,35 @@
@@ -3450,7 +3450,7 @@ index 0000000000000..ea70f29ff00cb
 +#endif /* IPTS_SPEC_HID_H */
 diff --git a/drivers/hid/ipts/thread.c b/drivers/hid/ipts/thread.c
 new file mode 100644
-index 0000000000000..8b46f775c1070
+index 000000000000..8b46f775c107
 --- /dev/null
 +++ b/drivers/hid/ipts/thread.c
 @@ -0,0 +1,85 @@
@@ -3541,7 +3541,7 @@ index 0000000000000..8b46f775c1070
 +}
 diff --git a/drivers/hid/ipts/thread.h b/drivers/hid/ipts/thread.h
 new file mode 100644
-index 0000000000000..a314843599fc3
+index 000000000000..a314843599fc
 --- /dev/null
 +++ b/drivers/hid/ipts/thread.h
 @@ -0,0 +1,60 @@
@@ -3606,9 +3606,201 @@ index 0000000000000..a314843599fc3
 +
 +#endif /* IPTS_THREAD_H */
 -- 
-2.39.2
+2.41.0
 
-From 0e662b09ba1ab4c9c9437b2fc829d988faad6c54 Mon Sep 17 00:00:00 2001
+From d920717bda248979eb2b2836fedef0a73223fa8c Mon Sep 17 00:00:00 2001
+From: Dorian Stoll <dorian.stoll@tmsp.io>
+Date: Fri, 28 Apr 2023 15:41:12 +0200
+Subject: [PATCH] Update IPTS from module repo
+
+Changes:
+ * Fix redefinition error on AOSP clang
+ * Increase the polling frequency to reduce latency
+ * Don't allocate a new buffer for every HID report
+ * Always use the generic HID driver instead of forcing hid-multitouch
+
+Based on https://github.com/linux-surface/intel-precise-touch/commit/a2b675d72dbde80ebe36a5b6ceaebd596c030314
+
+Signed-off-by: Dorian Stoll <dorian.stoll@tmsp.io>
+Patchset: ipts
+---
+ drivers/hid/ipts/hid.c       | 15 +++++----------
+ drivers/hid/ipts/receiver.c  |  2 +-
+ drivers/hid/ipts/resources.c | 35 +++++++++++++++++++++++++++++++----
+ drivers/hid/ipts/resources.h |  3 +++
+ 4 files changed, 40 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/hid/ipts/hid.c b/drivers/hid/ipts/hid.c
+index 6782394e8dde..a2471219615b 100644
+--- a/drivers/hid/ipts/hid.c
++++ b/drivers/hid/ipts/hid.c
+@@ -237,7 +237,6 @@ static struct hid_ll_driver ipts_hid_driver = {
+ 
+ int ipts_hid_input_data(struct ipts_context *ipts, u32 buffer)
+ {
+-	int ret = 0;
+ 	u8 *temp = NULL;
+ 	struct ipts_hid_header *frame = NULL;
+ 	struct ipts_data_header *header = NULL;
+@@ -250,6 +249,9 @@ int ipts_hid_input_data(struct ipts_context *ipts, u32 buffer)
+ 
+ 	header = (struct ipts_data_header *)ipts->resources.data[buffer].address;
+ 
++	temp = ipts->resources.report.address;
++	memset(temp, 0, ipts->resources.report.size);
++
+ 	if (!header)
+ 		return -EFAULT;
+ 
+@@ -273,10 +275,6 @@ int ipts_hid_input_data(struct ipts_context *ipts, u32 buffer)
+ 	if (header->size + 3 + sizeof(struct ipts_hid_header) > IPTS_HID_REPORT_DATA_SIZE)
+ 		return -ERANGE;
+ 
+-	temp = kzalloc(IPTS_HID_REPORT_DATA_SIZE, GFP_KERNEL);
+-	if (!temp)
+-		return -ENOMEM;
+-
+ 	/*
+ 	 * Synthesize a HID report matching the devices that natively send HID reports
+ 	 */
+@@ -288,10 +286,7 @@ int ipts_hid_input_data(struct ipts_context *ipts, u32 buffer)
+ 
+ 	memcpy(frame->data, header->data, header->size);
+ 
+-	ret = hid_input_report(ipts->hid, HID_INPUT_REPORT, temp, IPTS_HID_REPORT_DATA_SIZE, 1);
+-	kfree(temp);
+-
+-	return ret;
++	return hid_input_report(ipts->hid, HID_INPUT_REPORT, temp, IPTS_HID_REPORT_DATA_SIZE, 1);
+ }
+ 
+ int ipts_hid_init(struct ipts_context *ipts, struct ipts_device_info info)
+@@ -318,7 +313,7 @@ int ipts_hid_init(struct ipts_context *ipts, struct ipts_device_info info)
+ 
+ 	ipts->hid->vendor = info.vendor;
+ 	ipts->hid->product = info.product;
+-	ipts->hid->group = HID_GROUP_MULTITOUCH;
++	ipts->hid->group = HID_GROUP_GENERIC;
+ 
+ 	snprintf(ipts->hid->name, sizeof(ipts->hid->name), "IPTS %04X:%04X", info.vendor,
+ 		 info.product);
+diff --git a/drivers/hid/ipts/receiver.c b/drivers/hid/ipts/receiver.c
+index 77234f9e0e17..f56e9ed32d57 100644
+--- a/drivers/hid/ipts/receiver.c
++++ b/drivers/hid/ipts/receiver.c
+@@ -42,7 +42,7 @@ static void ipts_receiver_backoff(time64_t last, u32 n)
+ 	 * n seconds, sleep longer to avoid wasting CPU cycles.
+ 	 */
+ 	if (last + n > ktime_get_seconds())
+-		msleep(20);
++		usleep_range(1 * USEC_PER_MSEC, 5 * USEC_PER_MSEC);
+ 	else
+ 		msleep(200);
+ }
+diff --git a/drivers/hid/ipts/resources.c b/drivers/hid/ipts/resources.c
+index 80ba5885bb55..5e924d58c488 100644
+--- a/drivers/hid/ipts/resources.c
++++ b/drivers/hid/ipts/resources.c
+@@ -9,6 +9,7 @@
+ #include <linux/dma-mapping.h>
+ #include <linux/types.h>
+ 
++#include "desc.h"
+ #include "resources.h"
+ #include "spec-device.h"
+ 
+@@ -49,16 +50,22 @@ int ipts_resources_init(struct ipts_resources *res, struct device *dev, size_t d
+ {
+ 	int ret = 0;
+ 
++	/*
++	 * Some compilers (AOSP clang) complain about a redefined
++	 * variable when this is declared inside of the for loop.
++	 */
++	int i = 0;
++
+ 	if (!res)
+ 		return -EFAULT;
+ 
+-	for (int i = 0; i < IPTS_BUFFERS; i++) {
++	for (i = 0; i < IPTS_BUFFERS; i++) {
+ 		ret = ipts_resources_alloc_buffer(&res->data[i], dev, ds);
+ 		if (ret)
+ 			goto err;
+ 	}
+ 
+-	for (int i = 0; i < IPTS_BUFFERS; i++) {
++	for (i = 0; i < IPTS_BUFFERS; i++) {
+ 		ret = ipts_resources_alloc_buffer(&res->feedback[i], dev, fs);
+ 		if (ret)
+ 			goto err;
+@@ -80,6 +87,16 @@ int ipts_resources_init(struct ipts_resources *res, struct device *dev, size_t d
+ 	if (ret)
+ 		goto err;
+ 
++	if (!res->report.address) {
++		res->report.size = IPTS_HID_REPORT_DATA_SIZE;
++		res->report.address = kzalloc(res->report.size, GFP_KERNEL);
++
++		if (!res->report.address) {
++			ret = -ENOMEM;
++			goto err;
++		}
++	}
++
+ 	return 0;
+ 
+ err:
+@@ -90,13 +107,19 @@ int ipts_resources_init(struct ipts_resources *res, struct device *dev, size_t d
+ 
+ int ipts_resources_free(struct ipts_resources *res)
+ {
++	/*
++	 * Some compilers (AOSP clang) complain about a redefined
++	 * variable when this is declared inside of the for loop.
++	 */
++	int i = 0;
++
+ 	if (!res)
+ 		return -EFAULT;
+ 
+-	for (int i = 0; i < IPTS_BUFFERS; i++)
++	for (i = 0; i < IPTS_BUFFERS; i++)
+ 		ipts_resources_free_buffer(&res->data[i]);
+ 
+-	for (int i = 0; i < IPTS_BUFFERS; i++)
++	for (i = 0; i < IPTS_BUFFERS; i++)
+ 		ipts_resources_free_buffer(&res->feedback[i]);
+ 
+ 	ipts_resources_free_buffer(&res->doorbell);
+@@ -104,5 +127,9 @@ int ipts_resources_free(struct ipts_resources *res)
+ 	ipts_resources_free_buffer(&res->hid2me);
+ 	ipts_resources_free_buffer(&res->descriptor);
+ 
++	kfree(res->report.address);
++	res->report.address = NULL;
++	res->report.size = 0;
++
+ 	return 0;
+ }
+diff --git a/drivers/hid/ipts/resources.h b/drivers/hid/ipts/resources.h
+index 6cbb24a8a054..e0c400f420b9 100644
+--- a/drivers/hid/ipts/resources.h
++++ b/drivers/hid/ipts/resources.h
+@@ -31,6 +31,9 @@ struct ipts_resources {
+ 	struct ipts_buffer hid2me;
+ 
+ 	struct ipts_buffer descriptor;
++
++	// Buffer for synthesizing HID reports
++	struct ipts_buffer report;
+ };
+ 
+ int ipts_resources_init(struct ipts_resources *res, struct device *dev, size_t ds, size_t fs);
+-- 
+2.41.0
+
+From a17a3159c4a9c9c1676e4107af31eb79ad8b6196 Mon Sep 17 00:00:00 2001
 From: Dorian Stoll <dorian.stoll@tmsp.io>
 Date: Sun, 11 Dec 2022 12:03:38 +0100
 Subject: [PATCH] iommu: intel: Disable source id verification for ITHC
@@ -3620,10 +3812,10 @@ Patchset: ithc
  1 file changed, 16 insertions(+)
 
 diff --git a/drivers/iommu/intel/irq_remapping.c b/drivers/iommu/intel/irq_remapping.c
-index f58f5f57af782..59a6a458d9bfa 100644
+index df9e261af0b5..bc2a0aefedf2 100644
 --- a/drivers/iommu/intel/irq_remapping.c
 +++ b/drivers/iommu/intel/irq_remapping.c
-@@ -394,6 +394,22 @@ static int set_msi_sid(struct irte *irte, struct pci_dev *dev)
+@@ -390,6 +390,22 @@ static int set_msi_sid(struct irte *irte, struct pci_dev *dev)
  	data.busmatch_count = 0;
  	pci_for_each_dma_alias(dev, set_msi_sid_cb, &data);
  
@@ -3647,9 +3839,9 @@ index f58f5f57af782..59a6a458d9bfa 100644
  	 * DMA alias provides us with a PCI device and alias.  The only case
  	 * where the it will return an alias on a different bus than the
 -- 
-2.39.2
+2.41.0
 
-From 552d746111170ba0336a12c0d99fb42e597e1eda Mon Sep 17 00:00:00 2001
+From b8c74efc4c056710d4913daf96698a0fa76b3fc8 Mon Sep 17 00:00:00 2001
 From: Dorian Stoll <dorian.stoll@tmsp.io>
 Date: Sun, 11 Dec 2022 12:10:54 +0100
 Subject: [PATCH] hid: Add support for Intel Touch Host Controller
@@ -3682,28 +3874,28 @@ Patchset: ithc
  create mode 100644 drivers/hid/ithc/ithc.h
 
 diff --git a/drivers/hid/Kconfig b/drivers/hid/Kconfig
-index a4af77fcca209..4ece2a06949bf 100644
+index 7945cb57f531..91e9e4f58c27 100644
 --- a/drivers/hid/Kconfig
 +++ b/drivers/hid/Kconfig
-@@ -1293,4 +1293,6 @@ source "drivers/hid/surface-hid/Kconfig"
+@@ -1318,4 +1318,6 @@ source "drivers/hid/surface-hid/Kconfig"
  
  source "drivers/hid/ipts/Kconfig"
  
 +source "drivers/hid/ithc/Kconfig"
 +
- endmenu
+ endif # HID_SUPPORT
 diff --git a/drivers/hid/Makefile b/drivers/hid/Makefile
-index e48300bcea9be..8ef7308b0f9d7 100644
+index 285e12d95b0e..a3ff62e922f1 100644
 --- a/drivers/hid/Makefile
 +++ b/drivers/hid/Makefile
-@@ -166,3 +166,4 @@ obj-$(CONFIG_AMD_SFH_HID)       += amd-sfh-hid/
+@@ -169,3 +169,4 @@ obj-$(CONFIG_AMD_SFH_HID)       += amd-sfh-hid/
  obj-$(CONFIG_SURFACE_HID_CORE)  += surface-hid/
  
  obj-$(CONFIG_HID_IPTS)          += ipts/
 +obj-$(CONFIG_HID_ITHC)          += ithc/
 diff --git a/drivers/hid/ithc/Kbuild b/drivers/hid/ithc/Kbuild
 new file mode 100644
-index 0000000000000..aea83f2ac07b4
+index 000000000000..aea83f2ac07b
 --- /dev/null
 +++ b/drivers/hid/ithc/Kbuild
 @@ -0,0 +1,6 @@
@@ -3715,7 +3907,7 @@ index 0000000000000..aea83f2ac07b4
 +
 diff --git a/drivers/hid/ithc/Kconfig b/drivers/hid/ithc/Kconfig
 new file mode 100644
-index 0000000000000..ede7130236096
+index 000000000000..ede713023609
 --- /dev/null
 +++ b/drivers/hid/ithc/Kconfig
 @@ -0,0 +1,12 @@
@@ -3733,7 +3925,7 @@ index 0000000000000..ede7130236096
 +	  module will be called ithc.
 diff --git a/drivers/hid/ithc/ithc-debug.c b/drivers/hid/ithc/ithc-debug.c
 new file mode 100644
-index 0000000000000..57bf125c45bd5
+index 000000000000..57bf125c45bd
 --- /dev/null
 +++ b/drivers/hid/ithc/ithc-debug.c
 @@ -0,0 +1,96 @@
@@ -3835,7 +4027,7 @@ index 0000000000000..57bf125c45bd5
 +
 diff --git a/drivers/hid/ithc/ithc-dma.c b/drivers/hid/ithc/ithc-dma.c
 new file mode 100644
-index 0000000000000..7e89b3496918d
+index 000000000000..7e89b3496918
 --- /dev/null
 +++ b/drivers/hid/ithc/ithc-dma.c
 @@ -0,0 +1,258 @@
@@ -4099,7 +4291,7 @@ index 0000000000000..7e89b3496918d
 +
 diff --git a/drivers/hid/ithc/ithc-dma.h b/drivers/hid/ithc/ithc-dma.h
 new file mode 100644
-index 0000000000000..d9f2c19a13f3a
+index 000000000000..d9f2c19a13f3
 --- /dev/null
 +++ b/drivers/hid/ithc/ithc-dma.h
 @@ -0,0 +1,67 @@
@@ -4172,7 +4364,7 @@ index 0000000000000..d9f2c19a13f3a
 +
 diff --git a/drivers/hid/ithc/ithc-main.c b/drivers/hid/ithc/ithc-main.c
 new file mode 100644
-index 0000000000000..09512b9cb4d31
+index 000000000000..09512b9cb4d3
 --- /dev/null
 +++ b/drivers/hid/ithc/ithc-main.c
 @@ -0,0 +1,534 @@
@@ -4712,7 +4904,7 @@ index 0000000000000..09512b9cb4d31
 +
 diff --git a/drivers/hid/ithc/ithc-regs.c b/drivers/hid/ithc/ithc-regs.c
 new file mode 100644
-index 0000000000000..85d567b05761f
+index 000000000000..85d567b05761
 --- /dev/null
 +++ b/drivers/hid/ithc/ithc-regs.c
 @@ -0,0 +1,64 @@
@@ -4782,7 +4974,7 @@ index 0000000000000..85d567b05761f
 +
 diff --git a/drivers/hid/ithc/ithc-regs.h b/drivers/hid/ithc/ithc-regs.h
 new file mode 100644
-index 0000000000000..1a96092ed7eed
+index 000000000000..1a96092ed7ee
 --- /dev/null
 +++ b/drivers/hid/ithc/ithc-regs.h
 @@ -0,0 +1,186 @@
@@ -4974,7 +5166,7 @@ index 0000000000000..1a96092ed7eed
 +
 diff --git a/drivers/hid/ithc/ithc.h b/drivers/hid/ithc/ithc.h
 new file mode 100644
-index 0000000000000..6a9b0d480bc15
+index 000000000000..6a9b0d480bc1
 --- /dev/null
 +++ b/drivers/hid/ithc/ithc.h
 @@ -0,0 +1,60 @@
@@ -5039,525 +5231,9 @@ index 0000000000000..6a9b0d480bc15
 +void ithc_log_regs(struct ithc *ithc);
 +
 -- 
-2.39.2
+2.41.0
 
-From a15c035f0a681e25b94ab0468caf028801fbcbeb Mon Sep 17 00:00:00 2001
-From: Maximilian Luz <luzmaximilian@gmail.com>
-Date: Sat, 4 Mar 2023 20:09:36 +0100
-Subject: [PATCH] platform/surface: aggregator_tabletsw: Properly handle
- different posture source IDs
-
-The device posture subsystem (POS) can provide different posture
-sources. Different sources can provide different posture states and
-sources can be identified by their ID.
-
-For example, screen posture of the Surface Laptop Studio (SLS), which is
-currently the only supported source, uses a source ID of 0x03. The
-Surface Pro 9 uses the same subsystem for its Type-Cover, however,
-provides different states for that under the ID 0x00.
-
-To eventually support the Surface Pro 9 and potential future devices, we
-need to properly disambiguate between source IDs. Therefore, add the
-source ID to the state we carry and determine the tablet-mode state (as
-well as state names) based on that.
-
-Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
-Patchset: surface-sam
----
- .../surface/surface_aggregator_tabletsw.c     | 123 ++++++++++++------
- 1 file changed, 84 insertions(+), 39 deletions(-)
-
-diff --git a/drivers/platform/surface/surface_aggregator_tabletsw.c b/drivers/platform/surface/surface_aggregator_tabletsw.c
-index 9fed800c7cc09..e8682f52558f3 100644
---- a/drivers/platform/surface/surface_aggregator_tabletsw.c
-+++ b/drivers/platform/surface/surface_aggregator_tabletsw.c
-@@ -20,16 +20,23 @@
- 
- struct ssam_tablet_sw;
- 
-+struct ssam_tablet_sw_state {
-+	u32 source;
-+	u32 state;
-+};
-+
- struct ssam_tablet_sw_ops {
--	int (*get_state)(struct ssam_tablet_sw *sw, u32 *state);
--	const char *(*state_name)(struct ssam_tablet_sw *sw, u32 state);
--	bool (*state_is_tablet_mode)(struct ssam_tablet_sw *sw, u32 state);
-+	int (*get_state)(struct ssam_tablet_sw *sw, struct ssam_tablet_sw_state *state);
-+	const char *(*state_name)(struct ssam_tablet_sw *sw,
-+				  const struct ssam_tablet_sw_state *state);
-+	bool (*state_is_tablet_mode)(struct ssam_tablet_sw *sw,
-+				     const struct ssam_tablet_sw_state *state);
- };
- 
- struct ssam_tablet_sw {
- 	struct ssam_device *sdev;
- 
--	u32 state;
-+	struct ssam_tablet_sw_state state;
- 	struct work_struct update_work;
- 	struct input_dev *mode_switch;
- 
-@@ -45,9 +52,11 @@ struct ssam_tablet_sw_desc {
- 
- 	struct {
- 		u32 (*notify)(struct ssam_event_notifier *nf, const struct ssam_event *event);
--		int (*get_state)(struct ssam_tablet_sw *sw, u32 *state);
--		const char *(*state_name)(struct ssam_tablet_sw *sw, u32 state);
--		bool (*state_is_tablet_mode)(struct ssam_tablet_sw *sw, u32 state);
-+		int (*get_state)(struct ssam_tablet_sw *sw, struct ssam_tablet_sw_state *state);
-+		const char *(*state_name)(struct ssam_tablet_sw *sw,
-+					  const struct ssam_tablet_sw_state *state);
-+		bool (*state_is_tablet_mode)(struct ssam_tablet_sw *sw,
-+					     const struct ssam_tablet_sw_state *state);
- 	} ops;
- 
- 	struct {
-@@ -61,7 +70,7 @@ struct ssam_tablet_sw_desc {
- static ssize_t state_show(struct device *dev, struct device_attribute *attr, char *buf)
- {
- 	struct ssam_tablet_sw *sw = dev_get_drvdata(dev);
--	const char *state = sw->ops.state_name(sw, sw->state);
-+	const char *state = sw->ops.state_name(sw, &sw->state);
- 
- 	return sysfs_emit(buf, "%s\n", state);
- }
-@@ -79,19 +88,19 @@ static const struct attribute_group ssam_tablet_sw_group = {
- static void ssam_tablet_sw_update_workfn(struct work_struct *work)
- {
- 	struct ssam_tablet_sw *sw = container_of(work, struct ssam_tablet_sw, update_work);
-+	struct ssam_tablet_sw_state state;
- 	int tablet, status;
--	u32 state;
- 
- 	status = sw->ops.get_state(sw, &state);
- 	if (status)
- 		return;
- 
--	if (sw->state == state)
-+	if (sw->state.source == state.source && sw->state.state == state.state)
- 		return;
- 	sw->state = state;
- 
- 	/* Send SW_TABLET_MODE event. */
--	tablet = sw->ops.state_is_tablet_mode(sw, state);
-+	tablet = sw->ops.state_is_tablet_mode(sw, &state);
- 	input_report_switch(sw->mode_switch, SW_TABLET_MODE, tablet);
- 	input_sync(sw->mode_switch);
- }
-@@ -146,7 +155,7 @@ static int ssam_tablet_sw_probe(struct ssam_device *sdev)
- 	sw->mode_switch->id.bustype = BUS_HOST;
- 	sw->mode_switch->dev.parent = &sdev->dev;
- 
--	tablet = sw->ops.state_is_tablet_mode(sw, sw->state);
-+	tablet = sw->ops.state_is_tablet_mode(sw, &sw->state);
- 	input_set_capability(sw->mode_switch, EV_SW, SW_TABLET_MODE);
- 	input_report_switch(sw->mode_switch, SW_TABLET_MODE, tablet);
- 
-@@ -203,9 +212,10 @@ enum ssam_kip_cover_state {
- 	SSAM_KIP_COVER_STATE_FOLDED_BACK   = 0x05,
- };
- 
--static const char *ssam_kip_cover_state_name(struct ssam_tablet_sw *sw, u32 state)
-+static const char *ssam_kip_cover_state_name(struct ssam_tablet_sw *sw,
-+					     const struct ssam_tablet_sw_state *state)
- {
--	switch (state) {
-+	switch (state->state) {
- 	case SSAM_KIP_COVER_STATE_DISCONNECTED:
- 		return "disconnected";
- 
-@@ -222,14 +232,15 @@ static const char *ssam_kip_cover_state_name(struct ssam_tablet_sw *sw, u32 stat
- 		return "folded-back";
- 
- 	default:
--		dev_warn(&sw->sdev->dev, "unknown KIP cover state: %u\n", state);
-+		dev_warn(&sw->sdev->dev, "unknown KIP cover state: %u\n", state->state);
- 		return "<unknown>";
- 	}
- }
- 
--static bool ssam_kip_cover_state_is_tablet_mode(struct ssam_tablet_sw *sw, u32 state)
-+static bool ssam_kip_cover_state_is_tablet_mode(struct ssam_tablet_sw *sw,
-+						const struct ssam_tablet_sw_state *state)
- {
--	switch (state) {
-+	switch (state->state) {
- 	case SSAM_KIP_COVER_STATE_DISCONNECTED:
- 	case SSAM_KIP_COVER_STATE_FOLDED_CANVAS:
- 	case SSAM_KIP_COVER_STATE_FOLDED_BACK:
-@@ -240,7 +251,7 @@ static bool ssam_kip_cover_state_is_tablet_mode(struct ssam_tablet_sw *sw, u32 s
- 		return false;
- 
- 	default:
--		dev_warn(&sw->sdev->dev, "unknown KIP cover state: %d\n", sw->state);
-+		dev_warn(&sw->sdev->dev, "unknown KIP cover state: %d\n", state->state);
- 		return true;
- 	}
- }
-@@ -252,7 +263,7 @@ SSAM_DEFINE_SYNC_REQUEST_R(__ssam_kip_get_cover_state, u8, {
- 	.instance_id     = 0x00,
- });
- 
--static int ssam_kip_get_cover_state(struct ssam_tablet_sw *sw, u32 *state)
-+static int ssam_kip_get_cover_state(struct ssam_tablet_sw *sw, struct ssam_tablet_sw_state *state)
- {
- 	int status;
- 	u8 raw;
-@@ -263,7 +274,8 @@ static int ssam_kip_get_cover_state(struct ssam_tablet_sw *sw, u32 *state)
- 		return status;
- 	}
- 
--	*state = raw;
-+	state->source = 0;	/* Unused for KIP switch. */
-+	state->state = raw;
- 	return 0;
- }
- 
-@@ -312,11 +324,15 @@ MODULE_PARM_DESC(tablet_mode_in_slate_state, "Enable tablet mode in slate device
- #define SSAM_EVENT_POS_CID_POSTURE_CHANGED	0x03
- #define SSAM_POS_MAX_SOURCES			4
- 
--enum ssam_pos_state {
--	SSAM_POS_POSTURE_LID_CLOSED = 0x00,
--	SSAM_POS_POSTURE_LAPTOP     = 0x01,
--	SSAM_POS_POSTURE_SLATE      = 0x02,
--	SSAM_POS_POSTURE_TABLET     = 0x03,
-+enum ssam_pos_source_id {
-+	SSAM_POS_SOURCE_SLS   = 0x03,
-+};
-+
-+enum ssam_pos_state_sls {
-+	SSAM_POS_SLS_LID_CLOSED = 0x00,
-+	SSAM_POS_SLS_LAPTOP     = 0x01,
-+	SSAM_POS_SLS_SLATE      = 0x02,
-+	SSAM_POS_SLS_TABLET     = 0x03,
- };
- 
- struct ssam_sources_list {
-@@ -324,42 +340,68 @@ struct ssam_sources_list {
- 	__le32 id[SSAM_POS_MAX_SOURCES];
- } __packed;
- 
--static const char *ssam_pos_state_name(struct ssam_tablet_sw *sw, u32 state)
-+static const char *ssam_pos_state_name_sls(struct ssam_tablet_sw *sw, u32 state)
- {
- 	switch (state) {
--	case SSAM_POS_POSTURE_LID_CLOSED:
-+	case SSAM_POS_SLS_LID_CLOSED:
- 		return "closed";
- 
--	case SSAM_POS_POSTURE_LAPTOP:
-+	case SSAM_POS_SLS_LAPTOP:
- 		return "laptop";
- 
--	case SSAM_POS_POSTURE_SLATE:
-+	case SSAM_POS_SLS_SLATE:
- 		return "slate";
- 
--	case SSAM_POS_POSTURE_TABLET:
-+	case SSAM_POS_SLS_TABLET:
- 		return "tablet";
- 
- 	default:
--		dev_warn(&sw->sdev->dev, "unknown device posture: %u\n", state);
-+		dev_warn(&sw->sdev->dev, "unknown device posture for SLS: %u\n", state);
- 		return "<unknown>";
- 	}
- }
- 
--static bool ssam_pos_state_is_tablet_mode(struct ssam_tablet_sw *sw, u32 state)
-+static const char *ssam_pos_state_name(struct ssam_tablet_sw *sw,
-+				       const struct ssam_tablet_sw_state *state)
-+{
-+	switch (state->source) {
-+	case SSAM_POS_SOURCE_SLS:
-+		return ssam_pos_state_name_sls(sw, state->state);
-+
-+	default:
-+		dev_warn(&sw->sdev->dev, "unknown device posture source: %u\n", state->source);
-+		return "<unknown>";
-+	}
-+}
-+
-+static bool ssam_pos_state_is_tablet_mode_sls(struct ssam_tablet_sw *sw, u32 state)
- {
- 	switch (state) {
--	case SSAM_POS_POSTURE_LAPTOP:
--	case SSAM_POS_POSTURE_LID_CLOSED:
-+	case SSAM_POS_SLS_LAPTOP:
-+	case SSAM_POS_SLS_LID_CLOSED:
- 		return false;
- 
--	case SSAM_POS_POSTURE_SLATE:
-+	case SSAM_POS_SLS_SLATE:
- 		return tablet_mode_in_slate_state;
- 
--	case SSAM_POS_POSTURE_TABLET:
-+	case SSAM_POS_SLS_TABLET:
- 		return true;
- 
- 	default:
--		dev_warn(&sw->sdev->dev, "unknown device posture: %u\n", state);
-+		dev_warn(&sw->sdev->dev, "unknown device posture for SLS: %u\n", state);
-+		return true;
-+	}
-+}
-+
-+static bool ssam_pos_state_is_tablet_mode(struct ssam_tablet_sw *sw,
-+					  const struct ssam_tablet_sw_state *state)
-+{
-+	switch (state->source) {
-+	case SSAM_POS_SOURCE_SLS:
-+		return ssam_pos_state_is_tablet_mode_sls(sw, state->state);
-+
-+	default:
-+		dev_warn(&sw->sdev->dev, "unknown device posture source: %u\n", state->source);
- 		return true;
- 	}
- }
-@@ -450,9 +492,10 @@ static int ssam_pos_get_posture_for_source(struct ssam_tablet_sw *sw, u32 source
- 	return 0;
- }
- 
--static int ssam_pos_get_posture(struct ssam_tablet_sw *sw, u32 *state)
-+static int ssam_pos_get_posture(struct ssam_tablet_sw *sw, struct ssam_tablet_sw_state *state)
- {
- 	u32 source_id;
-+	u32 source_state;
- 	int status;
- 
- 	status = ssam_pos_get_source(sw, &source_id);
-@@ -461,13 +504,15 @@ static int ssam_pos_get_posture(struct ssam_tablet_sw *sw, u32 *state)
- 		return status;
- 	}
- 
--	status = ssam_pos_get_posture_for_source(sw, source_id, state);
-+	status = ssam_pos_get_posture_for_source(sw, source_id, &source_state);
- 	if (status) {
- 		dev_err(&sw->sdev->dev, "failed to get posture value for source %u: %d\n",
- 			source_id, status);
- 		return status;
- 	}
- 
-+	state->source = source_id;
-+	state->state = source_state;
- 	return 0;
- }
- 
--- 
-2.39.2
-
-From ee5e2e877d3916755db979c8ec74e1bfb96e75ed Mon Sep 17 00:00:00 2001
-From: Maximilian Luz <luzmaximilian@gmail.com>
-Date: Sun, 19 Feb 2023 23:33:43 +0100
-Subject: [PATCH] platform/surface: aggregator_tabletsw: Add support for
- Type-Cover posture source
-
-Implement support for the Type-Cover posture source (ID 0x00), found on
-the Surface Pro 9.
-
-Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
-Patchset: surface-sam
----
- .../surface/surface_aggregator_tabletsw.c     | 57 +++++++++++++++++++
- 1 file changed, 57 insertions(+)
-
-diff --git a/drivers/platform/surface/surface_aggregator_tabletsw.c b/drivers/platform/surface/surface_aggregator_tabletsw.c
-index e8682f52558f3..8f52b62d1c195 100644
---- a/drivers/platform/surface/surface_aggregator_tabletsw.c
-+++ b/drivers/platform/surface/surface_aggregator_tabletsw.c
-@@ -325,9 +325,18 @@ MODULE_PARM_DESC(tablet_mode_in_slate_state, "Enable tablet mode in slate device
- #define SSAM_POS_MAX_SOURCES			4
- 
- enum ssam_pos_source_id {
-+	SSAM_POS_SOURCE_COVER = 0x00,
- 	SSAM_POS_SOURCE_SLS   = 0x03,
- };
- 
-+enum ssam_pos_state_cover {
-+	SSAM_POS_COVER_DISCONNECTED  = 0x01,
-+	SSAM_POS_COVER_CLOSED        = 0x02,
-+	SSAM_POS_COVER_LAPTOP        = 0x03,
-+	SSAM_POS_COVER_FOLDED_CANVAS = 0x04,
-+	SSAM_POS_COVER_FOLDED_BACK   = 0x05,
-+};
-+
- enum ssam_pos_state_sls {
- 	SSAM_POS_SLS_LID_CLOSED = 0x00,
- 	SSAM_POS_SLS_LAPTOP     = 0x01,
-@@ -340,6 +349,30 @@ struct ssam_sources_list {
- 	__le32 id[SSAM_POS_MAX_SOURCES];
- } __packed;
- 
-+static const char *ssam_pos_state_name_cover(struct ssam_tablet_sw *sw, u32 state)
-+{
-+	switch (state) {
-+	case SSAM_POS_COVER_DISCONNECTED:
-+		return "disconnected";
-+
-+	case SSAM_POS_COVER_CLOSED:
-+		return "closed";
-+
-+	case SSAM_POS_COVER_LAPTOP:
-+		return "laptop";
-+
-+	case SSAM_POS_COVER_FOLDED_CANVAS:
-+		return "folded-canvas";
-+
-+	case SSAM_POS_COVER_FOLDED_BACK:
-+		return "folded-back";
-+
-+	default:
-+		dev_warn(&sw->sdev->dev, "unknown device posture for type-cover: %u\n", state);
-+		return "<unknown>";
-+	}
-+}
-+
- static const char *ssam_pos_state_name_sls(struct ssam_tablet_sw *sw, u32 state)
- {
- 	switch (state) {
-@@ -365,6 +398,9 @@ static const char *ssam_pos_state_name(struct ssam_tablet_sw *sw,
- 				       const struct ssam_tablet_sw_state *state)
- {
- 	switch (state->source) {
-+	case SSAM_POS_SOURCE_COVER:
-+		return ssam_pos_state_name_cover(sw, state->state);
-+
- 	case SSAM_POS_SOURCE_SLS:
- 		return ssam_pos_state_name_sls(sw, state->state);
- 
-@@ -374,6 +410,24 @@ static const char *ssam_pos_state_name(struct ssam_tablet_sw *sw,
- 	}
- }
- 
-+static bool ssam_pos_state_is_tablet_mode_cover(struct ssam_tablet_sw *sw, u32 state)
-+{
-+	switch (state) {
-+	case SSAM_POS_COVER_DISCONNECTED:
-+	case SSAM_POS_COVER_FOLDED_CANVAS:
-+	case SSAM_POS_COVER_FOLDED_BACK:
-+		return true;
-+
-+	case SSAM_POS_COVER_CLOSED:
-+	case SSAM_POS_COVER_LAPTOP:
-+		return false;
-+
-+	default:
-+		dev_warn(&sw->sdev->dev, "unknown device posture for type-cover: %u\n", state);
-+		return true;
-+	}
-+}
-+
- static bool ssam_pos_state_is_tablet_mode_sls(struct ssam_tablet_sw *sw, u32 state)
- {
- 	switch (state) {
-@@ -397,6 +451,9 @@ static bool ssam_pos_state_is_tablet_mode(struct ssam_tablet_sw *sw,
- 					  const struct ssam_tablet_sw_state *state)
- {
- 	switch (state->source) {
-+	case SSAM_POS_SOURCE_COVER:
-+		return ssam_pos_state_is_tablet_mode_cover(sw, state->state);
-+
- 	case SSAM_POS_SOURCE_SLS:
- 		return ssam_pos_state_is_tablet_mode_sls(sw, state->state);
- 
--- 
-2.39.2
-
-From 79d04c923646a40b89b3c2e3bd21641e10dd8fbc Mon Sep 17 00:00:00 2001
-From: Maximilian Luz <luzmaximilian@gmail.com>
-Date: Sun, 19 Feb 2023 23:41:18 +0100
-Subject: [PATCH] platform/surface: aggregator_registry: Add support for
- tablet-mode switch on Surface Pro 9
-
-Add support for the POS-subsystem tablet-mode switch used on the Surface
-Pro 9.
-
-Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
-Patchset: surface-sam
----
- drivers/platform/surface/surface_aggregator_registry.c | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
-
-diff --git a/drivers/platform/surface/surface_aggregator_registry.c b/drivers/platform/surface/surface_aggregator_registry.c
-index 296f72d52e6a6..0fe5be5396525 100644
---- a/drivers/platform/surface/surface_aggregator_registry.c
-+++ b/drivers/platform/surface/surface_aggregator_registry.c
-@@ -305,7 +305,7 @@ static const struct software_node *ssam_node_group_sp9[] = {
- 	&ssam_node_bat_ac,
- 	&ssam_node_bat_main,
- 	&ssam_node_tmp_pprof,
--	/* TODO: Tablet mode switch (via POS subsystem) */
-+	&ssam_node_pos_tablet_switch,
- 	&ssam_node_hid_kip_keyboard,
- 	&ssam_node_hid_kip_penstash,
- 	&ssam_node_hid_kip_touchpad,
--- 
-2.39.2
-
-From c8f4a4354d6af1d04bfa93f861fa464f27cf05ca Mon Sep 17 00:00:00 2001
-From: Maximilian Luz <luzmaximilian@gmail.com>
-Date: Wed, 3 May 2023 02:02:21 +0200
-Subject: [PATCH] platform/surface: aggregator: Allow completion work-items to
- be executed in parallel
-
-Currently, event completion work-items are restricted to be run strictly
-in non-parallel fashion by the respective workqueue. However, this has
-lead to some problems:
-
-In some instances, the event notifier function called inside this
-completion workqueue takes a non-negligible amount of time to execute.
-One such example is the battery event handling code (surface_battery.c),
-which can result in a full battery information refresh, involving
-further synchronous communication with the EC inside the event handler.
-This is made worse if the communication fails spuriously, generally
-incurring a multi-second timeout.
-
-Since the event completions are run strictly non-parallel, this blocks
-other events from being propagated to the respective subsystems. This
-becomes especially noticeable for keyboard and touchpad input, which
-also funnel their events through this system. Here, users have reported
-occasional multi-second "freezes".
-
-Note, however, that the event handling system was never intended to run
-purely sequentially. Instead, we have one work struct per EC/SAM
-subsystem, processing the event queue for that subsystem. These work
-structs were intended to run in parallel, allowing sequential processing
-of work items for each subsystem but parallel processing of work items
-across subsystems.
-
-The only restriction to this is the way the workqueue is created.
-Therefore, replace create_workqueue() with alloc_workqueue() and do not
-restrict the maximum number of parallel work items to be executed on
-that queue, resolving any cross-subsystem blockage.
-
-Fixes: c167b9c7e3d6 ("platform/surface: Add Surface Aggregator subsystem")
-Link: https://github.com/linux-surface/linux-surface/issues/1026
-Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
-Patchset: surface-sam
----
- drivers/platform/surface/aggregator/controller.c | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
-
-diff --git a/drivers/platform/surface/aggregator/controller.c b/drivers/platform/surface/aggregator/controller.c
-index 535581c0471c5..545e6628c695f 100644
---- a/drivers/platform/surface/aggregator/controller.c
-+++ b/drivers/platform/surface/aggregator/controller.c
-@@ -825,7 +825,7 @@ static int ssam_cplt_init(struct ssam_cplt *cplt, struct device *dev)
- 
- 	cplt->dev = dev;
- 
--	cplt->wq = create_workqueue(SSAM_CPLT_WQ_NAME);
-+	cplt->wq = alloc_workqueue(SSAM_CPLT_WQ_NAME, WQ_UNBOUND, WQ_MEM_RECLAIM, 0);
- 	if (!cplt->wq)
- 		return -ENOMEM;
- 
--- 
-2.40.1
-
-From 25ec6174923853d6c3564b5a196d8717a344aef8 Mon Sep 17 00:00:00 2001
+From caf057bfeb708d744d5531bf7ec5d4641ba5ad4a Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Sat, 25 Jul 2020 17:19:53 +0200
 Subject: [PATCH] i2c: acpi: Implement RawBytes read access
@@ -5614,10 +5290,10 @@ Patchset: surface-sam-over-hid
  1 file changed, 35 insertions(+)
 
 diff --git a/drivers/i2c/i2c-core-acpi.c b/drivers/i2c/i2c-core-acpi.c
-index 4dd777cc0c89f..b2338618163ad 100644
+index d6037a328669..a290ebc77aea 100644
 --- a/drivers/i2c/i2c-core-acpi.c
 +++ b/drivers/i2c/i2c-core-acpi.c
-@@ -639,6 +639,28 @@ static int acpi_gsb_i2c_write_bytes(struct i2c_client *client,
+@@ -628,6 +628,28 @@ static int acpi_gsb_i2c_write_bytes(struct i2c_client *client,
  	return (ret == 1) ? 0 : -EIO;
  }
  
@@ -5646,7 +5322,7 @@ index 4dd777cc0c89f..b2338618163ad 100644
  static acpi_status
  i2c_acpi_space_handler(u32 function, acpi_physical_address command,
  			u32 bits, u64 *value64,
-@@ -740,6 +762,19 @@ i2c_acpi_space_handler(u32 function, acpi_physical_address command,
+@@ -729,6 +751,19 @@ i2c_acpi_space_handler(u32 function, acpi_physical_address command,
  		}
  		break;
  
@@ -5667,9 +5343,9 @@ index 4dd777cc0c89f..b2338618163ad 100644
  		dev_warn(&adapter->dev, "protocol 0x%02x not supported for client 0x%02x\n",
  			 accessor_type, client->addr);
 -- 
-2.39.2
+2.41.0
 
-From d3a15c30f119dd1a5278ba50b902815ca5f6fdc8 Mon Sep 17 00:00:00 2001
+From 373b551fd0dbf20e51562ef2f0bb068fa8ee9bc0 Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Sat, 13 Feb 2021 16:41:18 +0100
 Subject: [PATCH] platform/surface: Add driver for Surface Book 1 dGPU switch
@@ -5692,7 +5368,7 @@ Patchset: surface-sam-over-hid
  create mode 100644 drivers/platform/surface/surfacebook1_dgpu_switch.c
 
 diff --git a/drivers/platform/surface/Kconfig b/drivers/platform/surface/Kconfig
-index b629e82af97c0..68656e8f309ed 100644
+index b629e82af97c..68656e8f309e 100644
 --- a/drivers/platform/surface/Kconfig
 +++ b/drivers/platform/surface/Kconfig
 @@ -149,6 +149,13 @@ config SURFACE_AGGREGATOR_TABLET_SWITCH
@@ -5710,7 +5386,7 @@ index b629e82af97c0..68656e8f309ed 100644
  	tristate "Surface DTX (Detachment System) Driver"
  	depends on SURFACE_AGGREGATOR
 diff --git a/drivers/platform/surface/Makefile b/drivers/platform/surface/Makefile
-index 53344330939bf..7efcd0cdb5329 100644
+index 53344330939b..7efcd0cdb532 100644
 --- a/drivers/platform/surface/Makefile
 +++ b/drivers/platform/surface/Makefile
 @@ -12,6 +12,7 @@ obj-$(CONFIG_SURFACE_AGGREGATOR_CDEV)	+= surface_aggregator_cdev.o
@@ -5723,7 +5399,7 @@ index 53344330939bf..7efcd0cdb5329 100644
  obj-$(CONFIG_SURFACE_HOTPLUG)		+= surface_hotplug.o
 diff --git a/drivers/platform/surface/surfacebook1_dgpu_switch.c b/drivers/platform/surface/surfacebook1_dgpu_switch.c
 new file mode 100644
-index 0000000000000..8b816ed8f35c6
+index 000000000000..8b816ed8f35c
 --- /dev/null
 +++ b/drivers/platform/surface/surfacebook1_dgpu_switch.c
 @@ -0,0 +1,162 @@
@@ -5890,9 +5566,9 @@ index 0000000000000..8b816ed8f35c6
 +MODULE_DESCRIPTION("Discrete GPU Power-Switch for Surface Book 1");
 +MODULE_LICENSE("GPL");
 -- 
-2.39.2
+2.41.0
 
-From d2e49c271c1c1a8716a2bf50bf3f45eb9267e302 Mon Sep 17 00:00:00 2001
+From 7bfca781dbbbf1c1faaad3b7e26d023f9538dbf3 Mon Sep 17 00:00:00 2001
 From: Sachi King <nakato@nakato.io>
 Date: Tue, 5 Oct 2021 00:05:09 +1100
 Subject: [PATCH] Input: soc_button_array - support AMD variant Surface devices
@@ -5914,7 +5590,7 @@ Patchset: surface-button
  1 file changed, 8 insertions(+), 25 deletions(-)
 
 diff --git a/drivers/input/misc/soc_button_array.c b/drivers/input/misc/soc_button_array.c
-index 09489380afda7..0f02411a60f1c 100644
+index 09489380afda..0f02411a60f1 100644
 --- a/drivers/input/misc/soc_button_array.c
 +++ b/drivers/input/misc/soc_button_array.c
 @@ -507,8 +507,8 @@ static const struct soc_device_data soc_device_MSHW0028 = {
@@ -5967,9 +5643,9 @@ index 09489380afda7..0f02411a60f1c 100644
  
  /*
 -- 
-2.39.2
+2.41.0
 
-From 67540c2fec9e86b264b4b0eff2d66e071696fdd0 Mon Sep 17 00:00:00 2001
+From 3639d6c1fcc2855ba5e915d1a061b09858366f15 Mon Sep 17 00:00:00 2001
 From: Sachi King <nakato@nakato.io>
 Date: Tue, 5 Oct 2021 00:22:57 +1100
 Subject: [PATCH] platform/surface: surfacepro3_button: don't load on amd
@@ -5990,7 +5666,7 @@ Patchset: surface-button
  1 file changed, 6 insertions(+), 24 deletions(-)
 
 diff --git a/drivers/platform/surface/surfacepro3_button.c b/drivers/platform/surface/surfacepro3_button.c
-index 2755601f979cd..4240c98ca2265 100644
+index 2755601f979c..4240c98ca226 100644
 --- a/drivers/platform/surface/surfacepro3_button.c
 +++ b/drivers/platform/surface/surfacepro3_button.c
 @@ -149,7 +149,8 @@ static int surface_button_resume(struct device *dev)
@@ -6039,9 +5715,9 @@ index 2755601f979cd..4240c98ca2265 100644
  
  
 -- 
-2.39.2
+2.41.0
 
-From a0e4aa5d2df3483d1face559757b642f8984e5d7 Mon Sep 17 00:00:00 2001
+From e82003705881b30eb50b53c3e8a1baa988a202b1 Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Sat, 18 Feb 2023 01:02:49 +0100
 Subject: [PATCH] USB: quirks: Add USB_QUIRK_DELAY_INIT for Surface Go 3
@@ -6066,7 +5742,7 @@ Patchset: surface-typecover
  1 file changed, 3 insertions(+)
 
 diff --git a/drivers/usb/core/quirks.c b/drivers/usb/core/quirks.c
-index 934b3d997702e..2c6604c6e8e12 100644
+index 934b3d997702..2c6604c6e8e1 100644
 --- a/drivers/usb/core/quirks.c
 +++ b/drivers/usb/core/quirks.c
 @@ -220,6 +220,9 @@ static const struct usb_device_id usb_quirk_list[] = {
@@ -6080,9 +5756,9 @@ index 934b3d997702e..2c6604c6e8e12 100644
  	{ USB_DEVICE(0x046a, 0x0023), .driver_info = USB_QUIRK_RESET_RESUME },
  
 -- 
-2.39.2
+2.41.0
 
-From 53538b95cf165320934decf246dee39bb9473553 Mon Sep 17 00:00:00 2001
+From 4d1c29ab0feff9e1bff235f0a5c6ea76fea6901c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
 Date: Thu, 5 Nov 2020 13:09:45 +0100
 Subject: [PATCH] hid/multitouch: Turn off Type Cover keyboard backlight when
@@ -6118,7 +5794,7 @@ Patchset: surface-typecover
  1 file changed, 98 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
-index e31be0cb8b850..63fd042aba6ba 100644
+index e31be0cb8b85..63fd042aba6b 100644
 --- a/drivers/hid/hid-multitouch.c
 +++ b/drivers/hid/hid-multitouch.c
 @@ -34,7 +34,10 @@
@@ -6313,9 +5989,9 @@ index e31be0cb8b850..63fd042aba6ba 100644
  	{ .driver_data = MT_CLS_GOOGLE,
  		HID_DEVICE(HID_BUS_ANY, HID_GROUP_ANY, USB_VENDOR_ID_GOOGLE,
 -- 
-2.39.2
+2.41.0
 
-From 670ed14c523191a642ef62b5b89919674ab17926 Mon Sep 17 00:00:00 2001
+From 44cce8482b30d432190f0c5dda8e82d463c1e736 Mon Sep 17 00:00:00 2001
 From: PJungkamp <p.jungkamp@gmail.com>
 Date: Fri, 25 Feb 2022 12:04:25 +0100
 Subject: [PATCH] hid/multitouch: Add support for surface pro type cover tablet
@@ -6344,7 +6020,7 @@ Patchset: surface-typecover
  1 file changed, 122 insertions(+), 26 deletions(-)
 
 diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
-index 63fd042aba6ba..508a250ff4bf1 100644
+index 63fd042aba6b..508a250ff4bf 100644
 --- a/drivers/hid/hid-multitouch.c
 +++ b/drivers/hid/hid-multitouch.c
 @@ -77,6 +77,7 @@ MODULE_LICENSE("GPL");
@@ -6613,9 +6289,9 @@ index 63fd042aba6ba..508a250ff4bf1 100644
  	unregister_pm_notifier(&td->pm_notifier);
  	del_timer_sync(&td->release_timer);
 -- 
-2.39.2
+2.41.0
 
-From ef9a8f34a8ffe0116f8b369418d397f167b48fa6 Mon Sep 17 00:00:00 2001
+From 51d2a71107c6ce799d020d1ea36c4aa9086a229f Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Sun, 19 Feb 2023 22:12:24 +0100
 Subject: [PATCH] PCI: Add quirk to prevent calling shutdown mehtod
@@ -6640,7 +6316,7 @@ Patchset: surface-shutdown
  3 files changed, 40 insertions(+)
 
 diff --git a/drivers/pci/pci-driver.c b/drivers/pci/pci-driver.c
-index 7a19f11daca3a..e6b8c9ef7c216 100644
+index 57ddcc59af30..497cbadd2c6c 100644
 --- a/drivers/pci/pci-driver.c
 +++ b/drivers/pci/pci-driver.c
 @@ -507,6 +507,9 @@ static void pci_device_shutdown(struct device *dev)
@@ -6654,10 +6330,10 @@ index 7a19f11daca3a..e6b8c9ef7c216 100644
  
  	if (drv && drv->shutdown)
 diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
-index 494fa46f57671..106fb2ff855b2 100644
+index c525867760bf..b67d9181a608 100644
 --- a/drivers/pci/quirks.c
 +++ b/drivers/pci/quirks.c
-@@ -6015,3 +6015,39 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x9a2d, dpc_log_size);
+@@ -6041,3 +6041,39 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x9a2d, dpc_log_size);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x9a2f, dpc_log_size);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x9a31, dpc_log_size);
  #endif
@@ -6698,7 +6374,7 @@ index 494fa46f57671..106fb2ff855b2 100644
 +DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x466d, quirk_no_shutdown);  // Thunderbolt 4 NHI
 +DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x46a8, quirk_no_shutdown);  // GPU
 diff --git a/include/linux/pci.h b/include/linux/pci.h
-index db6ec828aa4b2..9f47d975834b2 100644
+index a5dda515fcd1..69f6fc707ae5 100644
 --- a/include/linux/pci.h
 +++ b/include/linux/pci.h
 @@ -464,6 +464,7 @@ struct pci_dev {
@@ -6710,9 +6386,9 @@ index db6ec828aa4b2..9f47d975834b2 100644
  	atomic_t	enable_cnt;	/* pci_enable_device has been called */
  
 -- 
-2.39.2
+2.41.0
 
-From 160d5791ca908aa9a4b47d3ca37e5ada9d29fc74 Mon Sep 17 00:00:00 2001
+From 5861789d7efe99961dfb27d5228f5cbdf5288220 Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Sun, 12 Mar 2023 01:41:57 +0100
 Subject: [PATCH] platform/surface: gpe: Add support for Surface Pro 9
@@ -6726,7 +6402,7 @@ Patchset: surface-gpe
  1 file changed, 17 insertions(+)
 
 diff --git a/drivers/platform/surface/surface_gpe.c b/drivers/platform/surface/surface_gpe.c
-index c219b840d491a..69c4352e8406b 100644
+index c219b840d491..69c4352e8406 100644
 --- a/drivers/platform/surface/surface_gpe.c
 +++ b/drivers/platform/surface/surface_gpe.c
 @@ -41,6 +41,11 @@ static const struct property_entry lid_device_props_l4F[] = {
@@ -6761,9 +6437,9 @@ index c219b840d491a..69c4352e8406b 100644
  		.ident = "Surface Book 1",
  		.matches = {
 -- 
-2.39.2
+2.41.0
 
-From 79ea44e430eb19ad84ab22979bc2a9bc932f055d Mon Sep 17 00:00:00 2001
+From e5bbfaecaa8e645a74bc8e65479f30f8b475e991 Mon Sep 17 00:00:00 2001
 From: Hans de Goede <hdegoede@redhat.com>
 Date: Sun, 10 Oct 2021 20:56:57 +0200
 Subject: [PATCH] ACPI: delay enumeration of devices with a _DEP pointing to an
@@ -6823,7 +6499,7 @@ Patchset: cameras
  1 file changed, 3 insertions(+)
 
 diff --git a/drivers/acpi/scan.c b/drivers/acpi/scan.c
-index 0c6f06abe3f47..4fc320f424e8e 100644
+index 0c6f06abe3f4..4fc320f424e8 100644
 --- a/drivers/acpi/scan.c
 +++ b/drivers/acpi/scan.c
 @@ -2106,6 +2106,9 @@ static acpi_status acpi_bus_check_add_2(acpi_handle handle, u32 lvl_not_used,
@@ -6837,9 +6513,9 @@ index 0c6f06abe3f47..4fc320f424e8e 100644
  	 * Do not enumerate devices with enumeration_by_parent flag set as
  	 * they will be enumerated by their respective parents.
 -- 
-2.39.2
+2.41.0
 
-From 1ed4807a016ee75bfd6f2e6b61f971aa4cdbd466 Mon Sep 17 00:00:00 2001
+From 7a4daf2a194e97792bbbc434d6e48d698333afda Mon Sep 17 00:00:00 2001
 From: zouxiaoh <xiaohong.zou@intel.com>
 Date: Fri, 25 Jun 2021 08:52:59 +0800
 Subject: [PATCH] iommu: intel-ipu: use IOMMU passthrough mode for Intel IPUs
@@ -6865,7 +6541,7 @@ Patchset: cameras
  1 file changed, 30 insertions(+)
 
 diff --git a/drivers/iommu/intel/iommu.c b/drivers/iommu/intel/iommu.c
-index 08e35f9e67a62..a8f20384dfd4b 100644
+index 3ebd2260cdab..f8937235de4b 100644
 --- a/drivers/iommu/intel/iommu.c
 +++ b/drivers/iommu/intel/iommu.c
 @@ -37,6 +37,12 @@
@@ -6896,7 +6572,7 @@ index 08e35f9e67a62..a8f20384dfd4b 100644
  #define IDENTMAP_IPTS		16
  
  const struct iommu_ops intel_iommu_ops;
-@@ -2589,6 +2597,9 @@ static int device_def_domain_type(struct device *dev)
+@@ -2593,6 +2601,9 @@ static int device_def_domain_type(struct device *dev)
  		if ((iommu_identity_mapping & IDENTMAP_GFX) && IS_GFX_DEVICE(pdev))
  			return IOMMU_DOMAIN_IDENTITY;
  
@@ -6906,7 +6582,7 @@ index 08e35f9e67a62..a8f20384dfd4b 100644
  		if ((iommu_identity_mapping & IDENTMAP_IPTS) && IS_IPTS(pdev))
  			return IOMMU_DOMAIN_IDENTITY;
  	}
-@@ -2980,6 +2991,9 @@ static int __init init_dmars(void)
+@@ -2984,6 +2995,9 @@ static int __init init_dmars(void)
  	if (!dmar_map_gfx)
  		iommu_identity_mapping |= IDENTMAP_GFX;
  
@@ -6916,7 +6592,7 @@ index 08e35f9e67a62..a8f20384dfd4b 100644
  	if (!dmar_map_ipts)
  		iommu_identity_mapping |= IDENTMAP_IPTS;
  
-@@ -4823,6 +4837,18 @@ static void quirk_iommu_igfx(struct pci_dev *dev)
+@@ -4829,6 +4843,18 @@ static void quirk_iommu_igfx(struct pci_dev *dev)
  	dmar_map_gfx = 0;
  }
  
@@ -6935,7 +6611,7 @@ index 08e35f9e67a62..a8f20384dfd4b 100644
  static void quirk_iommu_ipts(struct pci_dev *dev)
  {
  	if (!IS_IPTS(dev))
-@@ -4834,6 +4860,7 @@ static void quirk_iommu_ipts(struct pci_dev *dev)
+@@ -4840,6 +4866,7 @@ static void quirk_iommu_ipts(struct pci_dev *dev)
  	pci_info(dev, "Passthrough IOMMU for IPTS\n");
  	dmar_map_ipts = 0;
  }
@@ -6943,7 +6619,7 @@ index 08e35f9e67a62..a8f20384dfd4b 100644
  /* G4x/GM45 integrated gfx dmar support is totally busted. */
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x2a40, quirk_iommu_igfx);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x2e00, quirk_iommu_igfx);
-@@ -4869,6 +4896,9 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x1632, quirk_iommu_igfx);
+@@ -4875,6 +4902,9 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x1632, quirk_iommu_igfx);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x163A, quirk_iommu_igfx);
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x163D, quirk_iommu_igfx);
  
@@ -6954,9 +6630,9 @@ index 08e35f9e67a62..a8f20384dfd4b 100644
  DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_INTEL, 0x9D3E, quirk_iommu_ipts);
  
 -- 
-2.39.2
+2.41.0
 
-From 69dd6ae22927cb0bcfc89ec3c48cf10f3c60c6a6 Mon Sep 17 00:00:00 2001
+From deb0c57207359bdeaafb79837eab06c31255f05f Mon Sep 17 00:00:00 2001
 From: Daniel Scally <djrscally@gmail.com>
 Date: Sun, 10 Oct 2021 20:57:02 +0200
 Subject: [PATCH] platform/x86: int3472: Enable I2c daisy chain
@@ -6973,7 +6649,7 @@ Patchset: cameras
  1 file changed, 7 insertions(+)
 
 diff --git a/drivers/platform/x86/intel/int3472/tps68470.c b/drivers/platform/x86/intel/int3472/tps68470.c
-index 5b8d1a9620a5d..6a0ff035cf209 100644
+index 5b8d1a9620a5..6a0ff035cf20 100644
 --- a/drivers/platform/x86/intel/int3472/tps68470.c
 +++ b/drivers/platform/x86/intel/int3472/tps68470.c
 @@ -46,6 +46,13 @@ static int tps68470_chip_init(struct device *dev, struct regmap *regmap)
@@ -6991,9 +6667,167 @@ index 5b8d1a9620a5d..6a0ff035cf209 100644
  
  	return 0;
 -- 
-2.39.2
+2.41.0
 
-From f173f220e38c37a1a94c4a5e8e8c42ae100c3758 Mon Sep 17 00:00:00 2001
+From e6a308aabbb13b64eb0b979337aa9f76375ccf62 Mon Sep 17 00:00:00 2001
+From: Daniel Scally <djrscally@gmail.com>
+Date: Wed, 4 May 2022 23:21:45 +0100
+Subject: [PATCH] media: ipu3-cio2: Move functionality from .complete() to
+ .bound()
+
+Creating links and registering subdev nodes during the .complete()
+callback has the unfortunate effect of preventing all cameras that
+connect to a notifier from working if any one of their drivers fails
+to probe. Moving the functionality from .complete() to .bound() allows
+those camera sensor drivers that did probe correctly to work regardless.
+
+Signed-off-by: Daniel Scally <djrscally@gmail.com>
+Patchset: cameras
+---
+ drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 65 +++++++------------
+ 1 file changed, 23 insertions(+), 42 deletions(-)
+
+diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+index 3b76a9d0383a..38f9f4da1922 100644
+--- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
++++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+@@ -1383,7 +1383,10 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
+ {
+ 	struct cio2_device *cio2 = to_cio2_device(notifier);
+ 	struct sensor_async_subdev *s_asd = to_sensor_asd(asd);
++	struct device *dev = &cio2->pci_dev->dev;
+ 	struct cio2_queue *q;
++	unsigned int pad;
++	int ret;
+ 
+ 	if (cio2->queue[s_asd->csi2.port].sensor)
+ 		return -EBUSY;
+@@ -1394,7 +1397,26 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
+ 	q->sensor = sd;
+ 	q->csi_rx_base = cio2->base + CIO2_REG_PIPE_BASE(q->csi2.port);
+ 
+-	return 0;
++	for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
++		if (q->sensor->entity.pads[pad].flags &
++					MEDIA_PAD_FL_SOURCE)
++			break;
++
++	if (pad == q->sensor->entity.num_pads) {
++		dev_err(dev, "failed to find src pad for %s\n",
++			q->sensor->name);
++		return -ENXIO;
++	}
++
++	ret = media_create_pad_link(&q->sensor->entity, pad, &q->subdev.entity,
++				    CIO2_PAD_SINK, 0);
++	if (ret) {
++		dev_err(dev, "failed to create link for %s\n",
++			q->sensor->name);
++		return ret;
++	}
++
++	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
+ }
+ 
+ /* The .unbind callback */
+@@ -1408,50 +1430,9 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
+ 	cio2->queue[s_asd->csi2.port].sensor = NULL;
+ }
+ 
+-/* .complete() is called after all subdevices have been located */
+-static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
+-{
+-	struct cio2_device *cio2 = to_cio2_device(notifier);
+-	struct device *dev = &cio2->pci_dev->dev;
+-	struct sensor_async_subdev *s_asd;
+-	struct v4l2_async_subdev *asd;
+-	struct cio2_queue *q;
+-	unsigned int pad;
+-	int ret;
+-
+-	list_for_each_entry(asd, &cio2->notifier.asd_list, asd_list) {
+-		s_asd = to_sensor_asd(asd);
+-		q = &cio2->queue[s_asd->csi2.port];
+-
+-		for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
+-			if (q->sensor->entity.pads[pad].flags &
+-						MEDIA_PAD_FL_SOURCE)
+-				break;
+-
+-		if (pad == q->sensor->entity.num_pads) {
+-			dev_err(dev, "failed to find src pad for %s\n",
+-				q->sensor->name);
+-			return -ENXIO;
+-		}
+-
+-		ret = media_create_pad_link(
+-				&q->sensor->entity, pad,
+-				&q->subdev.entity, CIO2_PAD_SINK,
+-				0);
+-		if (ret) {
+-			dev_err(dev, "failed to create link for %s\n",
+-				q->sensor->name);
+-			return ret;
+-		}
+-	}
+-
+-	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
+-}
+-
+ static const struct v4l2_async_notifier_operations cio2_async_ops = {
+ 	.bound = cio2_notifier_bound,
+ 	.unbind = cio2_notifier_unbind,
+-	.complete = cio2_notifier_complete,
+ };
+ 
+ static int cio2_parse_firmware(struct cio2_device *cio2)
+-- 
+2.41.0
+
+From f9f3c9d5662b44c2cdb8ab77ca5cf3f1f7686760 Mon Sep 17 00:00:00 2001
+From: Daniel Scally <djrscally@gmail.com>
+Date: Thu, 2 Jun 2022 22:15:56 +0100
+Subject: [PATCH] media: ipu3-cio2: Re-add .complete() to ipu3-cio2
+
+Removing the .complete() callback had some unintended consequences.
+Because the VCM driver is not directly linked to the ipu3-cio2
+driver .bound() never gets called for it, which means its devnode
+is never created if it probes late. Because .complete() waits for
+any sub-notifiers to also be complete it is captured in that call.
+
+Signed-off-by: Daniel Scally <djrscally@gmail.com>
+Patchset: cameras
+---
+ drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+index 38f9f4da1922..82681df7d794 100644
+--- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
++++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
+@@ -1430,9 +1430,18 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
+ 	cio2->queue[s_asd->csi2.port].sensor = NULL;
+ }
+ 
++/* .complete() is called after all subdevices have been located */
++static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
++{
++	struct cio2_device *cio2 = to_cio2_device(notifier);
++
++	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
++}
++
+ static const struct v4l2_async_notifier_operations cio2_async_ops = {
+ 	.bound = cio2_notifier_bound,
+ 	.unbind = cio2_notifier_unbind,
++	.complete = cio2_notifier_complete,
+ };
+ 
+ static int cio2_parse_firmware(struct cio2_device *cio2)
+-- 
+2.41.0
+
+From 0161770078e228821e5486ff11ca99c75df955a9 Mon Sep 17 00:00:00 2001
 From: Daniel Scally <djrscally@gmail.com>
 Date: Thu, 28 Oct 2021 21:55:16 +0100
 Subject: [PATCH] media: i2c: Add driver for DW9719 VCM
@@ -7012,10 +6846,10 @@ Patchset: cameras
  create mode 100644 drivers/media/i2c/dw9719.c
 
 diff --git a/MAINTAINERS b/MAINTAINERS
-index f77188f30210f..164d6078a6a32 100644
+index c6545eb54104..a197e0a54eed 100644
 --- a/MAINTAINERS
 +++ b/MAINTAINERS
-@@ -6362,6 +6362,13 @@ T:	git git://linuxtv.org/media_tree.git
+@@ -6237,6 +6237,13 @@ T:	git git://linuxtv.org/media_tree.git
  F:	Documentation/devicetree/bindings/media/i2c/dongwoon,dw9714.yaml
  F:	drivers/media/i2c/dw9714.c
  
@@ -7030,10 +6864,10 @@ index f77188f30210f..164d6078a6a32 100644
  M:	Dongchun Zhu <dongchun.zhu@mediatek.com>
  L:	linux-media@vger.kernel.org
 diff --git a/drivers/media/i2c/Kconfig b/drivers/media/i2c/Kconfig
-index 833241897d637..8cfd7b6c4bf54 100644
+index c3d5952ca27e..e759470a0b6b 100644
 --- a/drivers/media/i2c/Kconfig
 +++ b/drivers/media/i2c/Kconfig
-@@ -847,6 +847,17 @@ config VIDEO_DW9714
+@@ -887,6 +887,17 @@ config VIDEO_DW9714
  	  capability. This is designed for linear control of
  	  voice coil motors, controlled via I2C serial interface.
  
@@ -7052,7 +6886,7 @@ index 833241897d637..8cfd7b6c4bf54 100644
  	tristate "DW9768 lens voice coil support"
  	depends on I2C && VIDEO_DEV
 diff --git a/drivers/media/i2c/Makefile b/drivers/media/i2c/Makefile
-index 4d6c052bb5a7f..29e4d61ce310f 100644
+index 4f5e9d9cee85..eef3ee84d7dc 100644
 --- a/drivers/media/i2c/Makefile
 +++ b/drivers/media/i2c/Makefile
 @@ -30,6 +30,7 @@ obj-$(CONFIG_VIDEO_CS5345) += cs5345.o
@@ -7065,7 +6899,7 @@ index 4d6c052bb5a7f..29e4d61ce310f 100644
  obj-$(CONFIG_VIDEO_ET8EK8) += et8ek8/
 diff --git a/drivers/media/i2c/dw9719.c b/drivers/media/i2c/dw9719.c
 new file mode 100644
-index 0000000000000..180b04d2a6b3a
+index 000000000000..180b04d2a6b3
 --- /dev/null
 +++ b/drivers/media/i2c/dw9719.c
 @@ -0,0 +1,425 @@
@@ -7495,167 +7329,9 @@ index 0000000000000..180b04d2a6b3a
 +MODULE_DESCRIPTION("DW9719 VCM Driver");
 +MODULE_LICENSE("GPL");
 -- 
-2.39.2
+2.41.0
 
-From 6e5868f069084ed599460c8c398dc32380116393 Mon Sep 17 00:00:00 2001
-From: Daniel Scally <djrscally@gmail.com>
-Date: Wed, 4 May 2022 23:21:45 +0100
-Subject: [PATCH] media: ipu3-cio2: Move functionality from .complete() to
- .bound()
-
-Creating links and registering subdev nodes during the .complete()
-callback has the unfortunate effect of preventing all cameras that
-connect to a notifier from working if any one of their drivers fails
-to probe. Moving the functionality from .complete() to .bound() allows
-those camera sensor drivers that did probe correctly to work regardless.
-
-Signed-off-by: Daniel Scally <djrscally@gmail.com>
-Patchset: cameras
----
- drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 65 +++++++------------
- 1 file changed, 23 insertions(+), 42 deletions(-)
-
-diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-index 3b76a9d0383a8..38f9f4da1922e 100644
---- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-+++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-@@ -1383,7 +1383,10 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
- {
- 	struct cio2_device *cio2 = to_cio2_device(notifier);
- 	struct sensor_async_subdev *s_asd = to_sensor_asd(asd);
-+	struct device *dev = &cio2->pci_dev->dev;
- 	struct cio2_queue *q;
-+	unsigned int pad;
-+	int ret;
- 
- 	if (cio2->queue[s_asd->csi2.port].sensor)
- 		return -EBUSY;
-@@ -1394,7 +1397,26 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
- 	q->sensor = sd;
- 	q->csi_rx_base = cio2->base + CIO2_REG_PIPE_BASE(q->csi2.port);
- 
--	return 0;
-+	for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
-+		if (q->sensor->entity.pads[pad].flags &
-+					MEDIA_PAD_FL_SOURCE)
-+			break;
-+
-+	if (pad == q->sensor->entity.num_pads) {
-+		dev_err(dev, "failed to find src pad for %s\n",
-+			q->sensor->name);
-+		return -ENXIO;
-+	}
-+
-+	ret = media_create_pad_link(&q->sensor->entity, pad, &q->subdev.entity,
-+				    CIO2_PAD_SINK, 0);
-+	if (ret) {
-+		dev_err(dev, "failed to create link for %s\n",
-+			q->sensor->name);
-+		return ret;
-+	}
-+
-+	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
- }
- 
- /* The .unbind callback */
-@@ -1408,50 +1430,9 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
- 	cio2->queue[s_asd->csi2.port].sensor = NULL;
- }
- 
--/* .complete() is called after all subdevices have been located */
--static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
--{
--	struct cio2_device *cio2 = to_cio2_device(notifier);
--	struct device *dev = &cio2->pci_dev->dev;
--	struct sensor_async_subdev *s_asd;
--	struct v4l2_async_subdev *asd;
--	struct cio2_queue *q;
--	unsigned int pad;
--	int ret;
--
--	list_for_each_entry(asd, &cio2->notifier.asd_list, asd_list) {
--		s_asd = to_sensor_asd(asd);
--		q = &cio2->queue[s_asd->csi2.port];
--
--		for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
--			if (q->sensor->entity.pads[pad].flags &
--						MEDIA_PAD_FL_SOURCE)
--				break;
--
--		if (pad == q->sensor->entity.num_pads) {
--			dev_err(dev, "failed to find src pad for %s\n",
--				q->sensor->name);
--			return -ENXIO;
--		}
--
--		ret = media_create_pad_link(
--				&q->sensor->entity, pad,
--				&q->subdev.entity, CIO2_PAD_SINK,
--				0);
--		if (ret) {
--			dev_err(dev, "failed to create link for %s\n",
--				q->sensor->name);
--			return ret;
--		}
--	}
--
--	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
--}
--
- static const struct v4l2_async_notifier_operations cio2_async_ops = {
- 	.bound = cio2_notifier_bound,
- 	.unbind = cio2_notifier_unbind,
--	.complete = cio2_notifier_complete,
- };
- 
- static int cio2_parse_firmware(struct cio2_device *cio2)
--- 
-2.39.2
-
-From 410025f973dcad262720ce57f21d7fa8217a6850 Mon Sep 17 00:00:00 2001
-From: Daniel Scally <djrscally@gmail.com>
-Date: Thu, 2 Jun 2022 22:15:56 +0100
-Subject: [PATCH] media: ipu3-cio2: Re-add .complete() to ipu3-cio2
-
-Removing the .complete() callback had some unintended consequences.
-Because the VCM driver is not directly linked to the ipu3-cio2
-driver .bound() never gets called for it, which means its devnode
-is never created if it probes late. Because .complete() waits for
-any sub-notifiers to also be complete it is captured in that call.
-
-Signed-off-by: Daniel Scally <djrscally@gmail.com>
-Patchset: cameras
----
- drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 9 +++++++++
- 1 file changed, 9 insertions(+)
-
-diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-index 38f9f4da1922e..82681df7d794f 100644
---- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-+++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-@@ -1430,9 +1430,18 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
- 	cio2->queue[s_asd->csi2.port].sensor = NULL;
- }
- 
-+/* .complete() is called after all subdevices have been located */
-+static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
-+{
-+	struct cio2_device *cio2 = to_cio2_device(notifier);
-+
-+	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
-+}
-+
- static const struct v4l2_async_notifier_operations cio2_async_ops = {
- 	.bound = cio2_notifier_bound,
- 	.unbind = cio2_notifier_unbind,
-+	.complete = cio2_notifier_complete,
- };
- 
- static int cio2_parse_firmware(struct cio2_device *cio2)
--- 
-2.39.2
-
-From 3483ce66a85601ff413dd456b0f1a8e85ed701db Mon Sep 17 00:00:00 2001
+From 70157a1aae0104f5f1a16db19363103f87dcd8bd Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Fri, 15 Jul 2022 23:48:00 +0200
 Subject: [PATCH] drivers/media/i2c: Fix DW9719 dependencies
@@ -7669,10 +7345,10 @@ Patchset: cameras
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/drivers/media/i2c/Kconfig b/drivers/media/i2c/Kconfig
-index 8cfd7b6c4bf54..11b8acd7cc5fe 100644
+index e759470a0b6b..dbc6d20efbe5 100644
 --- a/drivers/media/i2c/Kconfig
 +++ b/drivers/media/i2c/Kconfig
-@@ -849,7 +849,7 @@ config VIDEO_DW9714
+@@ -889,7 +889,7 @@ config VIDEO_DW9714
  
  config VIDEO_DW9719
  	tristate "DW9719 lens voice coil support"
@@ -7682,9 +7358,9 @@ index 8cfd7b6c4bf54..11b8acd7cc5fe 100644
  	select VIDEO_V4L2_SUBDEV_API
  	select V4L2_ASYNC
 -- 
-2.39.2
+2.41.0
 
-From 7f2070b55cd5ec8e43b5db8e0df66963d88e2da7 Mon Sep 17 00:00:00 2001
+From 970e01f31f975856f412510083627b98376a79ef Mon Sep 17 00:00:00 2001
 From: Daniel Scally <dan.scally@ideasonboard.com>
 Date: Thu, 2 Mar 2023 12:59:39 +0000
 Subject: [PATCH] platform/x86: int3472: Remap reset GPIO for INT347E
@@ -7706,10 +7382,10 @@ Patchset: cameras
  1 file changed, 14 insertions(+)
 
 diff --git a/drivers/platform/x86/intel/int3472/discrete.c b/drivers/platform/x86/intel/int3472/discrete.c
-index c42c3faa2c32d..6f4b8e24eb56c 100644
+index f064da74f50a..2064b3bbe530 100644
 --- a/drivers/platform/x86/intel/int3472/discrete.c
 +++ b/drivers/platform/x86/intel/int3472/discrete.c
-@@ -108,6 +108,9 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
+@@ -98,6 +98,9 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
  {
  	const struct int3472_sensor_config *sensor_config;
  	char *path = agpio->resource_source.string_ptr;
@@ -7719,7 +7395,7 @@ index c42c3faa2c32d..6f4b8e24eb56c 100644
  	struct gpiod_lookup *table_entry;
  	struct acpi_device *adev;
  	acpi_handle handle;
-@@ -130,6 +133,17 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
+@@ -120,6 +123,17 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
  		}
  	}
  
@@ -7738,403 +7414,99 @@ index c42c3faa2c32d..6f4b8e24eb56c 100644
  	if (!func)
  		return 0;
 -- 
-2.39.2
+2.41.0
 
-From ab557ada9fedca0fc3adf7c4718433be3fbca6aa Mon Sep 17 00:00:00 2001
-From: Hans de Goede <hdegoede@redhat.com>
-Date: Fri, 20 Jan 2023 12:45:18 +0100
-Subject: [PATCH] leds: led-class: Add devicetree support to led_get()
+From 8e837ecfa3c9828ca1e897ce8f4ed7f6edba7c46 Mon Sep 17 00:00:00 2001
+From: Daniel Scally <dan.scally@ideasonboard.com>
+Date: Tue, 21 Mar 2023 13:45:26 +0000
+Subject: [PATCH] media: i2c: Clarify that gain is Analogue gain in OV7251
 
-Turn of_led_get() into a more generic __of_led_get() helper function,
-which can lookup LEDs in devicetree by either name or index.
+Update the control ID for the gain control in the ov7251 driver to
+V4L2_CID_ANALOGUE_GAIN.
 
-And use this new helper to add devicetree support to the generic
-(non devicetree specific) [devm_]led_get() function.
-
-This uses the standard devicetree pattern of adding a -names string array
-to map names to the indexes for an array of resources.
-
-Note the new led-names property for LED consumers is not added
-to the devicetree documentation because there seems to be no
-documentation for the leds property itself to extend it with this.
-It seems that how LED consumers should be described is not documented
-at all ATM.
-
-This patch is marked as RFC because of both the missing devicetree
-documentation and because there are no devicetree users of
-the generic [devm_]led_get() function for now.
-
-Reviewed-by: Andy Shevchenko <andy.shevchenko@gmail.com>
-Reviewed-by: Linus Walleij <linus.walleij@linaro.org>
-Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Daniel Scally <dan.scally@ideasonboard.com>
 Patchset: cameras
 ---
- drivers/leds/led-class.c | 37 ++++++++++++++++++++++++++++---------
- 1 file changed, 28 insertions(+), 9 deletions(-)
+ drivers/media/i2c/ov7251.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
-diff --git a/drivers/leds/led-class.c b/drivers/leds/led-class.c
-index 0c4b8d8d2b4fe..2f3af6e302082 100644
---- a/drivers/leds/led-class.c
-+++ b/drivers/leds/led-class.c
-@@ -234,19 +234,18 @@ static struct led_classdev *led_module_get(struct device *led_dev)
- 	return led_cdev;
- }
- 
--/**
-- * of_led_get() - request a LED device via the LED framework
-- * @np: device node to get the LED device from
-- * @index: the index of the LED
-- *
-- * Returns the LED device parsed from the phandle specified in the "leds"
-- * property of a device tree node or a negative error-code on failure.
-- */
--struct led_classdev *of_led_get(struct device_node *np, int index)
-+static struct led_classdev *__of_led_get(struct device_node *np, int index,
-+					 const char *name)
- {
- 	struct device *led_dev;
- 	struct device_node *led_node;
- 
-+	/*
-+	 * For named LEDs, first look up the name in the "led-names" property.
-+	 * If it cannot be found, then of_parse_phandle() will propagate the error.
-+	 */
-+	if (name)
-+		index = of_property_match_string(np, "led-names", name);
- 	led_node = of_parse_phandle(np, "leds", index);
- 	if (!led_node)
- 		return ERR_PTR(-ENOENT);
-@@ -256,6 +255,19 @@ struct led_classdev *of_led_get(struct device_node *np, int index)
- 
- 	return led_module_get(led_dev);
- }
-+
-+/**
-+ * of_led_get() - request a LED device via the LED framework
-+ * @np: device node to get the LED device from
-+ * @index: the index of the LED
-+ *
-+ * Returns the LED device parsed from the phandle specified in the "leds"
-+ * property of a device tree node or a negative error-code on failure.
-+ */
-+struct led_classdev *of_led_get(struct device_node *np, int index)
-+{
-+	return __of_led_get(np, index, NULL);
-+}
- EXPORT_SYMBOL_GPL(of_led_get);
- 
- /**
-@@ -329,9 +341,16 @@ EXPORT_SYMBOL_GPL(devm_of_led_get);
- struct led_classdev *led_get(struct device *dev, char *con_id)
- {
- 	struct led_lookup_data *lookup;
-+	struct led_classdev *led_cdev;
- 	const char *provider = NULL;
- 	struct device *led_dev;
- 
-+	if (dev->of_node) {
-+		led_cdev = __of_led_get(dev->of_node, -1, con_id);
-+		if (!IS_ERR(led_cdev) || PTR_ERR(led_cdev) != -ENOENT)
-+			return led_cdev;
-+	}
-+
- 	mutex_lock(&leds_lookup_lock);
- 	list_for_each_entry(lookup, &leds_lookup_list, list) {
- 		if (!strcmp(lookup->dev_id, dev_name(dev)) &&
+diff --git a/drivers/media/i2c/ov7251.c b/drivers/media/i2c/ov7251.c
+index 88e987435285..ff7b2c26da83 100644
+--- a/drivers/media/i2c/ov7251.c
++++ b/drivers/media/i2c/ov7251.c
+@@ -1051,7 +1051,7 @@ static int ov7251_s_ctrl(struct v4l2_ctrl *ctrl)
+ 	case V4L2_CID_EXPOSURE:
+ 		ret = ov7251_set_exposure(ov7251, ctrl->val);
+ 		break;
+-	case V4L2_CID_GAIN:
++	case V4L2_CID_ANALOGUE_GAIN:
+ 		ret = ov7251_set_gain(ov7251, ctrl->val);
+ 		break;
+ 	case V4L2_CID_TEST_PATTERN:
+@@ -1551,7 +1551,7 @@ static int ov7251_init_ctrls(struct ov7251 *ov7251)
+ 	ov7251->exposure = v4l2_ctrl_new_std(&ov7251->ctrls, &ov7251_ctrl_ops,
+ 					     V4L2_CID_EXPOSURE, 1, 32, 1, 32);
+ 	ov7251->gain = v4l2_ctrl_new_std(&ov7251->ctrls, &ov7251_ctrl_ops,
+-					 V4L2_CID_GAIN, 16, 1023, 1, 16);
++					 V4L2_CID_ANALOGUE_GAIN, 16, 1023, 1, 16);
+ 	v4l2_ctrl_new_std_menu_items(&ov7251->ctrls, &ov7251_ctrl_ops,
+ 				     V4L2_CID_TEST_PATTERN,
+ 				     ARRAY_SIZE(ov7251_test_pattern_menu) - 1,
 -- 
-2.39.2
+2.41.0
 
-From 55eceffb0759ac51b7a673be947973360f4e37a0 Mon Sep 17 00:00:00 2001
-From: Hans de Goede <hdegoede@redhat.com>
-Date: Fri, 20 Jan 2023 12:45:19 +0100
-Subject: [PATCH] media: v4l2-core: Built async and fwnode code into
- videodev.ko
+From 1dff46e8a9c767739d6ad3dd1e0735160e8eaf0e Mon Sep 17 00:00:00 2001
+From: Daniel Scally <dan.scally@ideasonboard.com>
+Date: Wed, 22 Mar 2023 11:01:42 +0000
+Subject: [PATCH] media: v4l2-core: Acquire privacy led in
+ v4l2_async_register_subdev()
 
-Currently the videodev.ko code may be builtin while e.g. v4l2-fwnode.ko
-is build as a module.
+The current call to v4l2_subdev_get_privacy_led() is contained in
+v4l2_async_register_subdev_sensor(), but that function isn't used by
+all the sensor drivers. Move the acquisition of the privacy led to
+v4l2_async_register_subdev() instead.
 
-This makes it hard to add code depending on other subsystems spanning
-both videodev.ko and v4l2-fwnode.ko. Specifically this block adding code
-depending on the LED subsystem.
-
-This is made even harder because CONFIG_V4L2_FWNODE is selected,
-not depended on so it itself cannot depend on another subsystem without
-editing all the Kconfig symbols selecting it to also list the dependency
-and there are many of such symbols.
-
-Adding a "select LED_CLASS if NEW_LEDS" to CONFIG_V4L2_FWNODE leads
-to Kconfig erroring out with "error: recursive dependency detected!".
-
-To fix this dependency mess, change the V4L2_FWNODE and V4L2_ASYNC
-(which V4L2_FWNODE selects) Kconfig symbols from tristate to bools and
-link their code into videodev.ko instead of making them separate modules.
-
-This will allow using IS_REACHABLE(LED_CLASS) for the new LED integration
-code without needing to worry that it expands to 0 in some places and
-1 in other places because some of the code being builtin vs modular.
-
-On x86_64 this leads to the following size changes for videodev.ko
-
-[hans@shalem linux]$ size drivers/media/v4l2-core/videodev.ko
-
-Before:
-   text	   data	    bss	    dec	    hex	filename
- 218206	  14395	   2448	 235049	  39629 drivers/media/v4l2-core/videodev.ko
-After:
-   text	   data	    bss	    dec	    hex	filename
- 243213	  17615	   2456	 263284	  40474	drivers/media/v4l2-core/videodev.ko
-
-So (as expected) there is some increase in size here, but it
-really is not that much.
-
-And the uncompressed no-debuginfo .ko file disk-usage actually shrinks
-by 17 KiB (comparing the slightly larger videodev.ko against the
-3 original modules) and loading time will also be better.
-
-Acked-by: Linus Walleij <linus.walleij@linaro.org>
-Signed-off-by: Hans de Goede <hdegoede@redhat.com>
+Signed-off-by: Daniel Scally <dan.scally@ideasonboard.com>
 Patchset: cameras
 ---
- drivers/media/v4l2-core/Kconfig         |  4 ++--
- drivers/media/v4l2-core/Makefile        |  4 ++--
- drivers/media/v4l2-core/v4l2-async.c    | 17 ++++-------------
- drivers/media/v4l2-core/v4l2-dev-priv.h | 19 +++++++++++++++++++
- drivers/media/v4l2-core/v4l2-dev.c      |  8 ++++++++
- drivers/media/v4l2-core/v4l2-fwnode.c   |  6 ------
- 6 files changed, 35 insertions(+), 23 deletions(-)
- create mode 100644 drivers/media/v4l2-core/v4l2-dev-priv.h
+ drivers/media/v4l2-core/v4l2-async.c  | 4 ++++
+ drivers/media/v4l2-core/v4l2-fwnode.c | 4 ----
+ 2 files changed, 4 insertions(+), 4 deletions(-)
 
-diff --git a/drivers/media/v4l2-core/Kconfig b/drivers/media/v4l2-core/Kconfig
-index 348559bc24689..73574d9460105 100644
---- a/drivers/media/v4l2-core/Kconfig
-+++ b/drivers/media/v4l2-core/Kconfig
-@@ -68,11 +68,11 @@ config V4L2_FLASH_LED_CLASS
- 	  When in doubt, say N.
- 
- config V4L2_FWNODE
--	tristate
-+	bool
- 	select V4L2_ASYNC
- 
- config V4L2_ASYNC
--	tristate
-+	bool
- 
- # Used by drivers that need Videobuf modules
- config VIDEOBUF_GEN
-diff --git a/drivers/media/v4l2-core/Makefile b/drivers/media/v4l2-core/Makefile
-index 41d91bd10cf28..8c5a1ab8d939a 100644
---- a/drivers/media/v4l2-core/Makefile
-+++ b/drivers/media/v4l2-core/Makefile
-@@ -15,7 +15,9 @@ videodev-objs	:=	v4l2-dev.o v4l2-ioctl.o v4l2-device.o v4l2-fh.o \
- 
- # Please keep it alphabetically sorted by Kconfig name
- # (e. g. LC_ALL=C sort Makefile)
-+videodev-$(CONFIG_V4L2_ASYNC) += v4l2-async.o
- videodev-$(CONFIG_COMPAT) += v4l2-compat-ioctl32.o
-+videodev-$(CONFIG_V4L2_FWNODE) += v4l2-fwnode.o
- videodev-$(CONFIG_MEDIA_CONTROLLER) += v4l2-mc.o
- videodev-$(CONFIG_SPI) += v4l2-spi.o
- videodev-$(CONFIG_TRACEPOINTS) += v4l2-trace.o
-@@ -24,9 +26,7 @@ videodev-$(CONFIG_VIDEO_V4L2_I2C) += v4l2-i2c.o
- # Please keep it alphabetically sorted by Kconfig name
- # (e. g. LC_ALL=C sort Makefile)
- 
--obj-$(CONFIG_V4L2_ASYNC) += v4l2-async.o
- obj-$(CONFIG_V4L2_FLASH_LED_CLASS) += v4l2-flash-led-class.o
--obj-$(CONFIG_V4L2_FWNODE) += v4l2-fwnode.o
- obj-$(CONFIG_V4L2_H264) += v4l2-h264.o
- obj-$(CONFIG_V4L2_JPEG_HELPER) += v4l2-jpeg.o
- obj-$(CONFIG_V4L2_MEM2MEM_DEV) += v4l2-mem2mem.o
 diff --git a/drivers/media/v4l2-core/v4l2-async.c b/drivers/media/v4l2-core/v4l2-async.c
-index 2f1b718a91893..024d6b82b50af 100644
+index b16b5f4cb91e..33739a979cbc 100644
 --- a/drivers/media/v4l2-core/v4l2-async.c
 +++ b/drivers/media/v4l2-core/v4l2-async.c
-@@ -11,7 +11,6 @@
- #include <linux/i2c.h>
- #include <linux/list.h>
- #include <linux/mm.h>
--#include <linux/module.h>
- #include <linux/mutex.h>
- #include <linux/of.h>
- #include <linux/platform_device.h>
-@@ -24,6 +23,8 @@
- #include <media/v4l2-fwnode.h>
- #include <media/v4l2-subdev.h>
+@@ -760,6 +760,10 @@ int v4l2_async_register_subdev(struct v4l2_subdev *sd)
+ 	struct v4l2_async_notifier *notifier;
+ 	int ret;
  
-+#include "v4l2-dev-priv.h"
++	ret = v4l2_subdev_get_privacy_led(sd);
++	if (ret < 0)
++		return ret;
 +
- static int v4l2_async_nf_call_bound(struct v4l2_async_notifier *n,
- 				    struct v4l2_subdev *subdev,
- 				    struct v4l2_async_subdev *asd)
-@@ -900,25 +901,15 @@ DEFINE_SHOW_ATTRIBUTE(pending_subdevs);
- 
- static struct dentry *v4l2_async_debugfs_dir;
- 
--static int __init v4l2_async_init(void)
-+void __init v4l2_async_debugfs_init(void)
- {
- 	v4l2_async_debugfs_dir = debugfs_create_dir("v4l2-async", NULL);
- 	debugfs_create_file("pending_async_subdevices", 0444,
- 			    v4l2_async_debugfs_dir, NULL,
- 			    &pending_subdevs_fops);
--
--	return 0;
- }
- 
--static void __exit v4l2_async_exit(void)
-+void __exit v4l2_async_debugfs_exit(void)
- {
- 	debugfs_remove_recursive(v4l2_async_debugfs_dir);
- }
--
--subsys_initcall(v4l2_async_init);
--module_exit(v4l2_async_exit);
--
--MODULE_AUTHOR("Guennadi Liakhovetski <g.liakhovetski@gmx.de>");
--MODULE_AUTHOR("Sakari Ailus <sakari.ailus@linux.intel.com>");
--MODULE_AUTHOR("Ezequiel Garcia <ezequiel@collabora.com>");
--MODULE_LICENSE("GPL");
-diff --git a/drivers/media/v4l2-core/v4l2-dev-priv.h b/drivers/media/v4l2-core/v4l2-dev-priv.h
-new file mode 100644
-index 0000000000000..b5b1ee78be20a
---- /dev/null
-+++ b/drivers/media/v4l2-core/v4l2-dev-priv.h
-@@ -0,0 +1,19 @@
-+/* SPDX-License-Identifier: GPL-2.0-or-later */
-+/*
-+ * Video capture interface for Linux version 2 private header.
-+ *
-+ * Copyright (C) 2023 Hans de Goede <hdegoede@redhat.com>
-+ */
-+
-+#ifndef _V4L2_DEV_PRIV_H_
-+#define _V4L2_DEV_PRIV_H_
-+
-+#if IS_ENABLED(CONFIG_V4L2_ASYNC)
-+void v4l2_async_debugfs_init(void);
-+void v4l2_async_debugfs_exit(void);
-+#else
-+static inline void v4l2_async_debugfs_init(void) {}
-+static inline void v4l2_async_debugfs_exit(void) {}
-+#endif
-+
-+#endif
-diff --git a/drivers/media/v4l2-core/v4l2-dev.c b/drivers/media/v4l2-core/v4l2-dev.c
-index 397d553177fa7..10ba2e4196a65 100644
---- a/drivers/media/v4l2-core/v4l2-dev.c
-+++ b/drivers/media/v4l2-core/v4l2-dev.c
-@@ -31,6 +31,8 @@
- #include <media/v4l2-ioctl.h>
- #include <media/v4l2-event.h>
- 
-+#include "v4l2-dev-priv.h"
-+
- #define VIDEO_NUM_DEVICES	256
- #define VIDEO_NAME              "video4linux"
- 
-@@ -1190,6 +1192,7 @@ static int __init videodev_init(void)
- 		return -EIO;
- 	}
- 
-+	v4l2_async_debugfs_init();
- 	return 0;
- }
- 
-@@ -1197,6 +1200,7 @@ static void __exit videodev_exit(void)
- {
- 	dev_t dev = MKDEV(VIDEO_MAJOR, 0);
- 
-+	v4l2_async_debugfs_exit();
- 	class_unregister(&video_class);
- 	unregister_chrdev_region(dev, VIDEO_NUM_DEVICES);
- }
-@@ -1205,6 +1209,10 @@ subsys_initcall(videodev_init);
- module_exit(videodev_exit)
- 
- MODULE_AUTHOR("Alan Cox, Mauro Carvalho Chehab <mchehab@kernel.org>, Bill Dirks, Justin Schoeman, Gerd Knorr");
-+MODULE_AUTHOR("Guennadi Liakhovetski <g.liakhovetski@gmx.de>");
-+MODULE_AUTHOR("Sakari Ailus <sakari.ailus@linux.intel.com>");
-+MODULE_AUTHOR("Ezequiel Garcia <ezequiel@collabora.com>");
-+MODULE_AUTHOR("Sylwester Nawrocki <s.nawrocki@samsung.com>");
- MODULE_DESCRIPTION("Video4Linux2 core driver");
- MODULE_LICENSE("GPL");
- MODULE_ALIAS_CHARDEV_MAJOR(VIDEO_MAJOR);
+ 	/*
+ 	 * No reference taken. The reference is held by the device
+ 	 * (struct v4l2_subdev.dev), and async sub-device does not
 diff --git a/drivers/media/v4l2-core/v4l2-fwnode.c b/drivers/media/v4l2-core/v4l2-fwnode.c
-index 3d9533c1b2029..c8a2264262bca 100644
+index 049c2f2001ea..f8c3e40b2b71 100644
 --- a/drivers/media/v4l2-core/v4l2-fwnode.c
 +++ b/drivers/media/v4l2-core/v4l2-fwnode.c
-@@ -17,7 +17,6 @@
- #include <linux/acpi.h>
- #include <linux/kernel.h>
- #include <linux/mm.h>
--#include <linux/module.h>
- #include <linux/of.h>
- #include <linux/property.h>
- #include <linux/slab.h>
-@@ -1328,8 +1327,3 @@ int v4l2_async_register_subdev_sensor(struct v4l2_subdev *sd)
- 	return ret;
- }
- EXPORT_SYMBOL_GPL(v4l2_async_register_subdev_sensor);
+@@ -1304,10 +1304,6 @@ int v4l2_async_register_subdev_sensor(struct v4l2_subdev *sd)
+ 
+ 	v4l2_async_nf_init(notifier);
+ 
+-	ret = v4l2_subdev_get_privacy_led(sd);
+-	if (ret < 0)
+-		goto out_cleanup;
 -
--MODULE_LICENSE("GPL");
--MODULE_AUTHOR("Sakari Ailus <sakari.ailus@linux.intel.com>");
--MODULE_AUTHOR("Sylwester Nawrocki <s.nawrocki@samsung.com>");
--MODULE_AUTHOR("Guennadi Liakhovetski <g.liakhovetski@gmx.de>");
+ 	ret = v4l2_async_nf_parse_fwnode_sensor(sd->dev, notifier);
+ 	if (ret < 0)
+ 		goto out_cleanup;
 -- 
-2.39.2
+2.41.0
 
-From 994585e34879b2175846546af49dcb7b2c5c5d9b Mon Sep 17 00:00:00 2001
-From: Hans de Goede <hdegoede@redhat.com>
-Date: Fri, 27 Jan 2023 21:37:25 +0100
-Subject: [PATCH] media: v4l2-core: Make the v4l2-core code enable/disable the
- privacy LED if present
-
-Make v4l2_async_register_subdev_sensor() try to get a privacy LED
-associated with the sensor and extend the call_s_stream() wrapper to
-enable/disable the privacy LED if found.
-
-This makes the core handle privacy LED control, rather then having to
-duplicate this code in all the sensor drivers.
-
-Suggested-by: Sakari Ailus <sakari.ailus@linux.intel.com>
-Acked-by: Linus Walleij <linus.walleij@linaro.org>
-Signed-off-by: Hans de Goede <hdegoede@redhat.com>
-Patchset: cameras
----
- drivers/media/v4l2-core/v4l2-async.c       |  3 ++
- drivers/media/v4l2-core/v4l2-fwnode.c      |  7 ++++
- drivers/media/v4l2-core/v4l2-subdev-priv.h | 14 +++++++
- drivers/media/v4l2-core/v4l2-subdev.c      | 44 ++++++++++++++++++++++
- include/media/v4l2-subdev.h                |  3 ++
- 5 files changed, 71 insertions(+)
- create mode 100644 drivers/media/v4l2-core/v4l2-subdev-priv.h
-
-diff --git a/drivers/media/v4l2-core/v4l2-async.c b/drivers/media/v4l2-core/v4l2-async.c
-index 024d6b82b50af..b26dcb8d423e1 100644
---- a/drivers/media/v4l2-core/v4l2-async.c
-+++ b/drivers/media/v4l2-core/v4l2-async.c
-@@ -24,6 +24,7 @@
- #include <media/v4l2-subdev.h>
- 
- #include "v4l2-dev-priv.h"
-+#include "v4l2-subdev-priv.h"
- 
- static int v4l2_async_nf_call_bound(struct v4l2_async_notifier *n,
- 				    struct v4l2_subdev *subdev,
-@@ -823,6 +824,8 @@ void v4l2_async_unregister_subdev(struct v4l2_subdev *sd)
- 	if (!sd->async_list.next)
- 		return;
- 
-+	v4l2_subdev_put_privacy_led(sd);
-+
- 	mutex_lock(&list_lock);
- 
- 	__v4l2_async_nf_unregister(sd->subdev_notifier);
--- 
-2.39.2
-
-From 05715123be7926dc7215b061d4924149de00e5c2 Mon Sep 17 00:00:00 2001
+From a4cf681c2fa125019e4e43c90d0593a8bdf5d470 Mon Sep 17 00:00:00 2001
 From: Kate Hsuan <hpa@redhat.com>
 Date: Tue, 21 Mar 2023 23:37:16 +0800
 Subject: [PATCH] platform: x86: int3472: Add MFD cell for tps68470 LED
@@ -8143,13 +7515,14 @@ Add MFD cell for tps68470-led.
 
 Reviewed-by: Daniel Scally <dan.scally@ideasonboard.com>
 Signed-off-by: Kate Hsuan <hpa@redhat.com>
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
 Patchset: cameras
 ---
  drivers/platform/x86/intel/int3472/tps68470.c | 5 +++--
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/platform/x86/intel/int3472/tps68470.c b/drivers/platform/x86/intel/int3472/tps68470.c
-index 6a0ff035cf209..2a7d01d3abc85 100644
+index 6a0ff035cf20..2a7d01d3abc8 100644
 --- a/drivers/platform/x86/intel/int3472/tps68470.c
 +++ b/drivers/platform/x86/intel/int3472/tps68470.c
 @@ -17,7 +17,7 @@
@@ -8172,9 +7545,9 @@ index 6a0ff035cf209..2a7d01d3abc85 100644
  		for (i = 0; i < board_data->n_gpiod_lookups; i++)
  			gpiod_add_lookup_table(board_data->tps68470_gpio_lookup_tables[i]);
 -- 
-2.39.2
+2.41.0
 
-From e3eae9b725c30c0ce57a862c6ed258bb169db015 Mon Sep 17 00:00:00 2001
+From 7e0c721dd6ccd0892ab0ae2a8e138b8b13edb56e Mon Sep 17 00:00:00 2001
 From: Kate Hsuan <hpa@redhat.com>
 Date: Tue, 21 Mar 2023 23:37:17 +0800
 Subject: [PATCH] include: mfd: tps68470: Add masks for LEDA and LEDB
@@ -8192,7 +7565,7 @@ Patchset: cameras
  1 file changed, 5 insertions(+)
 
 diff --git a/include/linux/mfd/tps68470.h b/include/linux/mfd/tps68470.h
-index 7807fa329db00..2d2abb25b944f 100644
+index 7807fa329db0..2d2abb25b944 100644
 --- a/include/linux/mfd/tps68470.h
 +++ b/include/linux/mfd/tps68470.h
 @@ -34,6 +34,7 @@
@@ -8213,9 +7586,9 @@ index 7807fa329db00..2d2abb25b944f 100644
 +
  #endif /* __LINUX_MFD_TPS68470_H */
 -- 
-2.39.2
+2.41.0
 
-From 7d750ce7a2c5b5b92a2f2e0870f422a0e4b369c0 Mon Sep 17 00:00:00 2001
+From 048d915ec0787597a955d5fafd5045f251ab8515 Mon Sep 17 00:00:00 2001
 From: Kate Hsuan <hpa@redhat.com>
 Date: Tue, 21 Mar 2023 23:37:18 +0800
 Subject: [PATCH] leds: tps68470: Add LED control for tps68470
@@ -8228,6 +7601,7 @@ set according to the property values. These two LEDs can be controlled
 through the LED class of sysfs (tps68470-leda and tps68470-ledb).
 
 Signed-off-by: Kate Hsuan <hpa@redhat.com>
+Reviewed-by: Hans de Goede <hdegoede@redhat.com>
 Patchset: cameras
 ---
  drivers/leds/Kconfig         |  12 +++
@@ -8237,10 +7611,10 @@ Patchset: cameras
  create mode 100644 drivers/leds/leds-tps68470.c
 
 diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
-index 499d0f215a8bf..f0caddb6ab757 100644
+index aaa9140bc351..1fb892c9acf1 100644
 --- a/drivers/leds/Kconfig
 +++ b/drivers/leds/Kconfig
-@@ -846,6 +846,18 @@ config LEDS_TPS6105X
+@@ -827,6 +827,18 @@ config LEDS_TPS6105X
  	  It is a single boost converter primarily for white LEDs and
  	  audio amplifiers.
  
@@ -8260,10 +7634,10 @@ index 499d0f215a8bf..f0caddb6ab757 100644
  	tristate "LED support for SGI Octane machines"
  	depends on LEDS_CLASS
 diff --git a/drivers/leds/Makefile b/drivers/leds/Makefile
-index 4fd2f92cd1981..b381220400398 100644
+index d30395d11fd8..515a69953e73 100644
 --- a/drivers/leds/Makefile
 +++ b/drivers/leds/Makefile
-@@ -82,6 +82,7 @@ obj-$(CONFIG_LEDS_TCA6507)		+= leds-tca6507.o
+@@ -80,6 +80,7 @@ obj-$(CONFIG_LEDS_TCA6507)		+= leds-tca6507.o
  obj-$(CONFIG_LEDS_TI_LMU_COMMON)	+= leds-ti-lmu-common.o
  obj-$(CONFIG_LEDS_TLC591XX)		+= leds-tlc591xx.o
  obj-$(CONFIG_LEDS_TPS6105X)		+= leds-tps6105x.o
@@ -8273,7 +7647,7 @@ index 4fd2f92cd1981..b381220400398 100644
  obj-$(CONFIG_LEDS_WM8350)		+= leds-wm8350.o
 diff --git a/drivers/leds/leds-tps68470.c b/drivers/leds/leds-tps68470.c
 new file mode 100644
-index 0000000000000..35aeb5db89c8f
+index 000000000000..35aeb5db89c8
 --- /dev/null
 +++ b/drivers/leds/leds-tps68470.c
 @@ -0,0 +1,185 @@
@@ -8463,99 +7837,9 @@ index 0000000000000..35aeb5db89c8f
 +MODULE_DESCRIPTION("LED driver for TPS68470 PMIC");
 +MODULE_LICENSE("GPL v2");
 -- 
-2.39.2
+2.41.0
 
-From 934e19bcd91c33cf11a8c592924c5972dd95c54d Mon Sep 17 00:00:00 2001
-From: Daniel Scally <dan.scally@ideasonboard.com>
-Date: Wed, 22 Mar 2023 11:01:42 +0000
-Subject: [PATCH] media: v4l2-core: Acquire privacy led in
- v4l2_async_register_subdev()
-
-The current call to v4l2_subdev_get_privacy_led() is contained in
-v4l2_async_register_subdev_sensor(), but that function isn't used by
-all the sensor drivers. Move the acquisition of the privacy led to
-v4l2_async_register_subdev() instead.
-
-Signed-off-by: Daniel Scally <dan.scally@ideasonboard.com>
-Patchset: cameras
----
- drivers/media/v4l2-core/v4l2-async.c  | 4 ++++
- drivers/media/v4l2-core/v4l2-fwnode.c | 4 ----
- 2 files changed, 4 insertions(+), 4 deletions(-)
-
-diff --git a/drivers/media/v4l2-core/v4l2-async.c b/drivers/media/v4l2-core/v4l2-async.c
-index b26dcb8d423e1..43774d5acf5d1 100644
---- a/drivers/media/v4l2-core/v4l2-async.c
-+++ b/drivers/media/v4l2-core/v4l2-async.c
-@@ -757,6 +757,10 @@ int v4l2_async_register_subdev(struct v4l2_subdev *sd)
- 	struct v4l2_async_notifier *notifier;
- 	int ret;
- 
-+	ret = v4l2_subdev_get_privacy_led(sd);
-+	if (ret < 0)
-+		return ret;
-+
- 	/*
- 	 * No reference taken. The reference is held by the device
- 	 * (struct v4l2_subdev.dev), and async sub-device does not
-diff --git a/drivers/media/v4l2-core/v4l2-fwnode.c b/drivers/media/v4l2-core/v4l2-fwnode.c
-index 8501b6931d3a0..077d85553b2b9 100644
---- a/drivers/media/v4l2-core/v4l2-fwnode.c
-+++ b/drivers/media/v4l2-core/v4l2-fwnode.c
-@@ -1303,10 +1303,6 @@ int v4l2_async_register_subdev_sensor(struct v4l2_subdev *sd)
- 
- 	v4l2_async_nf_init(notifier);
- 
--	ret = v4l2_subdev_get_privacy_led(sd);
--	if (ret < 0)
--		goto out_cleanup;
--
- 	ret = v4l2_async_nf_parse_fwnode_sensor(sd->dev, notifier);
- 	if (ret < 0)
- 		goto out_cleanup;
--- 
-2.39.2
-
-From 0d862175e6d09c9d5aeeaec117e973700b84f6f2 Mon Sep 17 00:00:00 2001
-From: Daniel Scally <dan.scally@ideasonboard.com>
-Date: Tue, 21 Mar 2023 13:45:26 +0000
-Subject: [PATCH] media: i2c: Clarify that gain is Analogue gain in OV7251
-
-Update the control ID for the gain control in the ov7251 driver to
-V4L2_CID_ANALOGUE_GAIN.
-
-Signed-off-by: Daniel Scally <dan.scally@ideasonboard.com>
-Patchset: cameras
----
- drivers/media/i2c/ov7251.c | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
-
-diff --git a/drivers/media/i2c/ov7251.c b/drivers/media/i2c/ov7251.c
-index 88e9874352853..ff7b2c26da835 100644
---- a/drivers/media/i2c/ov7251.c
-+++ b/drivers/media/i2c/ov7251.c
-@@ -1051,7 +1051,7 @@ static int ov7251_s_ctrl(struct v4l2_ctrl *ctrl)
- 	case V4L2_CID_EXPOSURE:
- 		ret = ov7251_set_exposure(ov7251, ctrl->val);
- 		break;
--	case V4L2_CID_GAIN:
-+	case V4L2_CID_ANALOGUE_GAIN:
- 		ret = ov7251_set_gain(ov7251, ctrl->val);
- 		break;
- 	case V4L2_CID_TEST_PATTERN:
-@@ -1551,7 +1551,7 @@ static int ov7251_init_ctrls(struct ov7251 *ov7251)
- 	ov7251->exposure = v4l2_ctrl_new_std(&ov7251->ctrls, &ov7251_ctrl_ops,
- 					     V4L2_CID_EXPOSURE, 1, 32, 1, 32);
- 	ov7251->gain = v4l2_ctrl_new_std(&ov7251->ctrls, &ov7251_ctrl_ops,
--					 V4L2_CID_GAIN, 16, 1023, 1, 16);
-+					 V4L2_CID_ANALOGUE_GAIN, 16, 1023, 1, 16);
- 	v4l2_ctrl_new_std_menu_items(&ov7251->ctrls, &ov7251_ctrl_ops,
- 				     V4L2_CID_TEST_PATTERN,
- 				     ARRAY_SIZE(ov7251_test_pattern_menu) - 1,
--- 
-2.39.2
-
-From cd7cd2e85e50076ec726e7498bba71b8707d331a Mon Sep 17 00:00:00 2001
+From 83f5914e9679853c02a9b4c6fee32e79a289f891 Mon Sep 17 00:00:00 2001
 From: Sachi King <nakato@nakato.io>
 Date: Sat, 29 May 2021 17:47:38 +1000
 Subject: [PATCH] ACPI: Add quirk for Surface Laptop 4 AMD missing irq 7
@@ -8578,7 +7862,7 @@ Patchset: amd-gpio
  1 file changed, 17 insertions(+)
 
 diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
-index 518bda50068cb..7706380d825a3 100644
+index 0dac4ab5b55b..9ce909da6db3 100644
 --- a/arch/x86/kernel/acpi/boot.c
 +++ b/arch/x86/kernel/acpi/boot.c
 @@ -22,6 +22,7 @@
@@ -8589,7 +7873,7 @@ index 518bda50068cb..7706380d825a3 100644
  
  #include <asm/e820/api.h>
  #include <asm/irqdomain.h>
-@@ -1247,6 +1248,17 @@ static void __init mp_config_acpi_legacy_irqs(void)
+@@ -1252,6 +1253,17 @@ static void __init mp_config_acpi_legacy_irqs(void)
  	}
  }
  
@@ -8607,7 +7891,7 @@ index 518bda50068cb..7706380d825a3 100644
  /*
   * Parse IOAPIC related entries in MADT
   * returns 0 on success, < 0 on error
-@@ -1302,6 +1314,11 @@ static int __init acpi_parse_madt_ioapic_entries(void)
+@@ -1307,6 +1319,11 @@ static int __init acpi_parse_madt_ioapic_entries(void)
  		acpi_sci_ioapic_setup(acpi_gbl_FADT.sci_interrupt, 0, 0,
  				      acpi_gbl_FADT.sci_interrupt);
  
@@ -8620,9 +7904,9 @@ index 518bda50068cb..7706380d825a3 100644
  	mp_config_acpi_legacy_irqs();
  
 -- 
-2.39.2
+2.41.0
 
-From 089fb5eba602462565f7290a5b9c681aad8ade2b Mon Sep 17 00:00:00 2001
+From 00716c074a0bc711428de39c5d9bcd746a91ddf2 Mon Sep 17 00:00:00 2001
 From: Maximilian Luz <luzmaximilian@gmail.com>
 Date: Thu, 3 Jun 2021 14:04:26 +0200
 Subject: [PATCH] ACPI: Add AMD 13" Surface Laptop 4 model to irq 7 override
@@ -8637,10 +7921,10 @@ Patchset: amd-gpio
  1 file changed, 8 insertions(+), 1 deletion(-)
 
 diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c
-index 7706380d825a3..e26c38ddc601d 100644
+index 9ce909da6db3..623d94a9cb86 100644
 --- a/arch/x86/kernel/acpi/boot.c
 +++ b/arch/x86/kernel/acpi/boot.c
-@@ -1250,12 +1250,19 @@ static void __init mp_config_acpi_legacy_irqs(void)
+@@ -1255,12 +1255,19 @@ static void __init mp_config_acpi_legacy_irqs(void)
  
  static const struct dmi_system_id surface_quirk[] __initconst = {
  	{
@@ -8662,9 +7946,9 @@ index 7706380d825a3..e26c38ddc601d 100644
  };
  
 -- 
-2.39.2
+2.41.0
 
-From c1425862cef6f3bafef2e6ad644e8146f72096bf Mon Sep 17 00:00:00 2001
+From f16b132e8fcc1a95530ff666ba9c166c2ee80350 Mon Sep 17 00:00:00 2001
 From: "Bart Groeneveld | GPX Solutions B.V" <bart@gpxbv.nl>
 Date: Mon, 5 Dec 2022 16:08:46 +0100
 Subject: [PATCH] acpi: allow usage of acpi_tad on HW-reduced platforms
@@ -8687,7 +7971,7 @@ Patchset: rtc
  1 file changed, 24 insertions(+), 11 deletions(-)
 
 diff --git a/drivers/acpi/acpi_tad.c b/drivers/acpi/acpi_tad.c
-index e9b8e8305e23e..944276934e7ec 100644
+index e9b8e8305e23..944276934e7e 100644
 --- a/drivers/acpi/acpi_tad.c
 +++ b/drivers/acpi/acpi_tad.c
 @@ -432,6 +432,14 @@ static ssize_t caps_show(struct device *dev, struct device_attribute *attr,
@@ -8771,1897 +8055,5 @@ index e9b8e8305e23e..944276934e7ec 100644
  		ret = sysfs_create_group(&dev->kobj, &acpi_tad_dc_attr_group);
  		if (ret)
 -- 
-2.39.2
+2.41.0
 
-From 0289e120424c88695e731293bb4f2816bc1d8da6 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:29 -0800
-Subject: [PATCH] sched/fair: Generalize asym_packing logic for SMT cores
-
-When doing asym_packing load balancing between cores, all we care is that
-the destination core is fully idle (including SMT siblings, if any) and
-that the busiest candidate scheduling group has exactly one busy CPU. It is
-irrelevant whether the candidate busiest core is non-SMT, SMT2, SMT4, SMT8,
-etc.
-
-Do not handle the candidate busiest non-SMT vs SMT cases separately. Simply
-do the two checks described above. Let find_busiest_group() handle bigger
-imbalances in the number of idle CPUs.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Reviewed-by: Len Brown <len.brown@intel.com>
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 41 ++++++++++++++---------------------------
- 1 file changed, 14 insertions(+), 27 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 0f87369914274..4509086a60a0d 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9124,13 +9124,11 @@ group_type group_classify(unsigned int imbalance_pct,
-  * the SMT siblings of @sg are busy. If only one CPU in @sg is busy, pull tasks
-  * only if @dst_cpu has higher priority.
-  *
-- * If both @dst_cpu and @sg have SMT siblings, and @sg has exactly one more
-- * busy CPU than @sds::local, let @dst_cpu pull tasks if it has higher priority.
-- * Bigger imbalances in the number of busy CPUs will be dealt with in
-- * update_sd_pick_busiest().
-- *
-- * If @sg does not have SMT siblings, only pull tasks if all of the SMT siblings
-- * of @dst_cpu are idle and @sg has lower priority.
-+ * If @dst_cpu has SMT siblings, check if there are no running tasks in
-+ * @sds::local. In such case, decide based on the priority of @sg. Do it only
-+ * if @sg has exactly one busy CPU (i.e., one more than @sds::local). Bigger
-+ * imbalances in the number of busy CPUs will be dealt with in
-+ * find_busiest_group().
-  *
-  * Return: true if @dst_cpu can pull tasks, false otherwise.
-  */
-@@ -9139,12 +9137,10 @@ static bool asym_smt_can_pull_tasks(int dst_cpu, struct sd_lb_stats *sds,
- 				    struct sched_group *sg)
- {
- #ifdef CONFIG_SCHED_SMT
--	bool local_is_smt, sg_is_smt;
-+	bool local_is_smt;
- 	int sg_busy_cpus;
- 
- 	local_is_smt = sds->local->flags & SD_SHARE_CPUCAPACITY;
--	sg_is_smt = sg->flags & SD_SHARE_CPUCAPACITY;
--
- 	sg_busy_cpus = sgs->group_weight - sgs->idle_cpus;
- 
- 	if (!local_is_smt) {
-@@ -9165,25 +9161,16 @@ static bool asym_smt_can_pull_tasks(int dst_cpu, struct sd_lb_stats *sds,
- 		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
- 	}
- 
--	/* @dst_cpu has SMT siblings. */
--
--	if (sg_is_smt) {
--		int local_busy_cpus = sds->local->group_weight -
--				      sds->local_stat.idle_cpus;
--		int busy_cpus_delta = sg_busy_cpus - local_busy_cpus;
--
--		if (busy_cpus_delta == 1)
--			return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
--
--		return false;
--	}
--
- 	/*
--	 * @sg does not have SMT siblings. Ensure that @sds::local does not end
--	 * up with more than one busy SMT sibling and only pull tasks if there
--	 * are not busy CPUs (i.e., no CPU has running tasks).
-+	 * @dst_cpu has SMT siblings. Do asym_packing load balancing only if
-+	 * all its siblings are idle (moving tasks between physical cores in
-+	 * which some SMT siblings are busy results in the same throughput).
-+	 *
-+	 * If the difference in the number of busy CPUs is two or more, let
-+	 * find_busiest_group() take care of it. We only care if @sg has
-+	 * exactly one busy CPU. This covers SMT and non-SMT sched groups.
- 	 */
--	if (!sds->local_stat.sum_nr_running)
-+	if (sg_busy_cpus == 1 && !sds->local_stat.sum_nr_running)
- 		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
- 
- 	return false;
--- 
-2.39.2
-
-From e9da5836d3052648536258be7fbaec9f2f15862e Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:30 -0800
-Subject: [PATCH] sched/fair: Move is_core_idle() out of CONFIG_NUMA
-
-asym_packing needs this function to determine whether an SMT core is a
-suitable destination for load balancing.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 34 +++++++++++++++++-----------------
- 1 file changed, 17 insertions(+), 17 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 4509086a60a0d..d58df9c6a88c4 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -1064,6 +1064,23 @@ update_stats_curr_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
-  * Scheduling class queueing methods:
-  */
- 
-+static inline bool is_core_idle(int cpu)
-+{
-+#ifdef CONFIG_SCHED_SMT
-+	int sibling;
-+
-+	for_each_cpu(sibling, cpu_smt_mask(cpu)) {
-+		if (cpu == sibling)
-+			continue;
-+
-+		if (!idle_cpu(sibling))
-+			return false;
-+	}
-+#endif
-+
-+	return true;
-+}
-+
- #ifdef CONFIG_NUMA
- #define NUMA_IMBALANCE_MIN 2
- 
-@@ -1700,23 +1717,6 @@ struct numa_stats {
- 	int idle_cpu;
- };
- 
--static inline bool is_core_idle(int cpu)
--{
--#ifdef CONFIG_SCHED_SMT
--	int sibling;
--
--	for_each_cpu(sibling, cpu_smt_mask(cpu)) {
--		if (cpu == sibling)
--			continue;
--
--		if (!idle_cpu(sibling))
--			return false;
--	}
--#endif
--
--	return true;
--}
--
- struct task_numa_env {
- 	struct task_struct *p;
- 
--- 
-2.39.2
-
-From e0ad77720e1ed2dc413aa9229442e8df0ee0f6ac Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:31 -0800
-Subject: [PATCH] sched/fair: Only do asym_packing load balancing from fully
- idle SMT cores
-
-When balancing load between cores, all the SMT siblings of the destination
-CPU, if any, must be idle. Otherwise, pulling new tasks degrades the
-throughput of the busy SMT siblings. The overall throughput of the system
-remains the same.
-
-When balancing load within an SMT core this consideration is not relevant
-relevant. Follow the priorities that hardware indicates.
-
-Using is_core_idle() renders checking !sds->local_stat.sum_nr_running
-redundant. Remove it.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Suggested-by: Valentin Schneider <vschneid@redhat.com>
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 34 +++++++++++++++++++++++++---------
- 1 file changed, 25 insertions(+), 9 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index d58df9c6a88c4..1b134a2f0585b 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9120,12 +9120,14 @@ group_type group_classify(unsigned int imbalance_pct,
-  * Check the state of the SMT siblings of both @sds::local and @sg and decide
-  * if @dst_cpu can pull tasks.
-  *
-+ * This function must be called only if all the SMT siblings of @dst_cpu are
-+ * idle, if any.
-+ *
-  * If @dst_cpu does not have SMT siblings, it can pull tasks if two or more of
-  * the SMT siblings of @sg are busy. If only one CPU in @sg is busy, pull tasks
-  * only if @dst_cpu has higher priority.
-  *
-- * If @dst_cpu has SMT siblings, check if there are no running tasks in
-- * @sds::local. In such case, decide based on the priority of @sg. Do it only
-+ * If @dst_cpu has SMT siblings, decide based on the priority of @sg. Do it only
-  * if @sg has exactly one busy CPU (i.e., one more than @sds::local). Bigger
-  * imbalances in the number of busy CPUs will be dealt with in
-  * find_busiest_group().
-@@ -9162,15 +9164,13 @@ static bool asym_smt_can_pull_tasks(int dst_cpu, struct sd_lb_stats *sds,
- 	}
- 
- 	/*
--	 * @dst_cpu has SMT siblings. Do asym_packing load balancing only if
--	 * all its siblings are idle (moving tasks between physical cores in
--	 * which some SMT siblings are busy results in the same throughput).
-+	 * @dst_cpu has SMT siblings and are also idle.
- 	 *
- 	 * If the difference in the number of busy CPUs is two or more, let
- 	 * find_busiest_group() take care of it. We only care if @sg has
- 	 * exactly one busy CPU. This covers SMT and non-SMT sched groups.
- 	 */
--	if (sg_busy_cpus == 1 && !sds->local_stat.sum_nr_running)
-+	if (sg_busy_cpus == 1)
- 		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
- 
- 	return false;
-@@ -9184,7 +9184,14 @@ static inline bool
- sched_asym(struct lb_env *env, struct sd_lb_stats *sds,  struct sg_lb_stats *sgs,
- 	   struct sched_group *group)
- {
--	/* Only do SMT checks if either local or candidate have SMT siblings */
-+	/*
-+	 * If the destination CPU has SMT siblings, env->idle != CPU_NOT_IDLE
-+	 * is not sufficient. We need to make sure the whole core is idle.
-+	 */
-+	if (sds->local->flags & SD_SHARE_CPUCAPACITY && !is_core_idle(env->dst_cpu))
-+		return false;
-+
-+	/* Only do SMT checks if either local or candidate have SMT siblings. */
- 	if ((sds->local->flags & SD_SHARE_CPUCAPACITY) ||
- 	    (group->flags & SD_SHARE_CPUCAPACITY))
- 		return asym_smt_can_pull_tasks(env->dst_cpu, sds, sgs, group);
-@@ -11131,8 +11138,17 @@ static void nohz_balancer_kick(struct rq *rq)
- 		 */
- 		for_each_cpu_and(i, sched_domain_span(sd), nohz.idle_cpus_mask) {
- 			if (sched_asym_prefer(i, cpu)) {
--				flags = NOHZ_STATS_KICK | NOHZ_BALANCE_KICK;
--				goto unlock;
-+				/*
-+				 * Always do ASYM_PACKING balance in the SMT
-+				 * domain. In upper domains, the core must be
-+				 * fully idle.
-+				 */
-+				if (sd->flags & SD_SHARE_CPUCAPACITY ||
-+				    (!(sd->flags & SD_SHARE_CPUCAPACITY) &&
-+				     is_core_idle(i))) {
-+					flags = NOHZ_STATS_KICK | NOHZ_BALANCE_KICK;
-+					goto unlock;
-+				}
- 			}
- 		}
- 	}
--- 
-2.39.2
-
-From 6894e2e70bb2dfe0a96d65a70c1e9a4005528211 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:32 -0800
-Subject: [PATCH] sched/fair: Let low-priority cores help high-priority busy
- SMT cores
-
-Using asym_packing priorities within an SMT core is straightforward. Just
-follow the priorities that hardware indicates.
-
-When balancing load from an SMT core, also consider the idle of its
-siblings. Priorities do not reflect that an SMT core divides its throughput
-among all its busy siblings. They only makes sense when exactly one sibling
-is busy.
-
-Indicate that active balance is needed if the destination CPU has lower
-priority than the source CPU but the latter has busy SMT siblings.
-
-Make find_busiest_queue() not skip higher-priority SMT cores with more than
-busy sibling.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Suggested-by: Valentin Schneider <vschneid@redhat.com>
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 31 ++++++++++++++++++++++++++-----
- 1 file changed, 26 insertions(+), 5 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 1b134a2f0585b..1255d99877fea 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -10306,11 +10306,20 @@ static struct rq *find_busiest_queue(struct lb_env *env,
- 		    nr_running == 1)
- 			continue;
- 
--		/* Make sure we only pull tasks from a CPU of lower priority */
-+		/*
-+		 * Make sure we only pull tasks from a CPU of lower priority
-+		 * when balancing between SMT siblings.
-+		 *
-+		 * If balancing between cores, let lower priority CPUs help
-+		 * SMT cores with more than one busy sibling.
-+		 */
- 		if ((env->sd->flags & SD_ASYM_PACKING) &&
- 		    sched_asym_prefer(i, env->dst_cpu) &&
--		    nr_running == 1)
--			continue;
-+		    nr_running == 1) {
-+			if (env->sd->flags & SD_SHARE_CPUCAPACITY ||
-+			    (!(env->sd->flags & SD_SHARE_CPUCAPACITY) && is_core_idle(i)))
-+				continue;
-+		}
- 
- 		switch (env->migration_type) {
- 		case migrate_load:
-@@ -10400,8 +10409,20 @@ asym_active_balance(struct lb_env *env)
- 	 * lower priority CPUs in order to pack all tasks in the
- 	 * highest priority CPUs.
- 	 */
--	return env->idle != CPU_NOT_IDLE && (env->sd->flags & SD_ASYM_PACKING) &&
--	       sched_asym_prefer(env->dst_cpu, env->src_cpu);
-+	if (env->idle != CPU_NOT_IDLE && (env->sd->flags & SD_ASYM_PACKING)) {
-+		/* Always obey priorities between SMT siblings. */
-+		if (env->sd->flags & SD_SHARE_CPUCAPACITY)
-+			return sched_asym_prefer(env->dst_cpu, env->src_cpu);
-+
-+		/*
-+		 * A lower priority CPU can help an SMT core with more than one
-+		 * busy sibling.
-+		 */
-+		return sched_asym_prefer(env->dst_cpu, env->src_cpu) ||
-+		       !is_core_idle(env->src_cpu);
-+	}
-+
-+	return false;
- }
- 
- static inline bool
--- 
-2.39.2
-
-From aacb4416f1e6e04c9ef67e06855b7a4c26d33e3d Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:33 -0800
-Subject: [PATCH] sched/fair: Keep a fully_busy SMT sched group as busiest
-
-When comparing two fully_busy scheduling groups, keep the current busiest
-group if it represents an SMT core. Tasks in such scheduling group share
-CPU resources and need more help than tasks in a non-SMT fully_busy group.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 16 ++++++++++++++--
- 1 file changed, 14 insertions(+), 2 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 1255d99877fea..ed1f13fa32f86 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9384,10 +9384,22 @@ static bool update_sd_pick_busiest(struct lb_env *env,
- 		 * contention when accessing shared HW resources.
- 		 *
- 		 * XXX for now avg_load is not computed and always 0 so we
--		 * select the 1st one.
-+		 * select the 1st one, except if @sg is composed of SMT
-+		 * siblings.
- 		 */
--		if (sgs->avg_load <= busiest->avg_load)
-+
-+		if (sgs->avg_load < busiest->avg_load)
- 			return false;
-+
-+		if (sgs->avg_load == busiest->avg_load) {
-+			/*
-+			 * SMT sched groups need more help than non-SMT groups.
-+			 * If @sg happens to also be SMT, either choice is good.
-+			 */
-+			if (sds->busiest->flags & SD_SHARE_CPUCAPACITY)
-+				return false;
-+		}
-+
- 		break;
- 
- 	case group_has_spare:
--- 
-2.39.2
-
-From 6a40621091eafca8bc7d4ac2f178971046744a58 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:34 -0800
-Subject: [PATCH] sched/fair: Use the prefer_sibling flag of the current sched
- domain
-
-SD_PREFER_SIBLING is set from the SMT scheduling domain up to the first
-non-NUMA domain (the exception is systems with SD_ASYM_CPUCAPACITY).
-
-Above the SMT sched domain, all domains have a child. The SD_PREFER_
-SIBLING is honored always regardless of the scheduling domain at which the
-load balance takes place.
-
-There are cases, however, in which the busiest CPU's sched domain has
-child but the destination CPU's does not. Consider, for instance a non-SMT
-core (or an SMT core with only one online sibling) doing load balance with
-an SMT core at the MC level. SD_PREFER_SIBLING will not be honored. We are
-left with a fully busy SMT core and an idle non-SMT core.
-
-Avoid inconsistent behavior. Use the prefer_sibling behavior at the current
-scheduling domain, not its child.
-
-The NUMA sched domain does not have the SD_PREFER_SIBLING flag. Thus, we
-will not spread load among NUMA sched groups, as desired.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Suggested-by: Valentin Schneider <vschneid@redhat.com>
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 10 +++++-----
- 1 file changed, 5 insertions(+), 5 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index ed1f13fa32f86..9d94ba3f67269 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9874,7 +9874,6 @@ static void update_idle_cpu_scan(struct lb_env *env,
- 
- static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sds)
- {
--	struct sched_domain *child = env->sd->child;
- 	struct sched_group *sg = env->sd->groups;
- 	struct sg_lb_stats *local = &sds->local_stat;
- 	struct sg_lb_stats tmp_sgs;
-@@ -9915,9 +9914,11 @@ static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sd
- 		sg = sg->next;
- 	} while (sg != env->sd->groups);
- 
--	/* Tag domain that child domain prefers tasks go to siblings first */
--	sds->prefer_sibling = child && child->flags & SD_PREFER_SIBLING;
--
-+	/*
-+	 * Tag domain that @env::sd prefers to spread excess tasks among
-+	 * sibling sched groups.
-+	 */
-+	sds->prefer_sibling = env->sd->flags & SD_PREFER_SIBLING;
- 
- 	if (env->sd->flags & SD_NUMA)
- 		env->fbq_type = fbq_classify_group(&sds->busiest_stat);
-@@ -10216,7 +10217,6 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
- 			goto out_balanced;
- 	}
- 
--	/* Try to move all excess tasks to child's sibling domain */
- 	if (sds.prefer_sibling && local->group_type == group_has_spare &&
- 	    busiest->sum_nr_running > local->sum_nr_running + 1)
- 		goto force_balance;
--- 
-2.39.2
-
-From b35c1dc0c7b494d014ffbc6e310506fb8c1b3457 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:35 -0800
-Subject: [PATCH] sched/fair: Do not even the number of busy CPUs via
- asym_packing
-
-Now that find_busiest_group() triggers load balancing between a fully_
-busy SMT2 core and an idle non-SMT core, it is no longer needed to force
-balancing via asym_packing. Use asym_packing only as intended: when there
-is high-priority CPU that is idle.
-
-After this change, the same logic apply to SMT and non-SMT local groups.
-Simplify asym_smt_can_pull_tasks() accordingly.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 37 +++++--------------------------------
- 1 file changed, 5 insertions(+), 32 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 9d94ba3f67269..e5079ee882ff8 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9117,20 +9117,15 @@ group_type group_classify(unsigned int imbalance_pct,
-  * @sgs:	Load-balancing statistics of the candidate busiest group
-  * @sg:		The candidate busiest group
-  *
-- * Check the state of the SMT siblings of both @sds::local and @sg and decide
-- * if @dst_cpu can pull tasks.
-+ * Check the state of the SMT siblings of @sg and decide if @dst_cpu can pull
-+ * tasks.
-  *
-  * This function must be called only if all the SMT siblings of @dst_cpu are
-  * idle, if any.
-  *
-- * If @dst_cpu does not have SMT siblings, it can pull tasks if two or more of
-- * the SMT siblings of @sg are busy. If only one CPU in @sg is busy, pull tasks
-- * only if @dst_cpu has higher priority.
-- *
-- * If @dst_cpu has SMT siblings, decide based on the priority of @sg. Do it only
-- * if @sg has exactly one busy CPU (i.e., one more than @sds::local). Bigger
-- * imbalances in the number of busy CPUs will be dealt with in
-- * find_busiest_group().
-+ * @dst_cpu can pull tasks if @sg has exactly one busy CPU (i.e., one more than
-+ * @sds::local) and has lower group priority than @sds::local. Bigger imbalances
-+ * in the number of busy CPUs will be dealt with in find_busiest_group().
-  *
-  * Return: true if @dst_cpu can pull tasks, false otherwise.
-  */
-@@ -9139,33 +9134,11 @@ static bool asym_smt_can_pull_tasks(int dst_cpu, struct sd_lb_stats *sds,
- 				    struct sched_group *sg)
- {
- #ifdef CONFIG_SCHED_SMT
--	bool local_is_smt;
- 	int sg_busy_cpus;
- 
--	local_is_smt = sds->local->flags & SD_SHARE_CPUCAPACITY;
- 	sg_busy_cpus = sgs->group_weight - sgs->idle_cpus;
- 
--	if (!local_is_smt) {
--		/*
--		 * If we are here, @dst_cpu is idle and does not have SMT
--		 * siblings. Pull tasks if candidate group has two or more
--		 * busy CPUs.
--		 */
--		if (sg_busy_cpus >= 2) /* implies sg_is_smt */
--			return true;
--
--		/*
--		 * @dst_cpu does not have SMT siblings. @sg may have SMT
--		 * siblings and only one is busy. In such case, @dst_cpu
--		 * can help if it has higher priority and is idle (i.e.,
--		 * it has no running tasks).
--		 */
--		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
--	}
--
- 	/*
--	 * @dst_cpu has SMT siblings and are also idle.
--	 *
- 	 * If the difference in the number of busy CPUs is two or more, let
- 	 * find_busiest_group() take care of it. We only care if @sg has
- 	 * exactly one busy CPU. This covers SMT and non-SMT sched groups.
--- 
-2.39.2
-
-From a06f6c7fbf4e42b2e8ff963d7b3d963550cc8ea3 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:36 -0800
-Subject: [PATCH] sched/topology: Remove SHARED_CHILD from ASYM_PACKING
-
-Only x86 and Power7 use ASYM_PACKING. They use it differently.
-
-Power7 has cores of equal priority, but the SMT siblings of a core have
-different priorities. Parent scheduling domains do not need (nor have) the
-ASYM_PACKING flag. SHARED_CHILD is not needed. Using SHARED_PARENT would
-cause the topology debug code to complain.
-
-X86 has cores of different priority, but all the SMT siblings of the core
-have equal priority. It needs ASYM_PACKING at the MC level, but not at the
-SMT level (it also needs it at upper levels if they have scheduling groups
-of different priority). Removing ASYM_PACKING from the SMT domain causes
-the topology debug code to complain.
-
-Remove SHARED_CHILD for now. We still need a topology check that satisfies
-both architectures.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Suggested-by: Valentin Schneider <vschneid@redhat.com>
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- include/linux/sched/sd_flags.h | 5 +----
- 1 file changed, 1 insertion(+), 4 deletions(-)
-
-diff --git a/include/linux/sched/sd_flags.h b/include/linux/sched/sd_flags.h
-index 57bde66d95f7a..800238854ba54 100644
---- a/include/linux/sched/sd_flags.h
-+++ b/include/linux/sched/sd_flags.h
-@@ -132,12 +132,9 @@ SD_FLAG(SD_SERIALIZE, SDF_SHARED_PARENT | SDF_NEEDS_GROUPS)
- /*
-  * Place busy tasks earlier in the domain
-  *
-- * SHARED_CHILD: Usually set on the SMT level. Technically could be set further
-- *               up, but currently assumed to be set from the base domain
-- *               upwards (see update_top_cache_domain()).
-  * NEEDS_GROUPS: Load balancing flag.
-  */
--SD_FLAG(SD_ASYM_PACKING, SDF_SHARED_CHILD | SDF_NEEDS_GROUPS)
-+SD_FLAG(SD_ASYM_PACKING,  SDF_NEEDS_GROUPS)
- 
- /*
-  * Prefer to place tasks in a sibling domain
--- 
-2.39.2
-
-From ae1ee00a1f2e7ea4ff86ad6f9fbce736960049f3 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:37 -0800
-Subject: [PATCH] x86/sched: Remove SD_ASYM_PACKING from the SMT domain flags
-
-There is no difference between any of the SMT siblings of a physical core.
-Do not do asym_packing load balancing at this level.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- arch/x86/kernel/smpboot.c | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
-
-diff --git a/arch/x86/kernel/smpboot.c b/arch/x86/kernel/smpboot.c
-index 55cad72715d99..0213d066a9a96 100644
---- a/arch/x86/kernel/smpboot.c
-+++ b/arch/x86/kernel/smpboot.c
-@@ -547,7 +547,7 @@ static int x86_core_flags(void)
- #ifdef CONFIG_SCHED_SMT
- static int x86_smt_flags(void)
- {
--	return cpu_smt_flags() | x86_sched_itmt_flags();
-+	return cpu_smt_flags();
- }
- #endif
- #ifdef CONFIG_SCHED_CLUSTER
--- 
-2.39.2
-
-From 03868cd4806db1cfd95e78ddaa203000b8aad97f Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 20:58:38 -0800
-Subject: [PATCH] x86/sched/itmt: Give all SMT siblings of a core the same
- priority
-
-X86 does not have the SD_ASYM_PACKING flag in the SMT domain. The scheduler
-knows how to handle SMT and non-SMT cores of different priority. There is
-no reason for SMT siblings of a core to have different priorities.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-kernel@vger.kernel.org
-Reviewed-by: Len Brown <len.brown@intel.com>
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Tested-by: Zhang Rui <rui.zhang@intel.com>
-Patchset: intel-thread-director
----
- arch/x86/kernel/itmt.c | 23 +++++------------------
- 1 file changed, 5 insertions(+), 18 deletions(-)
-
-diff --git a/arch/x86/kernel/itmt.c b/arch/x86/kernel/itmt.c
-index 9ff480e94511b..6510883c5e817 100644
---- a/arch/x86/kernel/itmt.c
-+++ b/arch/x86/kernel/itmt.c
-@@ -174,32 +174,19 @@ int arch_asym_cpu_priority(int cpu)
- 
- /**
-  * sched_set_itmt_core_prio() - Set CPU priority based on ITMT
-- * @prio:	Priority of cpu core
-- * @core_cpu:	The cpu number associated with the core
-+ * @prio:	Priority of @cpu
-+ * @cpu:	The CPU number
-  *
-  * The pstate driver will find out the max boost frequency
-  * and call this function to set a priority proportional
-- * to the max boost frequency. CPU with higher boost
-+ * to the max boost frequency. CPUs with higher boost
-  * frequency will receive higher priority.
-  *
-  * No need to rebuild sched domain after updating
-  * the CPU priorities. The sched domains have no
-  * dependency on CPU priorities.
-  */
--void sched_set_itmt_core_prio(int prio, int core_cpu)
-+void sched_set_itmt_core_prio(int prio, int cpu)
- {
--	int cpu, i = 1;
--
--	for_each_cpu(cpu, topology_sibling_cpumask(core_cpu)) {
--		int smt_prio;
--
--		/*
--		 * Ensure that the siblings are moved to the end
--		 * of the priority chain and only used when
--		 * all other high priority cpus are out of capacity.
--		 */
--		smt_prio = prio * smp_num_siblings / (i * i);
--		per_cpu(sched_core_priority, cpu) = smt_prio;
--		i++;
--	}
-+	per_cpu(sched_core_priority, cpu) = prio;
- }
--- 
-2.39.2
-
-From 10a86fa64a25c1156d1de468366708274cdbf6b8 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:42 -0800
-Subject: [PATCH] sched/task_struct: Introduce IPC classes of tasks
-
-On hybrid processors, the architecture differences between the types of
-CPUs lead to different instructions-per-cycle (IPC) on each type of CPU.
-IPCs may differ further by the type of instructions. Instructions can be
-grouped into classes of similar IPCs.
-
-Hence, tasks can be classified into groups based on the type of
-instructions they execute.
-
-Add a new member task_struct::ipcc to associate a particular task to
-an IPC class that depends on the instructions it executes.
-
-The scheduler may use the IPC class of a task and data about the
-performance among CPUs of a given IPC class to improve throughput. It
-may, for instance, place certain classes of tasks on CPUs of higher
-performance.
-
-The methods to determine the classification of a task and its relative
-IPC score are specific to each CPU architecture.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- include/linux/sched.h | 10 ++++++++++
- init/Kconfig          | 12 ++++++++++++
- 2 files changed, 22 insertions(+)
-
-diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 853d08f7562bd..f292942178850 100644
---- a/include/linux/sched.h
-+++ b/include/linux/sched.h
-@@ -127,6 +127,8 @@ struct task_group;
- 					 __TASK_TRACED | EXIT_DEAD | EXIT_ZOMBIE | \
- 					 TASK_PARKED)
- 
-+#define IPC_CLASS_UNCLASSIFIED		0
-+
- #define task_is_running(task)		(READ_ONCE((task)->__state) == TASK_RUNNING)
- 
- #define task_is_traced(task)		((READ_ONCE(task->jobctl) & JOBCTL_TRACED) != 0)
-@@ -1522,6 +1524,14 @@ struct task_struct {
- 	union rv_task_monitor		rv[RV_PER_TASK_MONITORS];
- #endif
- 
-+#ifdef CONFIG_IPC_CLASSES
-+	/*
-+	 * A hardware-defined classification of task that reflects but is
-+	 * not identical to the number of instructions per cycle.
-+	 */
-+	unsigned short			ipcc;
-+#endif
-+
- 	/*
- 	 * New fields for task_struct should be added above here, so that
- 	 * they are included in the randomized portion of task_struct.
-diff --git a/init/Kconfig b/init/Kconfig
-index 44e90b28a30f1..24c5eec9d22e6 100644
---- a/init/Kconfig
-+++ b/init/Kconfig
-@@ -867,6 +867,18 @@ config UCLAMP_BUCKETS_COUNT
- 
- 	  If in doubt, use the default value.
- 
-+config IPC_CLASSES
-+	bool "IPC classes of tasks"
-+	depends on SMP
-+	help
-+	  If selected, each task is assigned a classification value that
-+	  reflects the type of instructions that the task executes. This
-+	  classification reflects but is not equal to the number of
-+	  instructions retired per cycle.
-+
-+	  The scheduler uses the classification value to improve the placement
-+	  of tasks.
-+
- endmenu
- 
- #
--- 
-2.39.2
-
-From 11597284e5e583ef060ff6ccc4a3aa619c672d26 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:43 -0800
-Subject: [PATCH] sched: Add interfaces for IPC classes
-
-Add the interfaces that architectures shall implement to convey the data
-to support IPC classes.
-
-arch_update_ipcc() updates the IPC classification of the current task as
-given by hardware.
-
-arch_get_ipcc_score() provides a performance score for a given IPC class
-when placed on a specific CPU. Higher scores indicate higher performance.
-
-When a driver or equivalent enablement code has configured the necessary
-hardware to support IPC classes, it should call sched_enable_ipc_classes()
-to notify the scheduler that it can start using IPC classes data.
-
-The number of classes and the score of each class of task are determined
-by hardware.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- include/linux/sched/topology.h |  6 ++++
- kernel/sched/sched.h           | 66 ++++++++++++++++++++++++++++++++++
- kernel/sched/topology.c        |  9 +++++
- 3 files changed, 81 insertions(+)
-
-diff --git a/include/linux/sched/topology.h b/include/linux/sched/topology.h
-index 816df6cc444e1..5b084d3c9ad12 100644
---- a/include/linux/sched/topology.h
-+++ b/include/linux/sched/topology.h
-@@ -280,4 +280,10 @@ static inline int task_node(const struct task_struct *p)
- 	return cpu_to_node(task_cpu(p));
- }
- 
-+#ifdef CONFIG_IPC_CLASSES
-+extern void sched_enable_ipc_classes(void);
-+#else
-+static inline void sched_enable_ipc_classes(void) { }
-+#endif
-+
- #endif /* _LINUX_SCHED_TOPOLOGY_H */
-diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 771f8ddb70533..7ab65d3feaa16 100644
---- a/kernel/sched/sched.h
-+++ b/kernel/sched/sched.h
-@@ -2526,6 +2526,72 @@ void arch_scale_freq_tick(void)
- }
- #endif
- 
-+#ifdef CONFIG_IPC_CLASSES
-+DECLARE_STATIC_KEY_FALSE(sched_ipcc);
-+
-+static inline bool sched_ipcc_enabled(void)
-+{
-+	return static_branch_unlikely(&sched_ipcc);
-+}
-+
-+#ifndef arch_update_ipcc
-+/**
-+ * arch_update_ipcc() - Update the IPC class of the current task
-+ * @curr:		The current task
-+ *
-+ * Request that the IPC classification of @curr is updated.
-+ *
-+ * Returns: none
-+ */
-+static __always_inline
-+void arch_update_ipcc(struct task_struct *curr)
-+{
-+}
-+#endif
-+
-+#ifndef arch_get_ipcc_score
-+
-+#define SCHED_IPCC_SCORE_SCALE (1L << SCHED_FIXEDPOINT_SHIFT)
-+/**
-+ * arch_get_ipcc_score() - Get the IPC score of a class of task
-+ * @ipcc:	The IPC class
-+ * @cpu:	A CPU number
-+ *
-+ * The IPC performance scores reflects (but it is not identical to) the number
-+ * of instructions retired per cycle for a given IPC class. It is a linear and
-+ * abstract metric. Higher scores reflect better performance.
-+ *
-+ * The IPC score can be normalized with respect to the class, i, with the
-+ * highest IPC score on the CPU, c, with highest performance:
-+ *
-+ *            IPC(i, c)
-+ *  ------------------------------------ * SCHED_IPCC_SCORE_SCALE
-+ *     max(IPC(i, c) : (i, c))
-+ *
-+ * Scheduling schemes that want to use the IPC score along with other
-+ * normalized metrics for scheduling (e.g., CPU capacity) may need to normalize
-+ * it.
-+ *
-+ * Other scheduling schemes (e.g., asym_packing) do not need normalization.
-+ *
-+ * Returns the performance score of an IPC class, @ipcc, when running on @cpu.
-+ * Error when either @ipcc or @cpu are invalid.
-+ */
-+static __always_inline
-+unsigned long arch_get_ipcc_score(unsigned short ipcc, int cpu)
-+{
-+	return SCHED_IPCC_SCORE_SCALE;
-+}
-+#endif
-+#else /* CONFIG_IPC_CLASSES */
-+
-+#define arch_get_ipcc_score(ipcc, cpu) (-EINVAL)
-+#define arch_update_ipcc(curr)
-+
-+static inline bool sched_ipcc_enabled(void) { return false; }
-+
-+#endif /* CONFIG_IPC_CLASSES */
-+
- #ifndef arch_scale_freq_capacity
- /**
-  * arch_scale_freq_capacity - get the frequency scale factor of a given CPU.
-diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
-index 8739c2a5a54ea..60e03d15f58ca 100644
---- a/kernel/sched/topology.c
-+++ b/kernel/sched/topology.c
-@@ -670,6 +670,15 @@ DEFINE_PER_CPU(struct sched_domain __rcu *, sd_asym_packing);
- DEFINE_PER_CPU(struct sched_domain __rcu *, sd_asym_cpucapacity);
- DEFINE_STATIC_KEY_FALSE(sched_asym_cpucapacity);
- 
-+#ifdef CONFIG_IPC_CLASSES
-+DEFINE_STATIC_KEY_FALSE(sched_ipcc);
-+
-+void sched_enable_ipc_classes(void)
-+{
-+	static_branch_enable_cpuslocked(&sched_ipcc);
-+}
-+#endif
-+
- static void update_top_cache_domain(int cpu)
- {
- 	struct sched_domain_shared *sds = NULL;
--- 
-2.39.2
-
-From db0b0e36404f9b091b52d5c1798ca3e875bf3728 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:44 -0800
-Subject: [PATCH] sched/core: Initialize the IPC class of a new task
-
-New tasks shall start life as unclassified. They will be classified by
-hardware when they run.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/core.c | 3 +++
- 1 file changed, 3 insertions(+)
-
-diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 2a4918a1faa9e..325b1d3cf7a82 100644
---- a/kernel/sched/core.c
-+++ b/kernel/sched/core.c
-@@ -4424,6 +4424,9 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
- 	p->se.prev_sum_exec_runtime	= 0;
- 	p->se.nr_migrations		= 0;
- 	p->se.vruntime			= 0;
-+#ifdef CONFIG_IPC_CLASSES
-+	p->ipcc				= IPC_CLASS_UNCLASSIFIED;
-+#endif
- 	INIT_LIST_HEAD(&p->se.group_node);
- 
- #ifdef CONFIG_FAIR_GROUP_SCHED
--- 
-2.39.2
-
-From 8250fc7b2d160a0638603d7575b0516a0ff1340e Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:45 -0800
-Subject: [PATCH] sched/core: Add user_tick as argument to scheduler_tick()
-
-Differentiate between user and kernel ticks so that the scheduler updates
-the IPC class of the current task during the former.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- include/linux/sched.h | 2 +-
- kernel/sched/core.c   | 2 +-
- kernel/time/timer.c   | 2 +-
- 3 files changed, 3 insertions(+), 3 deletions(-)
-
-diff --git a/include/linux/sched.h b/include/linux/sched.h
-index f292942178850..4f96c3dd59d0b 100644
---- a/include/linux/sched.h
-+++ b/include/linux/sched.h
-@@ -293,7 +293,7 @@ enum {
- 	TASK_COMM_LEN = 16,
- };
- 
--extern void scheduler_tick(void);
-+extern void scheduler_tick(bool user_tick);
- 
- #define	MAX_SCHEDULE_TIMEOUT		LONG_MAX
- 
-diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 325b1d3cf7a82..b438fc79f868f 100644
---- a/kernel/sched/core.c
-+++ b/kernel/sched/core.c
-@@ -5550,7 +5550,7 @@ static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
-  * This function gets called by the timer code, with HZ frequency.
-  * We call it with interrupts disabled.
-  */
--void scheduler_tick(void)
-+void scheduler_tick(bool user_tick)
- {
- 	int cpu = smp_processor_id();
- 	struct rq *rq = cpu_rq(cpu);
-diff --git a/kernel/time/timer.c b/kernel/time/timer.c
-index 63a8ce7177dd4..e15e24105891f 100644
---- a/kernel/time/timer.c
-+++ b/kernel/time/timer.c
-@@ -2073,7 +2073,7 @@ void update_process_times(int user_tick)
- 	if (in_irq())
- 		irq_work_tick();
- #endif
--	scheduler_tick();
-+	scheduler_tick(user_tick);
- 	if (IS_ENABLED(CONFIG_POSIX_TIMERS))
- 		run_posix_cpu_timers();
- }
--- 
-2.39.2
-
-From 7151037d127499dfdb328d84ffc2f435aa3471ce Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:46 -0800
-Subject: [PATCH] sched/core: Update the IPC class of the current task
-
-When supported, hardware monitors the instruction stream to classify the
-current task. Hence, at userspace tick, we are ready to read the most
-recent classification result for the current task.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/core.c | 3 +++
- 1 file changed, 3 insertions(+)
-
-diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index b438fc79f868f..0ab39cc055c77 100644
---- a/kernel/sched/core.c
-+++ b/kernel/sched/core.c
-@@ -5562,6 +5562,9 @@ void scheduler_tick(bool user_tick)
- 	if (housekeeping_cpu(cpu, HK_TYPE_TICK))
- 		arch_scale_freq_tick();
- 
-+	if (sched_ipcc_enabled() && user_tick)
-+		arch_update_ipcc(curr);
-+
- 	sched_clock_tick();
- 
- 	rq_lock(rq, &rf);
--- 
-2.39.2
-
-From 7bd90996a0cfd74c641d808c8975ab8aa5796572 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:47 -0800
-Subject: [PATCH] sched/fair: Collect load-balancing stats for IPC classes
-
-When selecting a busiest scheduling group, the IPC class of the current
-task can be used to select between two scheduling groups of types asym_
-packing or fully_busy that are otherwise identical.
-
-Compute the IPC class performance score for a scheduling group. It
-is the sum of the scores of the current tasks of all the runqueues.
-
-Also, keep track of the class of the task with the lowest IPC class score
-in the scheduling group.
-
-These two metrics will be used during idle load balancing to compute the
-current and the prospective IPC class score of a scheduling group.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 61 +++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 61 insertions(+)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index e5079ee882ff8..a418164953c36 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -8767,6 +8767,11 @@ struct sg_lb_stats {
- 	unsigned int nr_numa_running;
- 	unsigned int nr_preferred_running;
- #endif
-+#ifdef CONFIG_IPC_CLASSES
-+	unsigned long min_score; /* Min(score(rq->curr->ipcc)) */
-+	unsigned short min_ipcc; /* Class of the task with the minimum IPCC score in the rq */
-+	unsigned long sum_score; /* Sum(score(rq->curr->ipcc)) */
-+#endif
- };
- 
- /*
-@@ -9110,6 +9115,59 @@ group_type group_classify(unsigned int imbalance_pct,
- 	return group_has_spare;
- }
- 
-+#ifdef CONFIG_IPC_CLASSES
-+static void init_rq_ipcc_stats(struct sg_lb_stats *sgs)
-+{
-+	/* All IPCC stats have been set to zero in update_sg_lb_stats(). */
-+	sgs->min_score = ULONG_MAX;
-+}
-+
-+/* Called only if cpu_of(@rq) is not idle and has tasks running. */
-+static void update_sg_lb_ipcc_stats(int dst_cpu, struct sg_lb_stats *sgs,
-+				    struct rq *rq)
-+{
-+	struct task_struct *curr;
-+	unsigned short ipcc;
-+	unsigned long score;
-+
-+	if (!sched_ipcc_enabled())
-+		return;
-+
-+	curr = rcu_dereference(rq->curr);
-+	if (!curr || (curr->flags & PF_EXITING) || is_idle_task(curr) ||
-+	    task_is_realtime(curr) ||
-+	    !cpumask_test_cpu(dst_cpu, curr->cpus_ptr))
-+		return;
-+
-+	ipcc = curr->ipcc;
-+	score = arch_get_ipcc_score(ipcc, cpu_of(rq));
-+
-+	/*
-+	 * Ignore tasks with invalid scores. When finding the busiest group, we
-+	 * prefer those with higher sum_score. This group will not be selected.
-+	 */
-+	if (IS_ERR_VALUE(score))
-+		return;
-+
-+	sgs->sum_score += score;
-+
-+	if (score < sgs->min_score) {
-+		sgs->min_score = score;
-+		sgs->min_ipcc = ipcc;
-+	}
-+}
-+
-+#else /* CONFIG_IPC_CLASSES */
-+static void update_sg_lb_ipcc_stats(int dst_cpu, struct sg_lb_stats *sgs,
-+				    struct rq *rq)
-+{
-+}
-+
-+static void init_rq_ipcc_stats(struct sg_lb_stats *sgs)
-+{
-+}
-+#endif /* CONFIG_IPC_CLASSES */
-+
- /**
-  * asym_smt_can_pull_tasks - Check whether the load balancing CPU can pull tasks
-  * @dst_cpu:	Destination CPU of the load balancing
-@@ -9202,6 +9260,7 @@ static inline void update_sg_lb_stats(struct lb_env *env,
- 	int i, nr_running, local_group;
- 
- 	memset(sgs, 0, sizeof(*sgs));
-+	init_rq_ipcc_stats(sgs);
- 
- 	local_group = group == sds->local;
- 
-@@ -9251,6 +9310,8 @@ static inline void update_sg_lb_stats(struct lb_env *env,
- 			if (sgs->group_misfit_task_load < load)
- 				sgs->group_misfit_task_load = load;
- 		}
-+
-+		update_sg_lb_ipcc_stats(env->dst_cpu, sgs, rq);
- 	}
- 
- 	sgs->group_capacity = group->sgc->capacity;
--- 
-2.39.2
-
-From dcdc8c47500008e304dab90c7546127c8a056752 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:48 -0800
-Subject: [PATCH] sched/fair: Compute IPC class scores for load balancing
-
-Compute the joint total (both current and prospective) IPC class score of
-a scheduling group and the local scheduling group.
-
-These IPCC statistics are used during idle load balancing. The candidate
-scheduling group will have one fewer busy CPU after load balancing. This
-observation is important for cores with SMT support.
-
-The IPCC score of scheduling groups composed of SMT siblings needs to
-consider that the siblings share CPU resources. When computing the total
-IPCC score of the scheduling group, divide score of each sibling by the
-number of busy siblings.
-
-Collect IPCC statistics for asym_packing and fully_busy scheduling groups.
-When picking a busiest group, they are used to break ties between otherwise
-identical groups.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 68 +++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 68 insertions(+)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index a418164953c36..ae0c908be707e 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -8771,6 +8771,8 @@ struct sg_lb_stats {
- 	unsigned long min_score; /* Min(score(rq->curr->ipcc)) */
- 	unsigned short min_ipcc; /* Class of the task with the minimum IPCC score in the rq */
- 	unsigned long sum_score; /* Sum(score(rq->curr->ipcc)) */
-+	long ipcc_score_after; /* Prospective IPCC score after load balancing */
-+	unsigned long ipcc_score_before; /* IPCC score before load balancing */
- #endif
- };
- 
-@@ -9157,6 +9159,62 @@ static void update_sg_lb_ipcc_stats(int dst_cpu, struct sg_lb_stats *sgs,
- 	}
- }
- 
-+static void update_sg_lb_stats_scores(struct sg_lb_stats *sgs,
-+				      struct sched_group *sg,
-+				      struct lb_env *env)
-+{
-+	unsigned long score_on_dst_cpu, before;
-+	int busy_cpus;
-+	long after;
-+
-+	if (!sched_ipcc_enabled())
-+		return;
-+
-+	/*
-+	 * IPCC scores are only useful during idle load balancing. For now,
-+	 * only asym_packing uses IPCC scores.
-+	 */
-+	if (!(env->sd->flags & SD_ASYM_PACKING) ||
-+	    env->idle == CPU_NOT_IDLE)
-+		return;
-+
-+	/*
-+	 * IPCC scores are used to break ties only between these types of
-+	 * groups.
-+	 */
-+	if (sgs->group_type != group_fully_busy &&
-+	    sgs->group_type != group_asym_packing)
-+		return;
-+
-+	busy_cpus = sgs->group_weight - sgs->idle_cpus;
-+
-+	/* No busy CPUs in the group. No tasks to move. */
-+	if (!busy_cpus)
-+		return;
-+
-+	score_on_dst_cpu = arch_get_ipcc_score(sgs->min_ipcc, env->dst_cpu);
-+
-+	/*
-+	 * Do not use IPC scores. sgs::ipcc_score_{after, before} will be zero
-+	 * and not used.
-+	 */
-+	if (IS_ERR_VALUE(score_on_dst_cpu))
-+		return;
-+
-+	before = sgs->sum_score;
-+	after = before - sgs->min_score;
-+
-+	/* SMT siblings share throughput. */
-+	if (busy_cpus > 1 && sg->flags & SD_SHARE_CPUCAPACITY) {
-+		before /= busy_cpus;
-+		/* One sibling will become idle after load balance. */
-+		after /= busy_cpus - 1;
-+	}
-+
-+	sgs->ipcc_score_after = after + score_on_dst_cpu;
-+	sgs->ipcc_score_before = before;
-+}
-+
- #else /* CONFIG_IPC_CLASSES */
- static void update_sg_lb_ipcc_stats(int dst_cpu, struct sg_lb_stats *sgs,
- 				    struct rq *rq)
-@@ -9166,6 +9224,13 @@ static void update_sg_lb_ipcc_stats(int dst_cpu, struct sg_lb_stats *sgs,
- static void init_rq_ipcc_stats(struct sg_lb_stats *sgs)
- {
- }
-+
-+static void update_sg_lb_stats_scores(struct sg_lb_stats *sgs,
-+				      struct sched_group *sg,
-+				      struct lb_env *env)
-+{
-+}
-+
- #endif /* CONFIG_IPC_CLASSES */
- 
- /**
-@@ -9327,6 +9392,9 @@ static inline void update_sg_lb_stats(struct lb_env *env,
- 
- 	sgs->group_type = group_classify(env->sd->imbalance_pct, group, sgs);
- 
-+	if (!local_group)
-+		update_sg_lb_stats_scores(sgs, group, env);
-+
- 	/* Computing avg_load makes sense only when group is overloaded */
- 	if (sgs->group_type == group_overloaded)
- 		sgs->avg_load = (sgs->group_load * SCHED_CAPACITY_SCALE) /
--- 
-2.39.2
-
-From f5899b589a3df28df698309c8529262012cbfcbc Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:49 -0800
-Subject: [PATCH] sched/fair: Use IPCC stats to break ties between asym_packing
- sched groups
-
-As it iterates, update_sd_pick_busiest() keeps on selecting as busiest
-sched groups of identical priority. Since both groups have the same
-priority, either group is a good choice. The IPCC statistics provide a
-measure of the throughput before and after load balance. Use them to
-pick a busiest scheduling group from otherwise identical asym_packing
-scheduling groups.
-
-Pick as busiest the scheduling group that yields a higher IPCC score
-after load balancing.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 72 +++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 72 insertions(+)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index ae0c908be707e..cffb435e2b1c4 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9215,6 +9215,60 @@ static void update_sg_lb_stats_scores(struct sg_lb_stats *sgs,
- 	sgs->ipcc_score_before = before;
- }
- 
-+/**
-+ * sched_asym_ipcc_prefer - Select a sched group based on its IPCC score
-+ * @a:	Load balancing statistics of a sched group
-+ * @b:	Load balancing statistics of a second sched group
-+ *
-+ * Returns: true if @a has a higher IPCC score than @b after load balance.
-+ * False otherwise.
-+ */
-+static bool sched_asym_ipcc_prefer(struct sg_lb_stats *a,
-+				   struct sg_lb_stats *b)
-+{
-+	if (!sched_ipcc_enabled())
-+		return false;
-+
-+	/* @a increases overall throughput after load balance. */
-+	if (a->ipcc_score_after > b->ipcc_score_after)
-+		return true;
-+
-+	/*
-+	 * If @a and @b yield the same overall throughput, pick @a if
-+	 * its current throughput is lower than that of @b.
-+	 */
-+	if (a->ipcc_score_after == b->ipcc_score_after)
-+		return a->ipcc_score_before < b->ipcc_score_before;
-+
-+	return false;
-+}
-+
-+/**
-+ * sched_asym_ipcc_pick - Select a sched group based on its IPCC score
-+ * @a:		A scheduling group
-+ * @b:		A second scheduling group
-+ * @a_stats:	Load balancing statistics of @a
-+ * @b_stats:	Load balancing statistics of @b
-+ *
-+ * Returns: true if @a has the same priority and @a has tasks with IPC classes
-+ * that yield higher overall throughput after load balance. False otherwise.
-+ */
-+static bool sched_asym_ipcc_pick(struct sched_group *a,
-+				 struct sched_group *b,
-+				 struct sg_lb_stats *a_stats,
-+				 struct sg_lb_stats *b_stats)
-+{
-+	/*
-+	 * Only use the class-specific preference selection if both sched
-+	 * groups have the same priority.
-+	 */
-+	if (arch_asym_cpu_priority(a->asym_prefer_cpu) !=
-+	    arch_asym_cpu_priority(b->asym_prefer_cpu))
-+		return false;
-+
-+	return sched_asym_ipcc_prefer(a_stats, b_stats);
-+}
-+
- #else /* CONFIG_IPC_CLASSES */
- static void update_sg_lb_ipcc_stats(int dst_cpu, struct sg_lb_stats *sgs,
- 				    struct rq *rq)
-@@ -9231,6 +9285,14 @@ static void update_sg_lb_stats_scores(struct sg_lb_stats *sgs,
- {
- }
- 
-+static bool sched_asym_ipcc_pick(struct sched_group *a,
-+				 struct sched_group *b,
-+				 struct sg_lb_stats *a_stats,
-+				 struct sg_lb_stats *b_stats)
-+{
-+	return false;
-+}
-+
- #endif /* CONFIG_IPC_CLASSES */
- 
- /**
-@@ -9466,6 +9528,16 @@ static bool update_sd_pick_busiest(struct lb_env *env,
- 		/* Prefer to move from lowest priority CPU's work */
- 		if (sched_asym_prefer(sg->asym_prefer_cpu, sds->busiest->asym_prefer_cpu))
- 			return false;
-+
-+		/*
-+		 * Unlike other callers of sched_asym_prefer(), here both @sg
-+		 * and @sds::busiest have tasks running. When they have equal
-+		 * priority, their IPC class scores can be used to select a
-+		 * better busiest.
-+		 */
-+		if (sched_asym_ipcc_pick(sds->busiest, sg, &sds->busiest_stat, sgs))
-+			return false;
-+
- 		break;
- 
- 	case group_misfit_task:
--- 
-2.39.2
-
-From 516bec260bf73b1f5c078755b96593849fd166d3 Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:50 -0800
-Subject: [PATCH] sched/fair: Use IPCC stats to break ties between fully_busy
- SMT groups
-
-IPCC statistics are used during idle load balancing. After balancing one
-of the siblings of an SMT core will become idle. The rest of the busy
-siblings will enjoy increased throughput. The IPCC statistics provide
-a measure of the increased throughput. Use them to pick a busiest group
-from otherwise identical fully_busy scheduling groups (of which the
-avg_load is equal - and zero).
-
-Using IPCC scores to break ties with non-SMT fully_busy sched groups
-is not necessary. SMT sched groups always need more help.
-
-Add a stub sched_asym_ipcc_prefer() for !CONFIG_IPC_CLASSES.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 23 ++++++++++++++++++++---
- 1 file changed, 20 insertions(+), 3 deletions(-)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index cffb435e2b1c4..0996339df429b 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9285,6 +9285,12 @@ static void update_sg_lb_stats_scores(struct sg_lb_stats *sgs,
- {
- }
- 
-+static bool sched_asym_ipcc_prefer(struct sg_lb_stats *a,
-+				   struct sg_lb_stats *b)
-+{
-+	return false;
-+}
-+
- static bool sched_asym_ipcc_pick(struct sched_group *a,
- 				 struct sched_group *b,
- 				 struct sg_lb_stats *a_stats,
-@@ -9568,10 +9574,21 @@ static bool update_sd_pick_busiest(struct lb_env *env,
- 		if (sgs->avg_load == busiest->avg_load) {
- 			/*
- 			 * SMT sched groups need more help than non-SMT groups.
--			 * If @sg happens to also be SMT, either choice is good.
- 			 */
--			if (sds->busiest->flags & SD_SHARE_CPUCAPACITY)
--				return false;
-+			if (sds->busiest->flags & SD_SHARE_CPUCAPACITY) {
-+				if (!(sg->flags & SD_SHARE_CPUCAPACITY))
-+					return false;
-+
-+				/*
-+				 * Between two SMT groups, use IPCC scores to pick the
-+				 * one that would improve throughput the most (only
-+				 * asym_packing uses IPCC scores for now).
-+				 */
-+				if (sched_ipcc_enabled() &&
-+				    env->sd->flags & SD_ASYM_PACKING &&
-+				    sched_asym_ipcc_prefer(busiest, sgs))
-+					return false;
-+			}
- 		}
- 
- 		break;
--- 
-2.39.2
-
-From 442df79e3613c6db2f01a8489177d0edd366309d Mon Sep 17 00:00:00 2001
-From: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Date: Mon, 6 Feb 2023 21:10:51 -0800
-Subject: [PATCH] sched/fair: Use IPCC scores to select a busiest runqueue
-
-For two runqueues of equal priority and equal number of running of tasks,
-select the one whose current task would have the highest IPC class score
-if placed on the destination CPU.
-
-For now, use IPCC scores only for scheduling domains with the
-SD_ASYM_PACKING flag.
-
-Cc: Ben Segall <bsegall@google.com>
-Cc: Daniel Bristot de Oliveira <bristot@redhat.com>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>
-Cc: Ionela Voinescu <ionela.voinescu@arm.com>
-Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
-Cc: Len Brown <len.brown@intel.com>
-Cc: Lukasz Luba <lukasz.luba@arm.com>
-Cc: Mel Gorman <mgorman@suse.de>
-Cc: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
-Cc: Srinivas Pandruvada <srinivas.pandruvada@linux.intel.com>
-Cc: Steven Rostedt <rostedt@goodmis.org>
-Cc: Tim C. Chen <tim.c.chen@intel.com>
-Cc: Valentin Schneider <vschneid@redhat.com>
-Cc: x86@kernel.org
-Cc: linux-pm@vger.kernel.org
-Cc: linux-kernel@vger.kernel.org
-Signed-off-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>
-Patchset: intel-thread-director
----
- kernel/sched/fair.c | 64 +++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 64 insertions(+)
-
-diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 0996339df429b..a9a105092e7c3 100644
---- a/kernel/sched/fair.c
-+++ b/kernel/sched/fair.c
-@@ -9269,6 +9269,37 @@ static bool sched_asym_ipcc_pick(struct sched_group *a,
- 	return sched_asym_ipcc_prefer(a_stats, b_stats);
- }
- 
-+/**
-+ * ipcc_score_delta - Get the IPCC score delta wrt the load balance's dst_cpu
-+ * @p:		A task
-+ * @env:	Load balancing environment
-+ *
-+ * Returns: The IPCC score delta that @p would get if placed in the destination
-+ * CPU of @env. LONG_MIN to indicate that the delta should not be used.
-+ */
-+static long ipcc_score_delta(struct task_struct *p, struct lb_env *env)
-+{
-+	unsigned long score_src, score_dst;
-+	unsigned short ipcc = p->ipcc;
-+
-+	if (!sched_ipcc_enabled())
-+		return LONG_MIN;
-+
-+	/* Only asym_packing uses IPCC scores at the moment. */
-+	if (!(env->sd->flags & SD_ASYM_PACKING))
-+		return LONG_MIN;
-+
-+	score_dst = arch_get_ipcc_score(ipcc, env->dst_cpu);
-+	if (IS_ERR_VALUE(score_dst))
-+		return LONG_MIN;
-+
-+	score_src = arch_get_ipcc_score(ipcc, task_cpu(p));
-+	if (IS_ERR_VALUE(score_src))
-+		return LONG_MIN;
-+
-+	return score_dst - score_src;
-+}
-+
- #else /* CONFIG_IPC_CLASSES */
- static void update_sg_lb_ipcc_stats(int dst_cpu, struct sg_lb_stats *sgs,
- 				    struct rq *rq)
-@@ -9299,6 +9330,11 @@ static bool sched_asym_ipcc_pick(struct sched_group *a,
- 	return false;
- }
- 
-+static long ipcc_score_delta(struct task_struct *p, struct lb_env *env)
-+{
-+	return LONG_MIN;
-+}
-+
- #endif /* CONFIG_IPC_CLASSES */
- 
- /**
-@@ -10459,6 +10495,7 @@ static struct rq *find_busiest_queue(struct lb_env *env,
- {
- 	struct rq *busiest = NULL, *rq;
- 	unsigned long busiest_util = 0, busiest_load = 0, busiest_capacity = 1;
-+	long busiest_ipcc_delta = LONG_MIN;
- 	unsigned int busiest_nr = 0;
- 	int i;
- 
-@@ -10575,8 +10612,35 @@ static struct rq *find_busiest_queue(struct lb_env *env,
- 
- 		case migrate_task:
- 			if (busiest_nr < nr_running) {
-+				struct task_struct *curr;
-+
- 				busiest_nr = nr_running;
- 				busiest = rq;
-+
-+				/*
-+				 * Remember the IPCC score delta of busiest::curr.
-+				 * We may need it to break a tie with other queues
-+				 * with equal nr_running.
-+				 */
-+				curr = rcu_dereference(busiest->curr);
-+				busiest_ipcc_delta = ipcc_score_delta(curr, env);
-+			/*
-+			 * If rq and busiest have the same number of running
-+			 * tasks and IPC classes are supported, pick rq if doing
-+			 * so would give rq::curr a bigger IPC boost on dst_cpu.
-+			 */
-+			} else if (busiest_nr == nr_running) {
-+				struct task_struct *curr;
-+				long delta;
-+
-+				curr = rcu_dereference(rq->curr);
-+				delta = ipcc_score_delta(curr, env);
-+
-+				if (busiest_ipcc_delta < delta) {
-+					busiest_ipcc_delta = delta;
-+					busiest_nr = nr_running;
-+					busiest = rq;
-+				}
- 			}
- 			break;
- 
--- 
-2.39.2
