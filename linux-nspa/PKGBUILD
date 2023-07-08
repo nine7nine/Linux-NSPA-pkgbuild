@@ -67,7 +67,7 @@ _zstd_compression=y
 _nf_cone=y
 
  pkgbase=linux-nspa
-_major=6.4
+_major=6.4.2
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -76,17 +76,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.4
+_srcname=linux-6.4.2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=1
+pkgrel=3
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.4.tar.xz"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.4.2.tar.xz"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -457,7 +457,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('8fa0588f0c2ceca44cac77a0e39ba48c9f00a6b9dc69761c02a5d3efac8da7f3'
+sha256sums=('a326ab224176c5b17c73c9ccad85f32e49b6e4e764861d57595727b7ef10062c'
             'b46d9ad0b119a227f754c2aa8803daf328dc7cafa15280252b5b6a6ae163980f'
             '0f33b112f98312fde160254bcb0da7e143862f6b0863277ad85bde9588226537'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
