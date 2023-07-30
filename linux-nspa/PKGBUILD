@@ -79,7 +79,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.4.7
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=4
+pkgrel=5
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -116,7 +116,9 @@ source=(
   "0030-Microsoft_Surface_Support-6.4.patch"
   "0037-pm-cpuidle_vs_preempt_rt.patch"  
   "0039-sched-Fix-put_task_struct-calls-under-PREEMPT_RT.patch"
+  "0040-Scheduler-IPC-support-v6.4.patch"
   "0061-posix-timers-Fixes-and-cleanups.patch"
+  
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -457,7 +459,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('de143cb61dcaa756c05f56ff35144316d810615819518a33e34754f064c4a7d8'
-            'b46d9ad0b119a227f754c2aa8803daf328dc7cafa15280252b5b6a6ae163980f'
+            '5cd8a2100ad2ccc750989137af452c63c49ffa972126e811e42c78f7f57b79de'
             '0f33b112f98312fde160254bcb0da7e143862f6b0863277ad85bde9588226537'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             'bf5bd4ce6cb489c9b05e77fc83fb03d0aa1ab1b3a5dcaf9480dc83091ad28c4e'
@@ -486,5 +488,6 @@ sha256sums=('de143cb61dcaa756c05f56ff35144316d810615819518a33e34754f064c4a7d8'
             '61995e5897c0a1f581de0ac287fc3dad764d7408858ae60743c2943c3f7d7e31'
             '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
             '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413'
+            '3f25d44ecc184d7e9108d3d0531dd00d230c791c57cb34501130fe2e5774ef65'
             'e9fdd59c54071ec2d9212b3d0d74e6462f273c6f88d59f1892a5f914c6d55029')
 
