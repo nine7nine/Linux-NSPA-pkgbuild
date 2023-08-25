@@ -286,20 +286,20 @@ index 28b397f9698b..d327614c70b0 100644
  }
  
  /*
-@@ -7585,6 +7593,13 @@ static int __sched_setscheduler(struct task_struct *p,
+@@ -7752,6 +7771,13 @@ recheck:
+ 		if (retval)
  			return retval;
  	}
- 
++	
 +	if (attr->sched_flags & SCHED_FLAG_LATENCY_NICE) {
 +		if (attr->sched_latency_nice > MAX_LATENCY_NICE)
 +			return -EINVAL;
 +		if (attr->sched_latency_nice < MIN_LATENCY_NICE)
 +			return -EINVAL;
 +	}
-+
- 	if (pi)
- 		cpuset_read_lock();
  
+ 	/* Update task specific "requested" clamps */
+ 	if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP) {
 @@ -7619,6 +7634,9 @@ static int __sched_setscheduler(struct task_struct *p,
  			goto change;
  		if (attr->sched_flags & SCHED_FLAG_UTIL_CLAMP)

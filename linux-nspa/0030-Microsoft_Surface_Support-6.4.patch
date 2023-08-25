@@ -7991,161 +7991,55 @@ index 5b8d1a9620a5..6a0ff035cf20 100644
 -- 
 2.41.0
 
-From 1be01e7174d76a4ae8bc3226d564cce68c4dff01 Mon Sep 17 00:00:00 2001
-From: Daniel Scally <djrscally@gmail.com>
-Date: Wed, 4 May 2022 23:21:45 +0100
-Subject: [PATCH] media: ipu3-cio2: Move functionality from .complete() to
- .bound()
-
-Creating links and registering subdev nodes during the .complete()
-callback has the unfortunate effect of preventing all cameras that
-connect to a notifier from working if any one of their drivers fails
-to probe. Moving the functionality from .complete() to .bound() allows
-those camera sensor drivers that did probe correctly to work regardless.
-
-Signed-off-by: Daniel Scally <djrscally@gmail.com>
-Patchset: cameras
----
- drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 65 +++++++------------
- 1 file changed, 23 insertions(+), 42 deletions(-)
-
 diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-index 3c84cb121632..8ba5f78baf9c 100644
+index 8ba5f78baf9c..f0b77012641b 100644
 --- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
 +++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-@@ -1384,7 +1384,10 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
+@@ -1436,34 +1436,6 @@ static void cio2_notifier_unbind(struct
+ static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
  {
  	struct cio2_device *cio2 = to_cio2_device(notifier);
- 	struct sensor_async_subdev *s_asd = to_sensor_asd(asd);
-+	struct device *dev = &cio2->pci_dev->dev;
- 	struct cio2_queue *q;
-+	unsigned int pad;
-+	int ret;
- 
- 	if (cio2->queue[s_asd->csi2.port].sensor)
- 		return -EBUSY;
-@@ -1395,7 +1398,26 @@ static int cio2_notifier_bound(struct v4l2_async_notifier *notifier,
- 	q->sensor = sd;
- 	q->csi_rx_base = cio2->base + CIO2_REG_PIPE_BASE(q->csi2.port);
- 
--	return 0;
-+	for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
-+		if (q->sensor->entity.pads[pad].flags &
-+					MEDIA_PAD_FL_SOURCE)
-+			break;
-+
-+	if (pad == q->sensor->entity.num_pads) {
-+		dev_err(dev, "failed to find src pad for %s\n",
-+			q->sensor->name);
-+		return -ENXIO;
-+	}
-+
-+	ret = media_create_pad_link(&q->sensor->entity, pad, &q->subdev.entity,
-+				    CIO2_PAD_SINK, 0);
-+	if (ret) {
-+		dev_err(dev, "failed to create link for %s\n",
-+			q->sensor->name);
-+		return ret;
-+	}
-+
-+	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
- }
- 
- /* The .unbind callback */
-@@ -1409,50 +1431,9 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
- 	cio2->queue[s_asd->csi2.port].sensor = NULL;
- }
- 
--/* .complete() is called after all subdevices have been located */
--static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
--{
--	struct cio2_device *cio2 = to_cio2_device(notifier);
 -	struct device *dev = &cio2->pci_dev->dev;
 -	struct sensor_async_subdev *s_asd;
 -	struct v4l2_async_subdev *asd;
 -	struct cio2_queue *q;
--	unsigned int pad;
 -	int ret;
 -
 -	list_for_each_entry(asd, &cio2->notifier.asd_list, asd_list) {
 -		s_asd = to_sensor_asd(asd);
 -		q = &cio2->queue[s_asd->csi2.port];
 -
--		for (pad = 0; pad < q->sensor->entity.num_pads; pad++)
--			if (q->sensor->entity.pads[pad].flags &
--						MEDIA_PAD_FL_SOURCE)
--				break;
--
--		if (pad == q->sensor->entity.num_pads) {
--			dev_err(dev, "failed to find src pad for %s\n",
--				q->sensor->name);
--			return -ENXIO;
+-		ret = media_entity_get_fwnode_pad(&q->sensor->entity,
+-						  s_asd->asd.match.fwnode,
+-						  MEDIA_PAD_FL_SOURCE);
+-		if (ret < 0) {
+-			dev_err(dev, "no pad for endpoint %pfw (%d)\n",
+-				s_asd->asd.match.fwnode, ret);
+-			return ret;
 -		}
 -
--		ret = media_create_pad_link(
--				&q->sensor->entity, pad,
--				&q->subdev.entity, CIO2_PAD_SINK,
--				0);
+-		ret = media_create_pad_link(&q->sensor->entity, ret,
+-					    &q->subdev.entity, CIO2_PAD_SINK,
+-					    0);
 -		if (ret) {
--			dev_err(dev, "failed to create link for %s\n",
--				q->sensor->name);
+-			dev_err(dev, "failed to create link for %s (endpoint %pfw, error %d)\n",
+-				q->sensor->name, s_asd->asd.match.fwnode, ret);
 -			return ret;
 -		}
 -	}
--
--	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
--}
--
+ 
+ 	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
+ }
+@@ -1471,7 +1443,7 @@ static int cio2_notifier_complete(struct
  static const struct v4l2_async_notifier_operations cio2_async_ops = {
  	.bound = cio2_notifier_bound,
  	.unbind = cio2_notifier_unbind,
 -	.complete = cio2_notifier_complete,
++	.complete = cio2_notifier_complete,	
  };
  
  static int cio2_parse_firmware(struct cio2_device *cio2)
--- 
-2.41.0
 
-From aaaa967ec5af91dfd4928c232370adbfff183ad0 Mon Sep 17 00:00:00 2001
-From: Daniel Scally <djrscally@gmail.com>
-Date: Thu, 2 Jun 2022 22:15:56 +0100
-Subject: [PATCH] media: ipu3-cio2: Re-add .complete() to ipu3-cio2
-
-Removing the .complete() callback had some unintended consequences.
-Because the VCM driver is not directly linked to the ipu3-cio2
-driver .bound() never gets called for it, which means its devnode
-is never created if it probes late. Because .complete() waits for
-any sub-notifiers to also be complete it is captured in that call.
-
-Signed-off-by: Daniel Scally <djrscally@gmail.com>
-Patchset: cameras
----
- drivers/media/pci/intel/ipu3/ipu3-cio2-main.c | 9 +++++++++
- 1 file changed, 9 insertions(+)
-
-diff --git a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-index 8ba5f78baf9c..f0b77012641b 100644
---- a/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-+++ b/drivers/media/pci/intel/ipu3/ipu3-cio2-main.c
-@@ -1431,9 +1431,18 @@ static void cio2_notifier_unbind(struct v4l2_async_notifier *notifier,
- 	cio2->queue[s_asd->csi2.port].sensor = NULL;
- }
- 
-+/* .complete() is called after all subdevices have been located */
-+static int cio2_notifier_complete(struct v4l2_async_notifier *notifier)
-+{
-+	struct cio2_device *cio2 = to_cio2_device(notifier);
-+
-+	return v4l2_device_register_subdev_nodes(&cio2->v4l2_dev);
-+}
-+
- static const struct v4l2_async_notifier_operations cio2_async_ops = {
- 	.bound = cio2_notifier_bound,
- 	.unbind = cio2_notifier_unbind,
-+	.complete = cio2_notifier_complete,
- };
- 
- static int cio2_parse_firmware(struct cio2_device *cio2)
 -- 
 2.41.0
 
@@ -8679,101 +8573,6 @@ index f5d036164db9..cf6919f73347 100644
  	select MEDIA_CONTROLLER
  	select VIDEO_V4L2_SUBDEV_API
  	select V4L2_ASYNC
--- 
-2.41.0
-
-From a5f0694cc9d2b426ae58fbab57133703e5b0d26a Mon Sep 17 00:00:00 2001
-From: Daniel Scally <dan.scally@ideasonboard.com>
-Date: Thu, 2 Mar 2023 12:59:39 +0000
-Subject: [PATCH] platform/x86: int3472: Remap reset GPIO for INT347E
-
-ACPI _HID INT347E represents the OmniVision 7251 camera sensor. The
-driver for this sensor expects a single pin named "enable", but on
-some Microsoft Surface platforms the sensor is assigned a single
-GPIO who's type flag is INT3472_GPIO_TYPE_RESET.
-
-Remap the GPIO pin's function from "reset" to "enable". This is done
-outside of the existing remap table since it is a more widespread
-discrepancy than that method is designed for. Additionally swap the
-polarity of the pin to match the driver's expectation.
-
-Signed-off-by: Daniel Scally <dan.scally@ideasonboard.com>
-Patchset: cameras
----
- drivers/platform/x86/intel/int3472/discrete.c | 14 ++++++++++++++
- 1 file changed, 14 insertions(+)
-
-diff --git a/drivers/platform/x86/intel/int3472/discrete.c b/drivers/platform/x86/intel/int3472/discrete.c
-index ef020e23e596..d21ef437c2f6 100644
---- a/drivers/platform/x86/intel/int3472/discrete.c
-+++ b/drivers/platform/x86/intel/int3472/discrete.c
-@@ -98,6 +98,9 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
- {
- 	const struct int3472_sensor_config *sensor_config;
- 	char *path = agpio->resource_source.string_ptr;
-+	const struct acpi_device_id ov7251_ids[] = {
-+		{ "INT347E" },
-+	};
- 	struct gpiod_lookup *table_entry;
- 	struct acpi_device *adev;
- 	acpi_handle handle;
-@@ -120,6 +123,17 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
- 		}
- 	}
- 
-+	/*
-+	 * In addition to the function remap table we need to bulk remap the
-+	 * "reset" GPIO for the OmniVision 7251 sensor, as the driver for that
-+	 * expects its only GPIO pin to be called "enable" (and to have the
-+	 * opposite polarity).
-+	 */
-+	if (!strcmp(func, "reset") && !acpi_match_device_ids(int3472->sensor, ov7251_ids)) {
-+		func = "enable";
-+		polarity = GPIO_ACTIVE_HIGH;
-+	}
-+
- 	/* Functions mapped to NULL should not be mapped to the sensor */
- 	if (!func)
- 		return 0;
--- 
-2.41.0
-
-From 8f204923a484bb4579d86f5bc250808e539f4dde Mon Sep 17 00:00:00 2001
-From: Daniel Scally <dan.scally@ideasonboard.com>
-Date: Tue, 21 Mar 2023 13:45:26 +0000
-Subject: [PATCH] media: i2c: Clarify that gain is Analogue gain in OV7251
-
-Update the control ID for the gain control in the ov7251 driver to
-V4L2_CID_ANALOGUE_GAIN.
-
-Signed-off-by: Daniel Scally <dan.scally@ideasonboard.com>
-Patchset: cameras
----
- drivers/media/i2c/ov7251.c | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
-
-diff --git a/drivers/media/i2c/ov7251.c b/drivers/media/i2c/ov7251.c
-index 88e987435285..ff7b2c26da83 100644
---- a/drivers/media/i2c/ov7251.c
-+++ b/drivers/media/i2c/ov7251.c
-@@ -1051,7 +1051,7 @@ static int ov7251_s_ctrl(struct v4l2_ctrl *ctrl)
- 	case V4L2_CID_EXPOSURE:
- 		ret = ov7251_set_exposure(ov7251, ctrl->val);
- 		break;
--	case V4L2_CID_GAIN:
-+	case V4L2_CID_ANALOGUE_GAIN:
- 		ret = ov7251_set_gain(ov7251, ctrl->val);
- 		break;
- 	case V4L2_CID_TEST_PATTERN:
-@@ -1551,7 +1551,7 @@ static int ov7251_init_ctrls(struct ov7251 *ov7251)
- 	ov7251->exposure = v4l2_ctrl_new_std(&ov7251->ctrls, &ov7251_ctrl_ops,
- 					     V4L2_CID_EXPOSURE, 1, 32, 1, 32);
- 	ov7251->gain = v4l2_ctrl_new_std(&ov7251->ctrls, &ov7251_ctrl_ops,
--					 V4L2_CID_GAIN, 16, 1023, 1, 16);
-+					 V4L2_CID_ANALOGUE_GAIN, 16, 1023, 1, 16);
- 	v4l2_ctrl_new_std_menu_items(&ov7251->ctrls, &ov7251_ctrl_ops,
- 				     V4L2_CID_TEST_PATTERN,
- 				     ARRAY_SIZE(ov7251_test_pattern_menu) - 1,
 -- 
 2.41.0
 
