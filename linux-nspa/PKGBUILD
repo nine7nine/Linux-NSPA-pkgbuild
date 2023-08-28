@@ -76,7 +76,7 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-rt-devel-6.5-rc7-rt4
+_srcname=linux-6.5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
 pkgrel=1
@@ -86,9 +86,10 @@ license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.5-rc7-rt4.tar.gz"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.5.tar.xz"
   "config"
   "config_surface7"
+  "0000-patch-6.5-rt4.patch"
   "auto-cpu-optimization.sh"
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0001-ClearLinux-patchwork.patch"
@@ -454,9 +455,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('e2a591f4431561a9cc205a82d3494976b4b82d78c687bd52010aedba1da6fce2'
+sha256sums=('7a574bbc20802ea76b52ca7faf07267f72045e861b18915c5272a98c27abf884'
             '5dd627ec8feeb026e9be070eedc137ae2febd6ee4e0234a569bc056043f45ed6'
             'd68f8077d29bbbb697daeeb4af20e82a53455a9dd5736e47679bb5f4588f5c49'
+            'c16504b1351c1dd8223042210fc15c2e4dc5a993dae67325a650525d5f02ae86'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
