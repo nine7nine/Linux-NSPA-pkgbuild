@@ -67,7 +67,7 @@ _zstd_compression=y
 _nf_cone=y
 
  pkgbase=linux-nspa
-_major=6.5.1
+_major=6.5.2
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -76,7 +76,7 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.5.1
+_srcname=linux-6.5.2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
 pkgrel=1
@@ -86,7 +86,7 @@ license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.5.1.tar.xz"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.5.2.tar.xz"
   "config"
   "config_surface7"
   "0000-patch-6.5-rt6.patch"
@@ -455,7 +455,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('23765dd44425462cd92adbee52670608fd7f3fd183a83b25ba7a7b4883d0451b'
+sha256sums=('2027e14057d568ad3ddc100dadf4c8853a49b031270478a61d88f6011572650f'
             '5dd627ec8feeb026e9be070eedc137ae2febd6ee4e0234a569bc056043f45ed6'
             '2d52f38de056ba18e708c1659353915d4153c4946f05295386b1cfa8bab27065'
             '25a5d1a3012b3925d3b22a2f26373db093d30bdf1c446634fd73ac0145f63dd3'
