@@ -79,7 +79,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.5.2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=1
+pkgrel=2
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -89,7 +89,7 @@ source=(
   "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.5.2.tar.xz"
   "config"
   "config_surface7"
-  "0000-patch-6.5-rt6.patch"
+  "0000-patch-6.5.2-rt8.patch"
   "auto-cpu-optimization.sh"
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0001-ClearLinux-patchwork.patch"
@@ -458,7 +458,7 @@ done
 sha256sums=('2027e14057d568ad3ddc100dadf4c8853a49b031270478a61d88f6011572650f'
             '5dd627ec8feeb026e9be070eedc137ae2febd6ee4e0234a569bc056043f45ed6'
             '2d52f38de056ba18e708c1659353915d4153c4946f05295386b1cfa8bab27065'
-            '25a5d1a3012b3925d3b22a2f26373db093d30bdf1c446634fd73ac0145f63dd3'
+            '8d40bae9250be239327aff8b96a04e9f27bd597b18edca2ba536eee4a33b9127'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'

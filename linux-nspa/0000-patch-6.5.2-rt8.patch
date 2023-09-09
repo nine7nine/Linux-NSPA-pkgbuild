@@ -3818,7 +3818,7 @@ index 21db0df0eb000..e56585ef489c8 100644
  
  	return rt_mutex_slowlock(lock, NULL, state);
 diff --git a/kernel/locking/rwbase_rt.c b/kernel/locking/rwbase_rt.c
-index 25ec0239477c2..b5e881250fec5 100644
+index 25ec0239477c2..34a59569db6be 100644
 --- a/kernel/locking/rwbase_rt.c
 +++ b/kernel/locking/rwbase_rt.c
 @@ -71,6 +71,7 @@ static int __sched __rwbase_read_lock(struct rwbase_rt *rwb,
@@ -3849,7 +3849,7 @@ index 25ec0239477c2..b5e881250fec5 100644
  	/* Force readers into slow path */
  	atomic_sub(READER_BIAS, &rwb->readers);
  
-+	rt_mutex_pre_schedule();
++	rwbase_pre_schedule();
 +
  	raw_spin_lock_irqsave(&rtm->wait_lock, flags);
  	if (__rwbase_write_trylock(rwb))
@@ -3858,7 +3858,7 @@ index 25ec0239477c2..b5e881250fec5 100644
  		if (rwbase_signal_pending_state(state, current)) {
  			rwbase_restore_current_state();
  			__rwbase_write_unlock(rwb, 0, flags);
-+			rt_mutex_post_schedule();
++			rwbase_post_schedule();
  			trace_contention_end(rwb, -EINTR);
  			return -EINTR;
  		}
@@ -3866,7 +3866,7 @@ index 25ec0239477c2..b5e881250fec5 100644
  
  out_unlock:
  	raw_spin_unlock_irqrestore(&rtm->wait_lock, flags);
-+	rt_mutex_post_schedule();
++	rwbase_post_schedule();
  	return 0;
  }
  
@@ -7617,7 +7617,7 @@ index 63a8ce7177dd4..b3fbe97d1e342 100644
  
  /*
 diff --git a/kernel/trace/trace.c b/kernel/trace/trace.c
-index 8e64aaad53619..2676f9fdcd100 100644
+index 2656ca3b9b39c..8fa7566407470 100644
 --- a/kernel/trace/trace.c
 +++ b/kernel/trace/trace.c
 @@ -2720,11 +2720,19 @@ unsigned int tracing_gen_ctx_irq_test(unsigned int irqs_status)
@@ -7771,11 +7771,11 @@ index db575094c4982..6e1b552fd9b94 100644
  	else
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..8fc605d806670
+index 0000000000000..700c857efd9ba
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt6
++-rt8
 diff --git a/mm/page_alloc.c b/mm/page_alloc.c
 index 7d3460c7a480b..4ff76c8c97364 100644
 --- a/mm/page_alloc.c
