@@ -1411,10 +1411,10 @@ diff --git a/arch/x86/kernel/cpu/cpuid-deps.c b/arch/x86/kernel/cpu/cpuid-deps.c
 index f6748c8bd647..7a87b823eef3 100644
 --- a/arch/x86/kernel/cpu/cpuid-deps.c
 +++ b/arch/x86/kernel/cpu/cpuid-deps.c
-@@ -81,6 +81,7 @@ static const struct cpuid_dep cpuid_deps[] = {
- 	{ X86_FEATURE_XFD,			X86_FEATURE_XSAVES    },
+@@ -82,6 +82,7 @@ static const struct cpuid_dep cpuid_deps
  	{ X86_FEATURE_XFD,			X86_FEATURE_XGETBV1   },
  	{ X86_FEATURE_AMX_TILE,			X86_FEATURE_XFD       },
+ 	{ X86_FEATURE_SHSTK,			X86_FEATURE_XSAVES    },
 +	{ X86_FEATURE_ITD,			X86_FEATURE_HFI       },
  	{}
  };
@@ -2311,18 +2311,18 @@ diff --git a/kernel/sched/core.c b/kernel/sched/core.c
 index a7e131c2374a..94fa1e76b959 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
-@@ -4548,6 +4548,11 @@ static void __sched_fork(unsigned long c
- 	p->se.prev_sum_exec_runtime	= 0;
+@@ -4549,6 +4549,11 @@ static void __sched_fork(unsigned long c
  	p->se.nr_migrations		= 0;
  	p->se.vruntime			= 0;
+ 	p->se.vlag			= 0;
 +#ifdef CONFIG_IPC_CLASSES
 +	p->ipcc				= IPC_CLASS_UNCLASSIFIED;
 +	p->ipcc_tmp			= IPC_CLASS_UNCLASSIFIED;
 +	p->ipcc_cntr			= 0;
-+#endif		
++#endif	
  	INIT_LIST_HEAD(&p->se.group_node);
- 	RB_CLEAR_NODE(&p->se.latency_node);
  
+ 	set_latency_prio(p, p->latency_prio);
 -- 
 2.41.0
 
@@ -2447,6 +2447,15 @@ index adc65e67f18e..7aa2cfb6eb97 100644
  }
  
  /**
+@@ -10972,7 +11276,7 @@ static int should_we_balance(struct lb_e
+ 		 * balancing cores, but remember the first idle SMT CPU for
+ 		 * later consideration.  Find CPU on an idle core first.
+ 		 */
+-		if (!(env->sd->flags & SD_SHARE_CPUCAPACITY) && !is_core_idle(cpu)) {
++		if (!(env->sd->flags & SD_SHARE_CPUCAPACITY) && !sched_smt_siblings_idle(cpu)) {
+ 			if (idle_smt == -1)
+ 				idle_smt = cpu;
+ 			/*
 -- 
 2.41.0
 

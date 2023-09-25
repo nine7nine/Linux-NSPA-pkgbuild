@@ -67,7 +67,7 @@ _zstd_compression=y
 _nf_cone=y
 
  pkgbase=linux-nspa
-_major=6.5.2
+_major=6.6
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -76,7 +76,7 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.5.2
+_srcname=linux-rt-devel-6.6-rc2-rt4
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
 pkgrel=2
@@ -86,10 +86,9 @@ license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.5.2.tar.xz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.6-rc2-rt4.tar.gz"
   "config"
   "config_surface7"
-  "0000-patch-6.5.2-rt8.patch"
   "auto-cpu-optimization.sh"
   "0000-more-uarches-for-kernel-5.17+.patch"
   "0001-ClearLinux-patchwork.patch"
@@ -106,16 +105,16 @@ source=(
   "0012-kt-rtmutex-no-rcu-lock-while-spinning.patch"
   "0013-kt-timekeeping-suspend-fixes.patch"
   "0014-kt-pm-suspend_patches.patch"
-  "0017-schedutil-Fix_deadlock_between_cpuset_and_cpu_hotplug.patch"
   "0018-sched-Add_latency_priority_for_CFS_class.patch"
   "0019-hid-wacom-Silence_log_spam.patch"
   "0022-kt-vm-mm_optimizations.patch"
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
   "0026-Add_support_for_epoll_min_wait.patch"
-  "0030-Microsoft_Surface_Support-6.4.patch"
+  "0030-Microsoft_Surface_Support-6.6.patch"
   "0037-pm-cpuidle_vs_preempt_rt.patch"  
   "0039-sched-Fix-put_task_struct-calls-under-PREEMPT_RT.patch"
-  "0040-Scheduler-IPC-support-v6.4.patch"
+  "0040-Scheduler-IPC-support-v6.6.patch"
+  "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -124,10 +123,10 @@ export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EP
 
 prepare() {
 
-    cd ${srcdir}/$_srcname
+  cd ${srcdir}/$_srcname
 
-    echo "-$pkgrel" > localversion.10-pkgrel
-    echo "${pkgbase#linux}" > localversion.20-pkgname
+  echo "-$pkgrel" > localversion.10-pkgrel
+  echo "${pkgbase#linux}" > localversion.20-pkgname
 
   local src
   for src in "${source[@]}"; do
@@ -350,8 +349,7 @@ _package() {
 
   cd ${srcdir}/$_srcname
 
-  local kernver="$(<version)"
-  local modulesdir="$pkgdir/usr/lib/modules/$kernver"
+  local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
 
   echo "Installing boot image..."
   # systemd expects to find the kernel here to allow hibernation
@@ -365,7 +363,7 @@ _package() {
   make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
 
   # remove build and source links
-  rm "$modulesdir"/{source,build}
+  rm -f "$modulesdir"/{source,build}
 }
 
 _package-headers() {
@@ -382,7 +380,7 @@ _package-headers() {
   install -Dt "$builddir/arch/x86" -m644 arch/x86/Makefile
   cp -t "$builddir" -a scripts
 
-  # add objtool for external module building and enabled VALIDATION_STACK option
+  # required when STACK_VALIDATION is enabled
   install -Dt "$builddir/tools/objtool" tools/objtool/objtool
 
   # add xfs and shmem for aufs building
@@ -396,13 +394,16 @@ _package-headers() {
   install -Dt "$builddir/drivers/md" -m644 drivers/md/*.h
   install -Dt "$builddir/net/mac80211" -m644 net/mac80211/*.h
 
-  # http://bugs.archlinux.org/task/13146
+  # https://bugs.archlinux.org/task/13146
   install -Dt "$builddir/drivers/media/i2c" -m644 drivers/media/i2c/msp3400-driver.h
 
-  # http://bugs.archlinux.org/task/20402
+  # https://bugs.archlinux.org/task/20402
   install -Dt "$builddir/drivers/media/usb/dvb-usb" -m644 drivers/media/usb/dvb-usb/*.h
   install -Dt "$builddir/drivers/media/dvb-frontends" -m644 drivers/media/dvb-frontends/*.h
   install -Dt "$builddir/drivers/media/tuners" -m644 drivers/media/tuners/*.h
+
+  # https://bugs.archlinux.org/task/71392
+  install -Dt "$builddir/drivers/iio/common/hid-sensors" -m644 drivers/iio/common/hid-sensors/*.h
 
   echo "Installing KConfig files..."
   find . -name 'Kconfig*' -exec install -Dm644 {} "$builddir/{}" \;
@@ -427,7 +428,7 @@ _package-headers() {
   echo "Stripping build tools..."
   local file
   while read -rd '' file; do
-    case "$(file -bi "$file")" in
+    case "$(file -Sib "$file")" in
       application/x-sharedlib\;*)      # Libraries (.so)
         strip -v $STRIP_SHARED "$file" ;;
       application/x-archive\;*)        # Libraries (.a)
@@ -455,10 +456,9 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('2027e14057d568ad3ddc100dadf4c8853a49b031270478a61d88f6011572650f'
+sha256sums=('5d3d669a63d17c03fd3d3851a4bc4f059ca7ffb0b79dc9ce448e8c7466b93af9'
             '5dd627ec8feeb026e9be070eedc137ae2febd6ee4e0234a569bc056043f45ed6'
-            '2d52f38de056ba18e708c1659353915d4153c4946f05295386b1cfa8bab27065'
-            '8d40bae9250be239327aff8b96a04e9f27bd597b18edca2ba536eee4a33b9127'
+            'd23b2151271df928bab22d348fb75a16084f70aea2ff4bc0fb8754a063b2bc46'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
             '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
@@ -475,14 +475,14 @@ sha256sums=('2027e14057d568ad3ddc100dadf4c8853a49b031270478a61d88f6011572650f'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
             '2b0897c7ce14feef108c856abed79de52a761a3001f9c835e1f857d1ff275ae3'
             '5c902ea52d3257ffea9399183499feeb59b101f79b75975d5f30ade86f2798d9'
-            'ba640b93b7d4bce58b15ad2232f0547007b725c2f518a8b19902d45632da0a47'
-            '33f7ef25a6957449794b40923719cd02dc3d23b02e7c75b1bf0a42b5debf4b9b'
+            '37bae6de5c4149deb61c324849f16863acea057c826727bdf62f05569f37346f'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '17b598ef3e08d6444f9e9c29c32719ff005f940d07589a05e6660597098b08b1'
             '96e2388bbefafc47b48da2ea8e58d9a9fa6fe4c9d8e4a38e4100e1c738f51e53'
             '7b53a72ebd7dd27a422712e106d65e0365fbefd9b81010a15eb191df079441d4'
-            'a9cba777167c44e8b88a40453023f47b2a8147b4e1691949a8107d53c0930ba4'
+            'f0c94df76f54f2f12ab94d28b464cd47f47ae0aaf2b5c8181beac87962b80648'
             '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
             '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413'
-            '622497e8523bdb9e46eb8e1e43933bd6c597b0cb2d51df0e96ed7a660ea97afd')
+            'd7f0cdaa50c02e81c51d12ce9112b7312595d1dd50513c2b55315a13d7a8bc1b'
+            '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc')
 
