@@ -79,7 +79,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-rt-devel-6.6-rc3-rt5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=3
+pkgrel=4
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -117,6 +117,7 @@ source=(
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0121-sched-rt-Make_rt_rq-pushable_tasks_updates_drive_rto_mask.patch"
   "0122-sched-rt-Fix_live_lock_between_select_fallback_rq-and_RT_push.patch"
+  "0130-V2-mm-PCP-high-auto-tuning.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -488,5 +489,6 @@ sha256sums=('e6c2d5ec28c951a96d079de71904cb4b837bbd3502fc11ca41f62a93acb1ed10'
             'd7f0cdaa50c02e81c51d12ce9112b7312595d1dd50513c2b55315a13d7a8bc1b'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             '133c0522902dd8b23bf04ddf7e6e1ca84fb3222e04ffcb15822e1c2cecc01956'
-            '57fbc9ba73b543e77dddce4293c61844f3fcecb62d9ae53c7bda9410eef5db45')
+            '57fbc9ba73b543e77dddce4293c61844f3fcecb62d9ae53c7bda9410eef5db45'
+            'd53bfc6702fbbd42d68c5767faadca3aaaeb5743348bead80fbb36bc70495312')
 
