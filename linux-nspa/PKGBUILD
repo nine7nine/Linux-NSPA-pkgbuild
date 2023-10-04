@@ -76,17 +76,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-rt-devel-6.6-rc4-rt6
+_srcname=linux-rt-devel-6.6-rc4-rt7
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=5
+pkgrel=6
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.6-rc4-rt6.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/rt/linux-rt-devel.git/snapshot/linux-rt-devel-6.6-rc4-rt7.tar.gz"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -456,7 +456,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('08b9db3bbb8c0827f6178ae8bb2e7829b831288e61e0a0e605ca73a1f0f95a34'
+sha256sums=('453f1e1c1580d1288645276fc2f80fe17c0e65e6ed54c2786c1620d2512b52bd'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             'd23b2151271df928bab22d348fb75a16084f70aea2ff4bc0fb8754a063b2bc46'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
