@@ -263,7 +263,7 @@ index 78f20e6327120..651229d99165a 100644
  	select ARCH_WANT_COMPAT_IPC_PARSE_VERSION if COMPAT
  	select ARCH_WANT_DEFAULT_BPF_JIT
 diff --git a/arch/powerpc/Kconfig b/arch/powerpc/Kconfig
-index 3aaadfd2c8eb2..a590b19191456 100644
+index d5d5388973ac7..15c3f9e4937e2 100644
 --- a/arch/powerpc/Kconfig
 +++ b/arch/powerpc/Kconfig
 @@ -166,6 +166,7 @@ config PPC
@@ -13702,7 +13702,7 @@ index 6f06dc12904ad..0a58f8b233d88 100644
  
  static void print_cpu_stall(unsigned long gps)
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 802551e0009bf..21b50e61d0014 100644
+index 802551e0009bf..0110026914efb 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -898,14 +898,15 @@ static inline void hrtick_rq_init(struct rq *rq)
@@ -13915,15 +13915,7 @@ index 802551e0009bf..21b50e61d0014 100644
  static inline int __rt_effective_prio(struct task_struct *pi_task, int prio)
  {
  	if (pi_task)
-@@ -8872,7 +8930,6 @@ static void __init preempt_dynamic_init(void)
- 		WARN_ON_ONCE(preempt_dynamic_mode == preempt_dynamic_undefined); \
- 		return preempt_dynamic_mode == preempt_dynamic_##mode;		 \
- 	}									 \
--	EXPORT_SYMBOL_GPL(preempt_model_##mode)
- 
- PREEMPT_MODEL_ACCESSOR(none);
- PREEMPT_MODEL_ACCESSOR(voluntary);
-@@ -8884,6 +8941,21 @@ static inline void preempt_dynamic_init(void) { }
+@@ -8884,6 +8942,21 @@ static inline void preempt_dynamic_init(void) { }
  
  #endif /* #ifdef CONFIG_PREEMPT_DYNAMIC */
  
@@ -13983,7 +13975,7 @@ index 4c3d0d9f3db63..63e19b89c8c32 100644
  }
  late_initcall(sched_init_debug);
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 061a30a8925ab..386a8b0d946ee 100644
+index df348aa55d3c7..ae5a46489c2c8 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -1016,8 +1016,10 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se);
@@ -14051,7 +14043,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  static void update_curr_fair(struct rq *rq)
  {
  	update_curr(cfs_rq_of(&rq->curr->se));
-@@ -5308,7 +5324,7 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
+@@ -5309,7 +5325,7 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
  	/*
  	 * Update run-time statistics of the 'current'.
  	 */
@@ -14060,7 +14052,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  
  	/*
  	 * Ensure that runnable average is periodically updated.
-@@ -5322,7 +5338,7 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
+@@ -5323,7 +5339,7 @@ entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
  	 * validating it and just reschedule.
  	 */
  	if (queued) {
@@ -14069,7 +14061,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  		return;
  	}
  	/*
-@@ -5468,7 +5484,7 @@ static void __account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
+@@ -5469,7 +5485,7 @@ static void __account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
  	 * hierarchy can be throttled
  	 */
  	if (!assign_cfs_rq_runtime(cfs_rq) && likely(cfs_rq->curr))
@@ -14078,7 +14070,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  }
  
  static __always_inline
-@@ -5728,7 +5744,7 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
+@@ -5729,7 +5745,7 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
  
  	/* Determine whether we need to wake up potentially idle CPU: */
  	if (rq->curr == rq->idle && rq->cfs.nr_running)
@@ -14087,7 +14079,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  }
  
  #ifdef CONFIG_SMP
-@@ -6433,7 +6449,7 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
+@@ -6434,7 +6450,7 @@ static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
  
  		if (delta < 0) {
  			if (task_current(rq, p))
@@ -14096,7 +14088,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  			return;
  		}
  		hrtick_start(rq, delta);
-@@ -8086,7 +8102,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -8087,7 +8103,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	 * prevents us from potentially nominating it as a false LAST_BUDDY
  	 * below.
  	 */
@@ -14105,7 +14097,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  		return;
  
  	/* Idle tasks are by definition preempted by non-idle tasks. */
-@@ -8128,7 +8144,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
+@@ -8129,7 +8145,7 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
  	return;
  
  preempt:
@@ -14114,7 +14106,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  }
  
  #ifdef CONFIG_SMP
-@@ -12279,7 +12295,7 @@ static inline void task_tick_core(struct rq *rq, struct task_struct *curr)
+@@ -12280,7 +12296,7 @@ static inline void task_tick_core(struct rq *rq, struct task_struct *curr)
  	 */
  	if (rq->core->core_forceidle_count && rq->cfs.nr_running == 1 &&
  	    __entity_slice_used(&curr->se, MIN_NR_TASKS_DURING_FORCEIDLE))
@@ -14123,7 +14115,7 @@ index 061a30a8925ab..386a8b0d946ee 100644
  }
  
  /*
-@@ -12444,7 +12460,7 @@ prio_changed_fair(struct rq *rq, struct task_struct *p, int oldprio)
+@@ -12445,7 +12461,7 @@ prio_changed_fair(struct rq *rq, struct task_struct *p, int oldprio)
  	 */
  	if (task_current(rq, p)) {
  		if (p->prio > oldprio)
@@ -14479,16 +14471,16 @@ index db575094c4982..c251a44ad8ac2 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..d79dde624aaac
+index 0000000000000..6e44e540b927b
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt10
++-rt12
 diff --git a/net/core/dev.c b/net/core/dev.c
-index 5aaf5753d4e46..26917a613acb2 100644
+index 9f3f8930c6914..cdfb3b36763f0 100644
 --- a/net/core/dev.c
 +++ b/net/core/dev.c
-@@ -4677,15 +4677,6 @@ static void rps_trigger_softirq(void *data)
+@@ -4702,15 +4702,6 @@ static void rps_trigger_softirq(void *data)
  
  #endif /* CONFIG_RPS */
  
@@ -14504,7 +14496,7 @@ index 5aaf5753d4e46..26917a613acb2 100644
  /*
   * After we queued a packet into sd->input_pkt_queue,
   * we need to make sure this queue is serviced soon.
-@@ -6654,6 +6645,32 @@ static void skb_defer_free_flush(struct softnet_data *sd)
+@@ -6679,6 +6670,32 @@ static void skb_defer_free_flush(struct softnet_data *sd)
  	}
  }
  
@@ -14537,7 +14529,7 @@ index 5aaf5753d4e46..26917a613acb2 100644
  static int napi_threaded_poll(void *data)
  {
  	struct napi_struct *napi = data;
-@@ -11513,7 +11530,11 @@ static int __init net_dev_init(void)
+@@ -11548,7 +11565,11 @@ static int __init net_dev_init(void)
  		INIT_CSD(&sd->csd, rps_trigger_softirq, sd);
  		sd->cpu = i;
  #endif
