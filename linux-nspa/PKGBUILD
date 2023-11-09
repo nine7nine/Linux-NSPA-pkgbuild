@@ -67,7 +67,7 @@ _zstd_compression=y
 _nf_cone=y
 
  pkgbase=linux-nspa
-_major=6.6
+_major=6.6.1
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -76,7 +76,7 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.6
+_srcname=linux-6.6.1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
 pkgrel=12
@@ -86,8 +86,8 @@ license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.tar.xz"
-  "0000-patch-6.6-rt12.patch"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.1.tar.xz"
+  "0000-patch-6.6-rt13.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -458,8 +458,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('d926a06c63dd8ac7df3f86ee1ffc2ce2a3b81a2d168484e76b5b389aba8e56d0'
-            '3dbc625b100cf274c4459aec9f884f57a1516d8220b182bce5d6d6e12d1b5ad0'
+sha256sums=('da1ed7d47c97ed72c9354091628740aa3c40a3c9cd7382871f3cedbd60588234'
+            'd83ed0772df5aa51ab015a09e5e04f1881e0a8575abba88962104056fe3bacfe'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             'd23b2151271df928bab22d348fb75a16084f70aea2ff4bc0fb8754a063b2bc46'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
