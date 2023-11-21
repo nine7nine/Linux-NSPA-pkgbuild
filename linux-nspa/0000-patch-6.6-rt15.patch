@@ -336,19 +336,6 @@ index 902611954200d..2f188137f830f 100644
  	select HAVE_KVM_IRQCHIP
  	select HAVE_KVM_IRQFD
  	select HAVE_KVM_IRQ_ROUTING
-diff --git a/arch/powerpc/perf/imc-pmu.c b/arch/powerpc/perf/imc-pmu.c
-index 9d229ef7f86ef..ada817c49b722 100644
---- a/arch/powerpc/perf/imc-pmu.c
-+++ b/arch/powerpc/perf/imc-pmu.c
-@@ -51,7 +51,7 @@ static int trace_imc_mem_size;
-  * core and trace-imc
-  */
- static struct imc_pmu_ref imc_global_refc = {
--	.lock = __SPIN_LOCK_INITIALIZER(imc_global_refc.lock),
-+	.lock = __SPIN_LOCK_UNLOCKED(imc_global_refc.lock),
- 	.id = 0,
- 	.refc = 0,
- };
 diff --git a/arch/powerpc/platforms/pseries/Kconfig b/arch/powerpc/platforms/pseries/Kconfig
 index 4ebf2ef2845d0..381c3be3bec1c 100644
 --- a/arch/powerpc/platforms/pseries/Kconfig
@@ -456,6 +443,219 @@ index 16d93b580f61f..5d59a7e110fff 100644
  	return rc;
  }
  
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 9c48fecc67191..ecf9db99a9272 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -48,6 +48,7 @@ config RISCV
+ 	select ARCH_SUPPORTS_HUGETLBFS if MMU
+ 	select ARCH_SUPPORTS_PAGE_TABLE_CHECK if MMU
+ 	select ARCH_SUPPORTS_PER_VMA_LOCK if MMU
++	select ARCH_SUPPORTS_RT
+ 	select ARCH_USE_MEMTEST
+ 	select ARCH_USE_QUEUED_RWLOCKS
+ 	select ARCH_USES_CFI_TRAPS if CFI_CLANG
+@@ -135,6 +136,7 @@ config RISCV
+ 	select HAVE_PERF_USER_STACK_DUMP
+ 	select HAVE_POSIX_CPU_TIMERS_TASK_WORK
+ 	select HAVE_PREEMPT_DYNAMIC_KEY if !XIP_KERNEL
++	select HAVE_PREEMPT_AUTO
+ 	select HAVE_REGS_AND_STACK_ACCESS_API
+ 	select HAVE_RETHOOK if !XIP_KERNEL
+ 	select HAVE_RSEQ
+diff --git a/arch/riscv/include/asm/cpufeature.h b/arch/riscv/include/asm/cpufeature.h
+index d0345bd659c94..23fed53b88157 100644
+--- a/arch/riscv/include/asm/cpufeature.h
++++ b/arch/riscv/include/asm/cpufeature.h
+@@ -30,6 +30,4 @@ DECLARE_PER_CPU(long, misaligned_access_speed);
+ /* Per-cpu ISA extensions. */
+ extern struct riscv_isainfo hart_isa[NR_CPUS];
+ 
+-void check_unaligned_access(int cpu);
+-
+ #endif
+diff --git a/arch/riscv/include/asm/thread_info.h b/arch/riscv/include/asm/thread_info.h
+index 1833beb00489c..c5aebcdafd7b2 100644
+--- a/arch/riscv/include/asm/thread_info.h
++++ b/arch/riscv/include/asm/thread_info.h
+@@ -85,6 +85,7 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src);
+  * - pending work-to-be-done flags are in lowest half-word
+  * - other flags in upper half-word(s)
+  */
++#define TIF_ARCH_RESCHED_LAZY	0	/* Lazy rescheduling */
+ #define TIF_NOTIFY_RESUME	1	/* callback before returning to user */
+ #define TIF_SIGPENDING		2	/* signal pending */
+ #define TIF_NEED_RESCHED	3	/* rescheduling necessary */
+@@ -99,6 +100,7 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src);
+ #define _TIF_NEED_RESCHED	(1 << TIF_NEED_RESCHED)
+ #define _TIF_NOTIFY_SIGNAL	(1 << TIF_NOTIFY_SIGNAL)
+ #define _TIF_UPROBE		(1 << TIF_UPROBE)
++#define _TIF_ARCH_RESCHED_LAZY	(1 << TIF_ARCH_RESCHED_LAZY)
+ 
+ #define _TIF_WORK_MASK \
+ 	(_TIF_NOTIFY_RESUME | _TIF_SIGPENDING | _TIF_NEED_RESCHED | \
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index 1cfbba65d11ae..07c7baac014db 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -8,6 +8,7 @@
+ 
+ #include <linux/acpi.h>
+ #include <linux/bitmap.h>
++#include <linux/cpuhotplug.h>
+ #include <linux/ctype.h>
+ #include <linux/log2.h>
+ #include <linux/memory.h>
+@@ -29,6 +30,7 @@
+ 
+ #define MISALIGNED_ACCESS_JIFFIES_LG2 1
+ #define MISALIGNED_BUFFER_SIZE 0x4000
++#define MISALIGNED_BUFFER_ORDER get_order(MISALIGNED_BUFFER_SIZE)
+ #define MISALIGNED_COPY_SIZE ((MISALIGNED_BUFFER_SIZE / 2) - 0x80)
+ 
+ unsigned long elf_hwcap __read_mostly;
+@@ -556,24 +558,19 @@ unsigned long riscv_get_elf_hwcap(void)
+ 	return hwcap;
+ }
+ 
+-void check_unaligned_access(int cpu)
++static int check_unaligned_access(void *param)
+ {
++	int cpu = smp_processor_id();
+ 	u64 start_cycles, end_cycles;
+ 	u64 word_cycles;
+ 	u64 byte_cycles;
+ 	int ratio;
+ 	unsigned long start_jiffies, now;
+-	struct page *page;
++	struct page *page = param;
+ 	void *dst;
+ 	void *src;
+ 	long speed = RISCV_HWPROBE_MISALIGNED_SLOW;
+ 
+-	page = alloc_pages(GFP_NOWAIT, get_order(MISALIGNED_BUFFER_SIZE));
+-	if (!page) {
+-		pr_warn("Can't alloc pages to measure memcpy performance");
+-		return;
+-	}
+-
+ 	/* Make an unaligned destination buffer. */
+ 	dst = (void *)((unsigned long)page_address(page) | 0x1);
+ 	/* Unalign src as well, but differently (off by 1 + 2 = 3). */
+@@ -626,7 +623,7 @@ void check_unaligned_access(int cpu)
+ 		pr_warn("cpu%d: rdtime lacks granularity needed to measure unaligned access speed\n",
+ 			cpu);
+ 
+-		goto out;
++		return 0;
+ 	}
+ 
+ 	if (word_cycles < byte_cycles)
+@@ -640,18 +637,83 @@ void check_unaligned_access(int cpu)
+ 		(speed == RISCV_HWPROBE_MISALIGNED_FAST) ? "fast" : "slow");
+ 
+ 	per_cpu(misaligned_access_speed, cpu) = speed;
+-
+-out:
+-	__free_pages(page, get_order(MISALIGNED_BUFFER_SIZE));
+-}
+-
+-static int check_unaligned_access_boot_cpu(void)
+-{
+-	check_unaligned_access(0);
+ 	return 0;
+ }
+ 
+-arch_initcall(check_unaligned_access_boot_cpu);
++static void check_unaligned_access_nonboot_cpu(void *param)
++{
++	unsigned int cpu = smp_processor_id();
++	struct page **pages = param;
++
++	if (smp_processor_id() != 0)
++		check_unaligned_access(pages[cpu]);
++}
++
++static int riscv_online_cpu(unsigned int cpu)
++{
++	static struct page *buf;
++
++	/* We are already set since the last check */
++	if (per_cpu(misaligned_access_speed, cpu) != RISCV_HWPROBE_MISALIGNED_UNKNOWN)
++		return 0;
++
++	buf = alloc_pages(GFP_KERNEL, MISALIGNED_BUFFER_ORDER);
++	if (!buf) {
++		pr_warn("Allocation failure, not measuring misaligned performance\n");
++		return -ENOMEM;
++	}
++
++	check_unaligned_access(buf);
++	__free_pages(buf, MISALIGNED_BUFFER_ORDER);
++	return 0;
++}
++
++/* Measure unaligned access on all CPUs present at boot in parallel. */
++static int check_unaligned_access_all_cpus(void)
++{
++	unsigned int cpu;
++	unsigned int cpu_count = num_possible_cpus();
++	struct page **bufs = kzalloc(cpu_count * sizeof(struct page *),
++				     GFP_KERNEL);
++
++	if (!bufs) {
++		pr_warn("Allocation failure, not measuring misaligned performance\n");
++		return 0;
++	}
++
++	/*
++	 * Allocate separate buffers for each CPU so there's no fighting over
++	 * cache lines.
++	 */
++	for_each_cpu(cpu, cpu_online_mask) {
++		bufs[cpu] = alloc_pages(GFP_KERNEL, MISALIGNED_BUFFER_ORDER);
++		if (!bufs[cpu]) {
++			pr_warn("Allocation failure, not measuring misaligned performance\n");
++			goto out;
++		}
++	}
++
++	/* Check everybody except 0, who stays behind to tend jiffies. */
++	on_each_cpu(check_unaligned_access_nonboot_cpu, bufs, 1);
++
++	/* Check core 0. */
++	smp_call_on_cpu(0, check_unaligned_access, bufs[0], true);
++
++	/* Setup hotplug callback for any new CPUs that come online. */
++	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "riscv:online",
++				  riscv_online_cpu, NULL);
++
++out:
++	for_each_cpu(cpu, cpu_online_mask) {
++		if (bufs[cpu])
++			__free_pages(bufs[cpu], MISALIGNED_BUFFER_ORDER);
++	}
++
++	kfree(bufs);
++	return 0;
++}
++
++arch_initcall(check_unaligned_access_all_cpus);
+ 
+ #ifdef CONFIG_RISCV_ALTERNATIVE
+ /*
+diff --git a/arch/riscv/kernel/smpboot.c b/arch/riscv/kernel/smpboot.c
+index 1b8da4e40a4d6..2cb5e651412cb 100644
+--- a/arch/riscv/kernel/smpboot.c
++++ b/arch/riscv/kernel/smpboot.c
+@@ -246,7 +246,6 @@ asmlinkage __visible void smp_callin(void)
+ 
+ 	numa_add_cpu(curr_cpuid);
+ 	set_cpu_online(curr_cpuid, 1);
+-	check_unaligned_access(curr_cpuid);
+ 
+ 	if (has_vector()) {
+ 		if (riscv_v_setup_vsize())
 diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
 index 66bfabae88149..203b51f183c7a 100644
 --- a/arch/x86/Kconfig
@@ -10918,7 +11118,7 @@ index f5b388e810b9f..39a2b61c7232e 100644
  obj-$(CONFIG_PRINTK_INDEX)	+= index.o
  
 diff --git a/kernel/printk/internal.h b/kernel/printk/internal.h
-index 7d4979d5c3ce6..db8329091bb82 100644
+index 7d4979d5c3ce6..a3ae0710346cd 100644
 --- a/kernel/printk/internal.h
 +++ b/kernel/printk/internal.h
 @@ -3,6 +3,8 @@
@@ -11061,7 +11261,7 @@ index 7d4979d5c3ce6..db8329091bb82 100644
 +static inline bool nbcon_alloc(struct console *con) { return false; }
 +static inline void nbcon_init(struct console *con) { }
 +static inline void nbcon_free(struct console *con) { }
-+enum nbcon_prio nbcon_get_default_prio(void) { return NBCON_PRIO_NONE; }
++static inline enum nbcon_prio nbcon_get_default_prio(void) { return NBCON_PRIO_NONE; }
 +static inline void nbcon_atomic_flush_all(void) { }
 +static bool nbcon_atomic_emit_next_record(struct console *con) { return false; }
 +
@@ -13937,7 +14137,7 @@ index 0b3af1529778c..cff34b06fabfa 100644
  }
  
 diff --git a/kernel/printk/printk_ringbuffer.c b/kernel/printk/printk_ringbuffer.c
-index fde338606ce83..a949d02fbd174 100644
+index fde338606ce83..2b2a85222d19d 100644
 --- a/kernel/printk/printk_ringbuffer.c
 +++ b/kernel/printk/printk_ringbuffer.c
 @@ -6,6 +6,7 @@
@@ -14019,7 +14219,7 @@ index fde338606ce83..a949d02fbd174 100644
 +	 * sequence. It needs to be expanded to 64bit. Get the first sequence
 +	 * number from the ringbuffer and fold it.
 +	 */
-+	seq = rb_first_seq - ((u32)rb_first_seq - ulseq);
++	seq = rb_first_seq - ((s32)((u32)rb_first_seq - ulseq));
 +
 +	return seq;
 +}
@@ -15303,11 +15503,11 @@ index db575094c4982..c251a44ad8ac2 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..9f7d0bdbffb18
+index 0000000000000..18777ec0c27d4
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt13
++-rt15
 diff --git a/net/core/dev.c b/net/core/dev.c
 index 9f3f8930c6914..cdfb3b36763f0 100644
 --- a/net/core/dev.c
