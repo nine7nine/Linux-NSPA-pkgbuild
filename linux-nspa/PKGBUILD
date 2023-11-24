@@ -67,7 +67,7 @@ _zstd_compression=y
 _nf_cone=y
 
  pkgbase=linux-nspa
-_major=6.6.2
+_major=6.7
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -76,18 +76,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.6.2
+_srcname=linux-6.7-rc2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=15
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.6.2.tar.xz"
-  "0000-patch-6.6-rt15.patch"
+  "https://git.kernel.org/torvalds/t/linux-6.7-rc2.tar.gz"
+  "0000-patch-6.7-rc2-rt1.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -110,13 +110,8 @@ source=(
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
   "0026-Add_support_for_epoll_min_wait.patch"
   "0030-Microsoft_Surface_Support-6.6.patch"
-  "0037-pm-cpuidle_vs_preempt_rt.patch"  
-  "0039-sched-Fix-put_task_struct-calls-under-PREEMPT_RT.patch"
   "0040-Scheduler-IPC-support-v6.6.patch"
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
-  "0121-sched-rt-Make_rt_rq-pushable_tasks_updates_drive_rto_mask.patch"
-  "0130-V2-mm-PCP-high-auto-tuning.patch"
-  "0150-mm-improve_performance_of_accounted_kernel_mem_allocs.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -458,8 +453,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('73d4f6ad8dd6ac2a41ed52c2928898b7c3f2519ed5dbdb11920209a36999b77e'
-            '06299b58893df9bda70fc474441c13ee7efde38f8c85763be3f6794350ca7d5a'
+sha256sums=('f09555bd1617112ff20807fb67866732ad65045c74cf24075cce1d424cc475d1'
+            '17207fe0bc1774d5bef9da020b8bbc87393ed6bb1801bfd81060944abe662476'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             'd23b2151271df928bab22d348fb75a16084f70aea2ff4bc0fb8754a063b2bc46'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -472,7 +467,7 @@ sha256sums=('73d4f6ad8dd6ac2a41ed52c2928898b7c3f2519ed5dbdb11920209a36999b77e'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
-            '5b1a8092837cd06a57becbe8cace02c7da445761e0e6d53ea25d9f966b57ab3b'
+            '24491ed1436cf0ca3c6c3da99ad1b07506948a1c2094cea01511c24cf5e6a997'
             '815a609564ede2009837ff09843d89e4735467bd2a14fd89a610e14cb73f2587'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
@@ -481,12 +476,7 @@ sha256sums=('73d4f6ad8dd6ac2a41ed52c2928898b7c3f2519ed5dbdb11920209a36999b77e'
             '17b598ef3e08d6444f9e9c29c32719ff005f940d07589a05e6660597098b08b1'
             '96e2388bbefafc47b48da2ea8e58d9a9fa6fe4c9d8e4a38e4100e1c738f51e53'
             '7b53a72ebd7dd27a422712e106d65e0365fbefd9b81010a15eb191df079441d4'
-            '3e181280b874c66b9db72d8952e581d0e1526671f3a8cb07e45e5ba2a1dd3d45'
-            '01cc1c601a2da6899b0ce85cbb26a48550ad8fbbfef3acea33ff150d5a48e7fd'
-            '4e0a09668f30e9351a741600b01263498a60fe258ea4e5beb96b6cd197de1413'
+            'fe7e22d23a4e903d6dd9e9911f1c985ba297a63d1804e084d31aa1035465af8f'
             'd7f0cdaa50c02e81c51d12ce9112b7312595d1dd50513c2b55315a13d7a8bc1b'
-            '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
-            '133c0522902dd8b23bf04ddf7e6e1ca84fb3222e04ffcb15822e1c2cecc01956'
-            'd53bfc6702fbbd42d68c5767faadca3aaaeb5743348bead80fbb36bc70495312'
-            '7397c504a573775cf2071d5f05b7690c0d7084adf08208f6dd9b4c9a35c5c57e')
+            '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc')
 

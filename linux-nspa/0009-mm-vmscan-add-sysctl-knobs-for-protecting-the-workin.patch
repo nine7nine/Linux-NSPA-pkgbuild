@@ -295,7 +295,7 @@ index 9d72d42b043c..180b52c03be1 100644
  /*
   * From 0 .. 200.  Higher means more swappy.
   */
-@@ -2736,6 +2749,54 @@ enum scan_balance {
+@@ -2208,6 +2221,54 @@ enum scan_balance {
  	SCAN_FILE,
  };
  
@@ -347,7 +347,7 @@ index 9d72d42b043c..180b52c03be1 100644
 +	}
 +}
 +
- static void prepare_scan_count(pg_data_t *pgdat, struct scan_control *sc)
+ static void prepare_scan_control(pg_data_t *pgdat, struct scan_control *sc)
  {
  	unsigned long file;
 @@ -2840,6 +2901,8 @@ static void prepare_scan_count(pg_data_t *pgdat, struct scan_control *sc)
