@@ -537,7 +537,7 @@ index d63b02940747f..1ff38ebbd5880 100644
  #define _TIF_SSBD		(1 << TIF_SSBD)
  #define _TIF_SPEC_IB		(1 << TIF_SPEC_IB)
 diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
-index 3a34a8c425fe4..1a69f082833ef 100644
+index 55437f5e0c3ae..7fc47007b9263 100644
 --- a/drivers/acpi/processor_idle.c
 +++ b/drivers/acpi/processor_idle.c
 @@ -108,7 +108,7 @@ static const struct dmi_system_id processor_power_dmi_table[] = {
@@ -1428,10 +1428,10 @@ index 76121c2bb4f82..f75f6bc195d18 100644
  
  static inline struct task_struct *this_cpu_ksoftirqd(void)
 diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
-index a16c9cc063fe0..4d06162165e78 100644
+index 2564e209465ea..1b1df7306627a 100644
 --- a/include/linux/netdevice.h
 +++ b/include/linux/netdevice.h
-@@ -3266,7 +3266,11 @@ struct softnet_data {
+@@ -3288,7 +3288,11 @@ struct softnet_data {
  	int			defer_count;
  	int			defer_ipi_scheduled;
  	struct sk_buff		*defer_list;
@@ -1952,7 +1952,7 @@ index 1d4bc493b2f4b..486c68c11bbe2 100644
  	NULL
  };
 diff --git a/kernel/locking/lockdep.c b/kernel/locking/lockdep.c
-index e85b5ad3e2069..00465373d358f 100644
+index 151bd3de59363..5c21ba41e3087 100644
 --- a/kernel/locking/lockdep.c
 +++ b/kernel/locking/lockdep.c
 @@ -56,6 +56,7 @@
@@ -1963,7 +1963,7 @@ index e85b5ad3e2069..00465373d358f 100644
  
  #include <asm/sections.h>
  
-@@ -3970,6 +3971,8 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
+@@ -3971,6 +3972,8 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
  	if (!debug_locks_off() || debug_locks_silent)
  		return;
  
@@ -1972,7 +1972,7 @@ index e85b5ad3e2069..00465373d358f 100644
  	pr_warn("\n");
  	pr_warn("================================\n");
  	pr_warn("WARNING: inconsistent lock state\n");
-@@ -3998,6 +4001,8 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
+@@ -3999,6 +4002,8 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
  
  	pr_warn("\nstack backtrace:\n");
  	dump_stack();
@@ -5047,13 +5047,13 @@ index d8b302d010830..4f58a196e14c1 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..6f206be67cd28
+index 0000000000000..c3054d08a1129
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt1
++-rt2
 diff --git a/net/core/dev.c b/net/core/dev.c
-index af53f6d838ce9..615017b1965c3 100644
+index c879246be48d8..323499ab1acd9 100644
 --- a/net/core/dev.c
 +++ b/net/core/dev.c
 @@ -4679,15 +4679,6 @@ static void rps_trigger_softirq(void *data)
@@ -5105,7 +5105,7 @@ index af53f6d838ce9..615017b1965c3 100644
  static int napi_threaded_poll(void *data)
  {
  	struct napi_struct *napi = data;
-@@ -11566,7 +11583,11 @@ static int __init net_dev_init(void)
+@@ -11621,7 +11638,11 @@ static int __init net_dev_init(void)
  		INIT_CSD(&sd->csd, rps_trigger_softirq, sd);
  		sd->cpu = i;
  #endif
