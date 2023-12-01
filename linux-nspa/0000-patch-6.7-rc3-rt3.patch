@@ -2155,7 +2155,7 @@ index 6c2afee5ef620..a3ae0710346cd 100644
  			     bool is_extended, bool may_supress);
  
 diff --git a/kernel/printk/nbcon.c b/kernel/printk/nbcon.c
-index b96077152f49d..a9be219673dbf 100644
+index b96077152f49d..0bd5ee1b5b282 100644
 --- a/kernel/printk/nbcon.c
 +++ b/kernel/printk/nbcon.c
 @@ -5,7 +5,11 @@
@@ -2270,7 +2270,7 @@ index b96077152f49d..a9be219673dbf 100644
  
  	/*
  	 * Since any dropped message was successfully output, reset the
-@@ -961,6 +999,517 @@ static bool nbcon_emit_next_record(struct nbcon_write_context *wctxt)
+@@ -961,6 +999,510 @@ static bool nbcon_emit_next_record(struct nbcon_write_context *wctxt)
  	return nbcon_context_exit_unsafe(ctxt);
  }
  
@@ -2307,13 +2307,6 @@ index b96077152f49d..a9be219673dbf 100644
 +
 +		nbcon_state_read(con, &cur);
 +
-+		/*
-+		 * Some other CPU is using the console. Patiently poll
-+		 * to see if it becomes available. This is more efficient
-+		 * than having every release trigger an irq_work to wake
-+		 * the kthread.
-+		 */
-+		msleep(1);
 +	} while (cur.prio != NBCON_PRIO_NONE);
 +
 +	/* Bring the sequence in @ctxt up to date */
@@ -2788,7 +2781,7 @@ index b96077152f49d..a9be219673dbf 100644
  /**
   * nbcon_alloc - Allocate buffers needed by the nbcon console
   * @con:	Console to allocate buffers for
-@@ -1007,8 +1556,11 @@ void nbcon_init(struct console *con)
+@@ -1007,8 +1549,11 @@ void nbcon_init(struct console *con)
  	/* nbcon_alloc() must have been called and successful! */
  	BUG_ON(!con->pbufs);
  
@@ -2800,7 +2793,7 @@ index b96077152f49d..a9be219673dbf 100644
  }
  
  /**
-@@ -1019,6 +1571,7 @@ void nbcon_free(struct console *con)
+@@ -1019,6 +1564,7 @@ void nbcon_free(struct console *con)
  {
  	struct nbcon_state state = { };
  
@@ -2808,7 +2801,7 @@ index b96077152f49d..a9be219673dbf 100644
  	nbcon_state_set(con, &state);
  
  	/* Boot consoles share global printk buffers. */
-@@ -1027,3 +1580,117 @@ void nbcon_free(struct console *con)
+@@ -1027,3 +1573,117 @@ void nbcon_free(struct console *con)
  
  	con->pbufs = NULL;
  }
@@ -5047,11 +5040,11 @@ index d8b302d010830..4f58a196e14c1 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..c3054d08a1129
+index 0000000000000..1445cd65885cd
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt2
++-rt3
 diff --git a/net/core/dev.c b/net/core/dev.c
 index c879246be48d8..323499ab1acd9 100644
 --- a/net/core/dev.c
