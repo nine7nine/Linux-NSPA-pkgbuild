@@ -76,17 +76,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.7-rc5
+_srcname=linux-6.7-rc7
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=5
+pkgrel=7
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.7-rc5.tar.gz"
+  "https://git.kernel.org/torvalds/t/linux-6.7-rc7.tar.gz"
   "0000-patch-6.7-rc5-rt5.patch"
   "config"
   "config_surface7"
@@ -453,7 +453,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('f32ad1b8e6e0bd8eed11d223e840d15da0464bf3413145478da1f11e0ba76011'
+sha256sums=('d0c92280db03d6f776d6f67faf035eba904bc5f2a04a807dfab77d1ebce39b02'
             'e2cd2c19b2ec382a35ac42cc2364318f671417ea126dfeaf41fa941047cf765d'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             'd23b2151271df928bab22d348fb75a16084f70aea2ff4bc0fb8754a063b2bc46'
