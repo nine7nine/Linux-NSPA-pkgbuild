@@ -263,7 +263,7 @@ index 7b071a00425d2..c5210e9b11a20 100644
  	select ARCH_WANT_COMPAT_IPC_PARSE_VERSION if COMPAT
  	select ARCH_WANT_DEFAULT_BPF_JIT
 diff --git a/arch/powerpc/Kconfig b/arch/powerpc/Kconfig
-index 6f105ee4f3cf5..fff3a3788167a 100644
+index 1f11a62809f20..c0c5e02fa2abe 100644
 --- a/arch/powerpc/Kconfig
 +++ b/arch/powerpc/Kconfig
 @@ -166,6 +166,7 @@ config PPC
@@ -444,7 +444,7 @@ index 496e16c588aaa..05cee07aafbbb 100644
  }
  
 diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
-index 95a2a06acc6a6..1ac4a3e6a5fc2 100644
+index cd4c9a204d08c..1cc38fc2c4711 100644
 --- a/arch/riscv/Kconfig
 +++ b/arch/riscv/Kconfig
 @@ -49,6 +49,7 @@ config RISCV
@@ -484,7 +484,7 @@ index 574779900bfb3..fd9ddc27b29ba 100644
  #define _TIF_WORK_MASK \
  	(_TIF_NOTIFY_RESUME | _TIF_SIGPENDING | _TIF_NEED_RESCHED | \
 diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
-index 3762f41bb0929..bd4a63dee459d 100644
+index 1566748f16c42..77744230399f5 100644
 --- a/arch/x86/Kconfig
 +++ b/arch/x86/Kconfig
 @@ -27,7 +27,7 @@ config X86_64
@@ -5268,10 +5268,10 @@ index 63a8ce7177dd4..b3fbe97d1e342 100644
  
  /*
 diff --git a/kernel/trace/trace.c b/kernel/trace/trace.c
-index fbcd3bafb93e2..bf5bf1352a753 100644
+index a0defe156b571..3b0f2cc1617f2 100644
 --- a/kernel/trace/trace.c
 +++ b/kernel/trace/trace.c
-@@ -2681,6 +2681,8 @@ unsigned int tracing_gen_ctx_irq_test(unsigned int irqs_status)
+@@ -2695,6 +2695,8 @@ unsigned int tracing_gen_ctx_irq_test(unsigned int irqs_status)
  
  	if (tif_need_resched())
  		trace_flags |= TRACE_FLAG_NEED_RESCHED;
@@ -5281,7 +5281,7 @@ index fbcd3bafb93e2..bf5bf1352a753 100644
  		trace_flags |= TRACE_FLAG_PREEMPT_RESCHED;
  	return (trace_flags << 16) | (min_t(unsigned int, pc & 0xff, 0xf)) |
 diff --git a/kernel/trace/trace_output.c b/kernel/trace/trace_output.c
-index d8b302d010830..4f58a196e14c1 100644
+index 3e7fa44dc2b24..5e120c2404cf5 100644
 --- a/kernel/trace/trace_output.c
 +++ b/kernel/trace/trace_output.c
 @@ -460,17 +460,29 @@ int trace_print_lat_fmt(struct trace_seq *s, struct trace_entry *entry)
@@ -5318,16 +5318,16 @@ index d8b302d010830..4f58a196e14c1 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..0efe7ba1930e1
+index 0000000000000..8fc605d806670
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt5
++-rt6
 diff --git a/net/core/dev.c b/net/core/dev.c
-index c879246be48d8..323499ab1acd9 100644
+index ad20bebe153fc..e32cb67c5bf32 100644
 --- a/net/core/dev.c
 +++ b/net/core/dev.c
-@@ -4679,15 +4679,6 @@ static void rps_trigger_softirq(void *data)
+@@ -4682,15 +4682,6 @@ static void rps_trigger_softirq(void *data)
  
  #endif /* CONFIG_RPS */
  
@@ -5343,7 +5343,7 @@ index c879246be48d8..323499ab1acd9 100644
  /*
   * After we queued a packet into sd->input_pkt_queue,
   * we need to make sure this queue is serviced soon.
-@@ -6658,6 +6649,32 @@ static void skb_defer_free_flush(struct softnet_data *sd)
+@@ -6661,6 +6652,32 @@ static void skb_defer_free_flush(struct softnet_data *sd)
  	}
  }
  
@@ -5376,7 +5376,7 @@ index c879246be48d8..323499ab1acd9 100644
  static int napi_threaded_poll(void *data)
  {
  	struct napi_struct *napi = data;
-@@ -11621,7 +11638,11 @@ static int __init net_dev_init(void)
+@@ -11624,7 +11641,11 @@ static int __init net_dev_init(void)
  		INIT_CSD(&sd->csd, rps_trigger_softirq, sd);
  		sd->cpu = i;
  #endif
@@ -5389,10 +5389,10 @@ index c879246be48d8..323499ab1acd9 100644
  
  		init_gro_hash(&sd->backlog);
 diff --git a/net/core/skbuff.c b/net/core/skbuff.c
-index b157efea5dea8..251ebf3fefac3 100644
+index 94cc40a6f7975..889ef4c4d9548 100644
 --- a/net/core/skbuff.c
 +++ b/net/core/skbuff.c
-@@ -6858,8 +6858,13 @@ nodefer:	__kfree_skb(skb);
+@@ -6861,8 +6861,13 @@ nodefer:	__kfree_skb(skb);
  	/* Make sure to trigger NET_RX_SOFTIRQ on the remote CPU
  	 * if we are unlucky enough (this seems very unlikely).
  	 */

@@ -76,18 +76,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.7-rc8
+_srcname=linux-6.7
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=8
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.7-rc8.tar.gz"
-  "0000-patch-6.7-rc5-rt5.patch"
+  "https://git.kernel.org/torvalds/t/linux-6.7.tar.xz"
+  "0000-patch-6.7-rt6.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -453,8 +453,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('4306cbb1b33b2fd67a86d9a3e4faba9a95413398c3d9cf57991ee97800a0640a'
-            'e2cd2c19b2ec382a35ac42cc2364318f671417ea126dfeaf41fa941047cf765d'
+sha256sums=('ef31144a2576d080d8c31698e83ec9f66bf97c677fa2aaf0d5bbb9f3345b1069'
+            '40b6e070fd306c4e6f06ffd3483839c7af0261dfedaf0580dc005e97fcfe1818'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             'd23b2151271df928bab22d348fb75a16084f70aea2ff4bc0fb8754a063b2bc46'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
