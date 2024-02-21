@@ -67,7 +67,7 @@ _zstd_compression=y
 _nf_cone=y
 
  pkgbase=linux-nspa
-_major=6.7.1
+_major=6.8
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -76,7 +76,7 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.7.1
+_srcname=linux-6.8-rc5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
 pkgrel=1
@@ -86,17 +86,15 @@ license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.7.1.tar.xz"
-  "0000-patch-6.7-rt6.patch"
+  "https://git.kernel.org/torvalds/t/linux-6.8-rc5.tar.gz"
+  "0000-patch-6.8-rc4-rt4.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
-  "0000-more-uarches-for-kernel-5.17+.patch"
+  "0000-more-uarches-for-kernel-6.8+.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
   "0003-x86-Enable-fast-strings-on-Intel-if-BIOS-hasn-t-alre.patch"
-  "0004-pinctl-amd-threaded_irqs.patch"
-  "0005-designware-i2c_IRQF_NO_THREAD.patch"
   "0006-background_reclaim_of_hugepages.patch"
   "0007-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
   "0008-mm-increase_max_map_count.patch"
@@ -104,13 +102,13 @@ source=(
   "0010-kt-rcu-Make_the_grace_period_workers_unbound_again.patch"
   "0011-kt-smp-migrate_disable_in_smp_call_function_single_async.patch"
   "0012-kt-rtmutex-no-rcu-lock-while-spinning.patch"
-  "0018-sched-Add_latency_priority_for_CFS_class.patch"
   "0019-hid-wacom-Silence_log_spam.patch"
   "0022-kt-vm-mm_optimizations.patch"
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
   "0026-Add_support_for_epoll_min_wait.patch"
   "0030-Microsoft_Surface_Support-6.6.patch"
-  "0040-Scheduler-IPC-support-v6.6.patch"
+  "0040-Scheduler-IPC-support-v6.8.patch"
+  "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
 )
 
@@ -453,17 +451,15 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('1ecffa568e86a2202ba5533ad9034bc263a9aa14e189597a94f09b3854ad68c3'
-            '40b6e070fd306c4e6f06ffd3483839c7af0261dfedaf0580dc005e97fcfe1818'
+sha256sums=('702e946d85050640220fbd2504313de1a138510dabc9841fb48a69272e3c3eda'
+            '0fdf788e93e7b78eb729d88aeff46d8c86f07b1f038b9658070df4efdac62a11'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             'd23b2151271df928bab22d348fb75a16084f70aea2ff4bc0fb8754a063b2bc46'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
-            '8d4a22387dbe7a9f339555c99bd70c55c033422026244b98cbfd93eb39fb99c2'
-            '35a7cde86fb94939c0f25a62b8c47f3de0dbd3c65f876f460b263181b3e92fc0'
+            '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
+            'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             'e3c106cfac323c6f677b698b080b48798ea63786a7153f81d9a21f749e73168d'
-            '4f715ec191c760ede34963ea449c2f12cd58813cd0fa3a684297ab0f45c6ff49'
-            '8e5edc5ae5282fae35684006f0aeea41c16523dc0482891dc6c15e40e87f6a53'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
@@ -471,12 +467,12 @@ sha256sums=('1ecffa568e86a2202ba5533ad9034bc263a9aa14e189597a94f09b3854ad68c3'
             '815a609564ede2009837ff09843d89e4735467bd2a14fd89a610e14cb73f2587'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
-            '37bae6de5c4149deb61c324849f16863acea057c826727bdf62f05569f37346f'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '17b598ef3e08d6444f9e9c29c32719ff005f940d07589a05e6660597098b08b1'
             '96e2388bbefafc47b48da2ea8e58d9a9fa6fe4c9d8e4a38e4100e1c738f51e53'
             '7b53a72ebd7dd27a422712e106d65e0365fbefd9b81010a15eb191df079441d4'
             'fe7e22d23a4e903d6dd9e9911f1c985ba297a63d1804e084d31aa1035465af8f'
-            'd7f0cdaa50c02e81c51d12ce9112b7312595d1dd50513c2b55315a13d7a8bc1b'
+            '8ce1dadd940747a617abaa6164f7dacb11d4cfe1ac49e87000a69475233fa33d'
+            'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc')
 
