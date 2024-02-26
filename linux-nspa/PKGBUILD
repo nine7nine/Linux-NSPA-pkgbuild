@@ -37,34 +37,45 @@ _config_Surface7=y
 # See, https://bugs.archlinux.org/task/31187
 _NUMAdisable=y
 
-### Disable MQ-Deadline I/O scheduler
+# Disable MQ-Deadline I/O scheduler
 _mq_deadline_disable=y
 
-### Disable Kyber I/O scheduler
+# Disable Kyber I/O scheduler
 _kyber_disable=y
 
-### Enable multigenerational LRU
+# Enable multigenerational LRU
 _lru_enable=y
 
 ## Enable DAMON
 _damon=
 
-## enable SPECULATIVE_PAGE_FAULT
+# enable SPECULATIVE_PAGE_FAULT
 _spf_enable=y
 
-## Enable Linux Random Number Generator
+# Enable Linux Random Number Generator
 _lrng_enable=
 
-## Apply Kernel automatic Optimization
+# Apply Kernel automatic Optimization
 _use_auto_optimization=y
 
 # disable debug to lower the size of the kernel
 _disable_debug=
 
-## Enable zram/zswap ZSTD compression
+# Enable zram/zswap ZSTD compression
 _zstd_compression=y
 
 _nf_cone=y
+
+# VMX hack: Set VMX enabled, even if disabled in the BIOS.  Microsoft
+# disables VMX on my Micosft-Suface 7 BIOS (and it can't be enabled!). Skip
+# check in Linux, enable it with MSR.
+#
+# Additionally, trick the kernel into thinking Ice Lake CPUs aren't affected
+# by iTLB Multihit vulnerability (Add to whitelisted CPUs). As I am only
+# using trusted VMs - I'm not overly worried about this vulnerability.
+#
+# !!! WARNING: Do NOT enable this: may have your system !!! 
+_vmx_hack=
 
  pkgbase=linux-nspa
 _major=6.8
@@ -76,17 +87,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.8-rc5
+_srcname=linux-6.8-rc6
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=2
+pkgrel=4
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.8-rc5.tar.gz"
+  "https://git.kernel.org/torvalds/t/linux-6.8-rc6.tar.gz"
   "0000-patch-6.8-rc4-rt4.patch"
   "config"
   "config_surface7"
@@ -106,12 +117,13 @@ source=(
   "0022-kt-vm-mm_optimizations.patch"
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
   "0026-Add_support_for_epoll_min_wait.patch"
-  "0030-Microsoft_Surface_Support-6.6.patch"
+  "0030-Microsoft_Surface_Support-6.8.patch"
   "0040-Intel-Thread-Director-IPC-v6.8.patch"
   "0043-Intel-Thread-Director-Virtualization.patch"
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0018-sched-Add_latency_priority_for_CFS_class.patch"
+  "0099-cpu-Force-Enable-VMX-hack.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -129,9 +141,16 @@ prepare() {
   for src in "${source[@]}"; do
     src="${src%%::*}"
     src="${src##*/}"
-    [[ $src = *.patch ]] || continue
-    echo "Applying patch $src..."
-    patch -Np1 < "../$src"
+
+    # Check if fo the VMX bios hack && if _vmx_hack=y is set
+    if [[ $src == "0099-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack == "y" ]]; then
+      echo "Applying patch $src..."
+      patch -Np1 < "../$src"
+    elif [[ $src == *.patch ]]; then
+      # Apply other patches if they are present
+      echo "Applying patch $src..."
+      patch -Np1 < "../$src"
+    fi
   done
 
   echo "Setting config..."
@@ -305,7 +324,6 @@ prepare() {
         fi
     fi
 
-
     ### Optionally load needed modules for the make localmodconfig
     # See https://aur.archlinux.org/packages/modprobed-db
     if [ -n "$_localmodcfg" ]; then
@@ -453,10 +471,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('702e946d85050640220fbd2504313de1a138510dabc9841fb48a69272e3c3eda'
+sha256sums=('1a1baf80be207cc07a38d2fc348e3c59624900f0584feeaf152f0ec0690acfbe'
             '0fdf788e93e7b78eb729d88aeff46d8c86f07b1f038b9658070df4efdac62a11'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
-            'a5061ce22ec798d92ccc6defe4770691f83db42755c7fc322608c62f9c925523'
+            'fcd35e1e9353a4ea3be471c1b87c70aa36be47bf8ff0c84edf44f084fd4b5a9a'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -473,10 +491,11 @@ sha256sums=('702e946d85050640220fbd2504313de1a138510dabc9841fb48a69272e3c3eda'
             '17b598ef3e08d6444f9e9c29c32719ff005f940d07589a05e6660597098b08b1'
             '96e2388bbefafc47b48da2ea8e58d9a9fa6fe4c9d8e4a38e4100e1c738f51e53'
             '7b53a72ebd7dd27a422712e106d65e0365fbefd9b81010a15eb191df079441d4'
-            'fe7e22d23a4e903d6dd9e9911f1c985ba297a63d1804e084d31aa1035465af8f'
+            'd6fcb3029e034d522666a19d134583262f9c1edb4b116f3fceae8d50dcef47c7'
             '8ce1dadd940747a617abaa6164f7dacb11d4cfe1ac49e87000a69475233fa33d'
             '6a91e68e4b826827ec6d8cdecfd50291c114815ff626f838e54e4c9b54fd705e'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
-            'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017')
+            'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017'
+            'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558')
 

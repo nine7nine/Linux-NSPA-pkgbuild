@@ -1,0 +1,41 @@
+--- a/arch/x86/kernel/cpu/feat_ctl.c	2024-02-23 11:09:24.797577478 -0500
++++ b/arch/x86/kernel/cpu/feat_ctl.c	2024-02-23 11:19:58.831604386 -0500
+@@ -146,16 +146,15 @@ void init_ia32_feat_ctl(struct cpuinfo_x
+ 	msr = FEAT_CTL_LOCKED;
+ 
+ 	/*
+-	 * Enable VMX if and only if the kernel may do VMXON at some point,
+-	 * i.e. KVM is enabled, to avoid unnecessarily adding an attack vector
+-	 * for the kernel, e.g. using VMX to hide malicious code.
++	 * HACK - Force-Enable VMX on my Microsft Surface 7. the CPU supports
++	 * it, but MS's bios disables VMX, due to iTLB Multihit vulnerability.
++	 * Enable it anyway, use this hack to bypass the BIOS settings.
+ 	 */
+-	if (enable_vmx) {
+-		msr |= FEAT_CTL_VMX_ENABLED_OUTSIDE_SMX;
+ 
+-		if (tboot)
+-			msr |= FEAT_CTL_VMX_ENABLED_INSIDE_SMX;
+-	}
++	msr = FEAT_CTL_VMX_ENABLED_OUTSIDE_SMX;
++
++	if (tboot)
++		msr |= FEAT_CTL_VMX_ENABLED_INSIDE_SMX;
+ 
+ 	if (enable_sgx_kvm || enable_sgx_driver) {
+ 		msr |= FEAT_CTL_SGX_ENABLED;
+--- a/arch/x86/kernel/cpu/common.c	2024-02-23 14:23:41.511452632 -0500
++++ b/arch/x86/kernel/cpu/common.c	2024-02-23 14:21:01.151912566 -0500
+@@ -1242,6 +1242,11 @@ static const __initconst struct x86_cpu_
+ 	VULNWL_INTEL(ATOM_GOLDMONT_D,		NO_MDS | NO_L1TF | NO_SWAPGS | NO_ITLB_MULTIHIT | NO_MMIO),
+ 	VULNWL_INTEL(ATOM_GOLDMONT_PLUS,	NO_MDS | NO_L1TF | NO_SWAPGS | NO_ITLB_MULTIHIT | NO_MMIO | NO_EIBRS_PBRSB),
+ 
++	/* HACK - Vulnerable, but I want to use VMX knowing the risks */
++	VULNWL_INTEL(ICELAKE_L,			NO_ITLB_MULTIHIT),
++	VULNWL_INTEL(ICELAKE_D,			NO_ITLB_MULTIHIT),
++	VULNWL_INTEL(ICELAKE_X,			NO_ITLB_MULTIHIT),
++
+ 	/*
+ 	 * Technically, swapgs isn't serializing on AMD (despite it previously
+ 	 * being documented as such in the APM).  But according to AMD, %gs is
+
