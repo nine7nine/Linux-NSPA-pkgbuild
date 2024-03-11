@@ -78,7 +78,7 @@ _nf_cone=y
 _vmx_hack=
 
  pkgbase=linux-nspa
-_major=6.8
+_major=6.8.0
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -87,17 +87,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.8-rc7
+_srcname=linux-6.8
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=7
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.8-rc7.tar.gz"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.tar.xz"
   "0000-patch-6.8-rc7-rt6.patch"
   "config"
   "config_surface7"
@@ -473,7 +473,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('7dff9585f59c09794344a7e29006b170b76b45bf9880cf011cf3e0a15c1f0768'
+sha256sums=('c969dea4e8bb6be991bbf7c010ba0e0a5643a3a8d8fb0a2aaa053406f1e965f3'
             '415f8c3287d87bd9a79192797b06155cf60d3914481eb9209d381e0afb2cabf6'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             '7ef49fa3e7b7de50402206a90f85c0b96c8acf522ff4e57ab78694f8a3da53fb'
