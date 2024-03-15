@@ -90,7 +90,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.8
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=1
+pkgrel=3
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -98,7 +98,7 @@ options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
   "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.tar.xz"
-  "0000-patch-6.8-rc7-rt6.patch"
+  "0000-patch-6.8-rt8.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -123,6 +123,7 @@ source=(
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0018-sched-Add_latency_priority_for_CFS_class.patch"
+  "0100-sched-pull-6.9.patch"
   "0101-sched-Fair-DL-server.patch"
   "0099-cpu-Force-Enable-VMX-hack.patch"
   "0123-thermal-netlink-intel_hfi-Enable-HFI-feature-only-when-required.patch"
@@ -474,7 +475,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('c969dea4e8bb6be991bbf7c010ba0e0a5643a3a8d8fb0a2aaa053406f1e965f3'
-            '415f8c3287d87bd9a79192797b06155cf60d3914481eb9209d381e0afb2cabf6'
+            '71cf6bd24782f8b179b3291a87da8912ec74db9bf9fc0ac3c4dc5467ade89ac6'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             '7ef49fa3e7b7de50402206a90f85c0b96c8acf522ff4e57ab78694f8a3da53fb'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -499,7 +500,8 @@ sha256sums=('c969dea4e8bb6be991bbf7c010ba0e0a5643a3a8d8fb0a2aaa053406f1e965f3'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017'
-            '0c2c065361e95e8a76314a6385f9c85d1eb29ece4ea2215b631110d9370a5814'
+            '2bca646b44d0c596aa26772ddf1d1022ec2e0b57bd8750b180a9e5db2f2e285f'
+            'ba69f9330948996bc8beb6ca11e331d63cbfe54bf7ba59ba06ada534193f0845'
             'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
             'fd44f54c40ad3f1caa4f6801ec896f920895a26791605f2d1ad2c87a509e113e')
 
