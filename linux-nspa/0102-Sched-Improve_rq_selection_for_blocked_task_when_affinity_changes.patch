@@ -1,0 +1,80 @@
+From: Ze Gao <zegao2021@gmail.com>
+To: Ben Segall <bsegall@google.com>,
+	Daniel Bristot de Oliveira <bristot@redhat.com>,
+	Dietmar Eggemann <dietmar.eggemann@arm.com>,
+	Ingo Molnar <mingo@redhat.com>,
+	Juri Lelli <juri.lelli@redhat.com>, Mel Gorman <mgorman@suse.de>,
+	Peter Zijlstra <peterz@infradead.org>,
+	Steven Rostedt <rostedt@goodmis.org>,
+	Valentin Schneider <vschneid@redhat.com>,
+	Vincent Guittot <vincent.guittot@linaro.org>
+Cc: linux-kernel@vger.kernel.org, Ze Gao <zegao@tencent.com>
+Subject: [PATCH] sched: Improve rq selection for a blocked task when its affinity changes
+Date: Wed, 13 Mar 2024 04:58:17 -0400	[thread overview]
+Message-ID: <20240313085817.48892-1-zegao@tencent.com> (raw)
+
+We observered select_idle_sibling() is likely to return the *target* cpu
+early which is likely to be the previous cpu this task is running on even
+when it's actually not within the affinity list newly set, from where after
+we can only rely on select_fallback_rq() to choose one for us at its will
+(the first valid mostly for now).
+
+However, the one chosen by select_fallback_rq() is highly likely not a
+good enough candidate, sometimes it has to rely on load balancer to kick
+in to place itself to a better cpu, which adds one or more unnecessary
+migrations in no doubt. For example, this is what I get when I move task
+3964 to cpu 23-24 where cpu 23 has a cpu bound work pinned already:
+
+        swapper       0 [013]   959.791829: sched:sched_migrate_task: comm=stress-ng-cpu pid=3964 prio=120 orig_cpu=13 dest_cpu=23
+kworker/24:2-mm    1014 [024]   959.806148: sched:sched_migrate_task: comm=stress-ng-cpu pid=3964 prio=120 orig_cpu=23 dest_cpu=24
+
+The thing is we can actually do better if we do checks early and take more
+advantages of the *target* in select_idle_sibling(). That is, we continue
+the idle cpu selection if *target* fails the test of cpumask_test_cpu(
+*target*, p->cpus_ptr). By doing so, we are likely to pick a good candidate,
+especially when the newly allowed cpu set shares some cpu resources with
+*target*.
+
+And with this change, we clearly see the improvement when I move task 3964
+to cpu 25-26 where cpu 25 has a cpu bound work pinned already.
+
+        swapper       0 [027]  4249.204658: sched:sched_migrate_task: comm=stress-ng-cpu pid=3964 prio=120 orig_cpu=27 dest_cpu=26
+
+Note we do the same check for *prev* in select_idle_sibling() as well.
+
+Signed-off-by: Ze Gao <zegao@tencent.com>
+---
+ kernel/sched/fair.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 533547e3c90a..9ef6e74c6b2a 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7511,16 +7511,19 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
+ 	 */
+ 	lockdep_assert_irqs_disabled();
+ 
+-	if ((available_idle_cpu(target) || sched_idle_cpu(target)) &&
+-	    asym_fits_cpu(task_util, util_min, util_max, target))
++	if (cpumask_test_cpu(target, p->cpus_ptr) &&
++		(available_idle_cpu(target) || sched_idle_cpu(target)) &&
++		asym_fits_cpu(task_util, util_min, util_max, target))
+ 		return target;
+ 
+ 	/*
+ 	 * If the previous CPU is cache affine and idle, don't be stupid:
+ 	 */
+-	if (prev != target && cpus_share_cache(prev, target) &&
+-	    (available_idle_cpu(prev) || sched_idle_cpu(prev)) &&
+-	    asym_fits_cpu(task_util, util_min, util_max, prev)) {
++	if (cpumask_test_cpu(prev, p->cpus_ptr) &&
++		prev != target &&
++		cpus_share_cache(prev, target) &&
++		(available_idle_cpu(prev) || sched_idle_cpu(prev)) &&
++		asym_fits_cpu(task_util, util_min, util_max, prev)) {
+ 
+ 		if (!static_branch_unlikely(&sched_cluster_active) ||
+ 		    cpus_share_resources(prev, target))
+-- 
+2.41.0

@@ -90,7 +90,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.8
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=3
+pkgrel=4
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -109,7 +109,7 @@ source=(
   "0006-background_reclaim_of_hugepages.patch"
   "0007-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
   "0008-mm-increase_max_map_count.patch"
-  "0009-mm-vmscan-add-sysctl-knobs-for-protecting-the-workin.patch"
+  "0009-mm-le9uo-add-sysctl-knobs-for-protecting-the-workin.patch"
   "0010-kt-rcu-Make_the_grace_period_workers_unbound_again.patch"
   "0011-kt-smp-migrate_disable_in_smp_call_function_single_async.patch"
   "0012-kt-rtmutex-no-rcu-lock-while-spinning.patch"
@@ -124,6 +124,7 @@ source=(
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0018-sched-Add_latency_priority_for_CFS_class.patch"
   "0100-sched-pull-6.9.patch"
+  "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0101-sched-Fair-DL-server.patch"
   "0099-cpu-Force-Enable-VMX-hack.patch"
   "0123-thermal-netlink-intel_hfi-Enable-HFI-feature-only-when-required.patch"
@@ -486,7 +487,7 @@ sha256sums=('c969dea4e8bb6be991bbf7c010ba0e0a5643a3a8d8fb0a2aaa053406f1e965f3'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
-            '24491ed1436cf0ca3c6c3da99ad1b07506948a1c2094cea01511c24cf5e6a997'
+            '0b90d0973fdd3865803b18c620346f733c03b6af8b61c370ccbd3508df7d943c'
             '815a609564ede2009837ff09843d89e4735467bd2a14fd89a610e14cb73f2587'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
@@ -501,6 +502,7 @@ sha256sums=('c969dea4e8bb6be991bbf7c010ba0e0a5643a3a8d8fb0a2aaa053406f1e965f3'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017'
             '2bca646b44d0c596aa26772ddf1d1022ec2e0b57bd8750b180a9e5db2f2e285f'
+            '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             'ba69f9330948996bc8beb6ca11e331d63cbfe54bf7ba59ba06ada534193f0845'
             'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
             'fd44f54c40ad3f1caa4f6801ec896f920895a26791605f2d1ad2c87a509e113e')
