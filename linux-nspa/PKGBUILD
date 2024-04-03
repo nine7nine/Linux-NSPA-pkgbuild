@@ -78,7 +78,7 @@ _nf_cone=y
 _vmx_hack=
 
  pkgbase=linux-nspa
-_major=6.8.1
+_major=6.8.3
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -87,18 +87,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.8.1
+_srcname=linux-6.8.3
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=5
+pkgrel=6
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.1.tar.xz"
-  "0000-patch-6.8-rt8.patch"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.3.tar.xz"
+  "0000-patch-6.8.2-rt10.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -475,8 +475,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('8d0c8936e3140a0fbdf511ad7a9f21121598f3656743898f47bb9052d37cff68'
-            '71cf6bd24782f8b179b3291a87da8912ec74db9bf9fc0ac3c4dc5467ade89ac6'
+sha256sums=('db7eb56d5014ee9a7fac0c715053155d92798d98d9197a2173eef1f0a496c986'
+            'd4d391a3ac50f54572a4b100250b90d9cf2bbaa000a6dbfb8d34831418c86108'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
             'a108040aa16705496423f56a32caab7a72968df047363c2ef86bc2ae28c39662'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -501,7 +501,7 @@ sha256sums=('8d0c8936e3140a0fbdf511ad7a9f21121598f3656743898f47bb9052d37cff68'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017'
-            '2bca646b44d0c596aa26772ddf1d1022ec2e0b57bd8750b180a9e5db2f2e285f'
+            '866a41e5bf7969e801121e7b75440eadd20c8af9c9c0dd06bfd59dc3b6abfb60'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '0c2c065361e95e8a76314a6385f9c85d1eb29ece4ea2215b631110d9370a5814'
             'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
