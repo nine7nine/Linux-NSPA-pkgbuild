@@ -78,7 +78,7 @@ _nf_cone=y
 _vmx_hack=
 
  pkgbase=linux-nspa
-_major=6.8.3
+_major=6.9
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -87,18 +87,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.8.3
+_srcname=linux-6.9-rc2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=6
+pkgrel=2
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.8.3.tar.xz"
-  "0000-patch-6.8.2-rt10.patch"
+  "https://git.kernel.org/torvalds/t/linux-6.9-rc2.tar.gz"
+  "0000-patch-6.9-rc2-rt1.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -110,24 +110,17 @@ source=(
   "0007-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
   "0008-mm-increase_max_map_count.patch"
   "0009-mm-le9uo-add-sysctl-knobs-for-protecting-the-workin.patch"
-  "0010-kt-rcu-Make_the_grace_period_workers_unbound_again.patch"
   "0011-kt-smp-migrate_disable_in_smp_call_function_single_async.patch"
   "0012-kt-rtmutex-no-rcu-lock-while-spinning.patch"
   "0019-hid-wacom-Silence_log_spam.patch"
-  "0022-kt-vm-mm_optimizations.patch"
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
-  "0026-Add_support_for_epoll_min_wait.patch"
   "0030-Microsoft_Surface_Support-6.8.patch"
-  "0040-Intel-Thread-Director-IPC-v6.8.patch"
-  "0043-Intel-Thread-Director-Virtualization.patch"
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0018-sched-Add_latency_priority_for_CFS_class.patch"
-  "0100-sched-pull-6.9.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0101-sched-Fair-DL-server.patch"
   "0099-cpu-Force-Enable-VMX-hack.patch"
-  "0123-thermal-netlink-intel_hfi-Enable-HFI-feature-only-when-required.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -475,10 +468,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('db7eb56d5014ee9a7fac0c715053155d92798d98d9197a2173eef1f0a496c986'
-            'd4d391a3ac50f54572a4b100250b90d9cf2bbaa000a6dbfb8d34831418c86108'
+sha256sums=('5ce1087e02d0ba7bfaf3cf09552e86dcb509e5d94d89dda0e20d397a14c4bf5a'
+            '68ebbb28d43fcf9234c820824226328fbaf5059329d439977399855339c063cf'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
-            'a108040aa16705496423f56a32caab7a72968df047363c2ef86bc2ae28c39662'
+            '622746f9d6ef67ff7990c9dc293cb133fc34121cc0794d957c12679f10aaf155'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -487,23 +480,16 @@ sha256sums=('db7eb56d5014ee9a7fac0c715053155d92798d98d9197a2173eef1f0a496c986'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
-            '0b90d0973fdd3865803b18c620346f733c03b6af8b61c370ccbd3508df7d943c'
-            '815a609564ede2009837ff09843d89e4735467bd2a14fd89a610e14cb73f2587'
+            '59055bd176bb31e26b143ff01c0abee4daf54e9c74924dfd48b0098e7cfd4e12'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
-            '17b598ef3e08d6444f9e9c29c32719ff005f940d07589a05e6660597098b08b1'
             '96e2388bbefafc47b48da2ea8e58d9a9fa6fe4c9d8e4a38e4100e1c738f51e53'
-            '7b53a72ebd7dd27a422712e106d65e0365fbefd9b81010a15eb191df079441d4'
-            'd6fcb3029e034d522666a19d134583262f9c1edb4b116f3fceae8d50dcef47c7'
-            '8ce1dadd940747a617abaa6164f7dacb11d4cfe1ac49e87000a69475233fa33d'
-            '6a91e68e4b826827ec6d8cdecfd50291c114815ff626f838e54e4c9b54fd705e'
+            '3cf2702da17a3fd7e79d120a0bc669c1c5811052a737ced778b66bb849b6c16d'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017'
-            '866a41e5bf7969e801121e7b75440eadd20c8af9c9c0dd06bfd59dc3b6abfb60'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
-            '0c2c065361e95e8a76314a6385f9c85d1eb29ece4ea2215b631110d9370a5814'
-            'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
-            'fd44f54c40ad3f1caa4f6801ec896f920895a26791605f2d1ad2c87a509e113e')
+            'd39cd4aedea4119143f5c1a7967ad31f3c4e119d8f19ac76fa9a7290bafea99c'
+            'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558')
 
