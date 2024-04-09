@@ -75,7 +75,7 @@ _nf_cone=y
 # using trusted VMs - I'm not overly worried about this vulnerability.
 #
 # !!! WARNING: Do NOT enable this: may have your system !!! 
-_vmx_hack=
+_vmx_hack=y
 
  pkgbase=linux-nspa
 _major=6.9
@@ -87,17 +87,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.9-rc2
+_srcname=linux-6.9-rc3
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=2
+pkgrel=5
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.9-rc2.tar.gz"
+  "https://git.kernel.org/torvalds/t/linux-6.9-rc3.tar.gz"
   "0000-patch-6.9-rc2-rt1.patch"
   "config"
   "config_surface7"
@@ -117,10 +117,19 @@ source=(
   "0030-Microsoft_Surface_Support-6.8.patch"
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
-  "0018-sched-Add_latency_priority_for_CFS_class.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
-  "0101-sched-Fair-DL-server.patch"
+  "0101-sched-Fair-DL-server_V6.patch"
   "0099-cpu-Force-Enable-VMX-hack.patch"
+  "1001-sched-eevdf-Add-feature-comments.patch"
+  "1002-sched-eevdf-Remove-min_vruntime_copy.patch"
+  "1003-sched-fair-Cleanup-pick_task_fair-vs-throttle.patch"
+  "1004-sched-fair-Cleanup-pick_task_fair-s-curr.patch"
+  "1005-sched-fair-Unify-pick_-next_-_task_fair.patch"
+  "1006-sched-Allow-sched_class-dequeue_task-to-fail.patch"
+  "1007-sched-fair-Re-organize-dequeue_task_fair.patch"
+  "1008-sched-fair-Implement-delayed-dequeue.patch"
+  "1009-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
+  "0018-sched-Add_latency_priority_for_CFS_class.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -468,10 +477,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('5ce1087e02d0ba7bfaf3cf09552e86dcb509e5d94d89dda0e20d397a14c4bf5a'
+sha256sums=('9e53a8268c25dcb948cd4002cf08be1a90a6cebfb0aef402370f32fa62ecf848'
             '68ebbb28d43fcf9234c820824226328fbaf5059329d439977399855339c063cf'
             '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
-            '622746f9d6ef67ff7990c9dc293cb133fc34121cc0794d957c12679f10aaf155'
+            'af4d6015c5220b4bda44ae05538d274d2f5c2652d531ea117f22c3ac51cb7eb8'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -488,8 +497,17 @@ sha256sums=('5ce1087e02d0ba7bfaf3cf09552e86dcb509e5d94d89dda0e20d397a14c4bf5a'
             '3cf2702da17a3fd7e79d120a0bc669c1c5811052a737ced778b66bb849b6c16d'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
-            'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
-            'd39cd4aedea4119143f5c1a7967ad31f3c4e119d8f19ac76fa9a7290bafea99c'
-            'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558')
+            'e515902604d11f1812442a188a3d8631fb4492607f2e20593f918bdd64833e19'
+            'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
+            'd16531952e0da603999ac9227cf6e055d8755f1fd2a3437a013720e4637c23bb'
+            '85ed8776081b2cd3679b47302c8ee3500e98a654a7ce0836a8a6d1c47bc291ad'
+            '0c116df3b67cf130592967ad4b2886d7d0178eaf5f6bb32aa86c01dc5cecb530'
+            'b4f2769c4303643ca680f3c870acd9e8468b01f5d37354bcc1ee8e5b7cb41a72'
+            '523f2e30a0234ecea2d9fc246152d4a1fa7f746a78146a6e73cb2ca04c4813d1'
+            '9d2033eb8671468883f8fadc95ed43f03f53a7cd3b061e4f94b542ea216e9d40'
+            'ccb165048cc6ea41dc989277007b96f869dfd79519ffc4b07da5504c587f78f1'
+            '20664c30098453fdb2dd20842a3abe1ee4598a95e7407710ed9437104a3bf476'
+            'f6fc7409ed38cd594a25221c06872b8864ac2cf1e6c396f78e44d06923955df6'
+            'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017')
 
