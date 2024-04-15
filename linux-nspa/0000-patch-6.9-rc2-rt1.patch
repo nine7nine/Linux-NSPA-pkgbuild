@@ -1829,44 +1829,6 @@ index 955e31860095e..f2074b458d801 100644
  #endif
  
  bool this_cpu_in_panic(void);
-diff --git a/include/linux/rwbase_rt.h b/include/linux/rwbase_rt.h
-index 29c4e4f243e47..f2394a409c9d5 100644
---- a/include/linux/rwbase_rt.h
-+++ b/include/linux/rwbase_rt.h
-@@ -31,9 +31,9 @@ static __always_inline bool rw_base_is_locked(const struct rwbase_rt *rwb)
- 	return atomic_read(&rwb->readers) != READER_BIAS;
- }
- 
--static inline void rw_base_assert_held_write(const struct rwbase_rt *rwb)
-+static __always_inline bool rw_base_is_write_locked(const struct rwbase_rt *rwb)
- {
--	WARN_ON(atomic_read(&rwb->readers) != WRITER_BIAS);
-+	return atomic_read(&rwb->readers) == WRITER_BIAS;
- }
- 
- static __always_inline bool rw_base_is_contended(const struct rwbase_rt *rwb)
-diff --git a/include/linux/rwsem.h b/include/linux/rwsem.h
-index 4f1c18992f768..c8b543d428b0a 100644
---- a/include/linux/rwsem.h
-+++ b/include/linux/rwsem.h
-@@ -167,14 +167,14 @@ static __always_inline int rwsem_is_locked(const struct rw_semaphore *sem)
- 	return rw_base_is_locked(&sem->rwbase);
- }
- 
--static inline void rwsem_assert_held_nolockdep(const struct rw_semaphore *sem)
-+static __always_inline void rwsem_assert_held_nolockdep(const struct rw_semaphore *sem)
- {
- 	WARN_ON(!rwsem_is_locked(sem));
- }
- 
--static inline void rwsem_assert_held_write_nolockdep(const struct rw_semaphore *sem)
-+static __always_inline void rwsem_assert_held_write_nolockdep(const struct rw_semaphore *sem)
- {
--	rw_base_assert_held_write(sem);
-+	WARN_ON(!rw_base_is_write_locked(&sem->rwbase));
- }
- 
- static __always_inline int rwsem_is_contended(struct rw_semaphore *sem)
 diff --git a/include/linux/sched.h b/include/linux/sched.h
 index 3c2abbc587b49..1d3b8dc33334e 100644
 --- a/include/linux/sched.h

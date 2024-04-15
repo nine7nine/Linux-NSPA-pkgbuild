@@ -87,17 +87,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.9-rc3
+_srcname=linux-6.9-rc4
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=5
+pkgrel=6
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.9-rc3.tar.gz"
+  "https://git.kernel.org/torvalds/t/linux-6.9-rc4.tar.gz"
   "0000-patch-6.9-rc2-rt1.patch"
   "config"
   "config_surface7"
@@ -129,7 +129,7 @@ source=(
   "1007-sched-fair-Re-organize-dequeue_task_fair.patch"
   "1008-sched-fair-Implement-delayed-dequeue.patch"
   "1009-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
-  "0018-sched-Add_latency_priority_for_CFS_class.patch"
+  "1010-sched-eevdf-Use-sched_attr-sched_runtime-to-set-requ.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -477,10 +477,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('9e53a8268c25dcb948cd4002cf08be1a90a6cebfb0aef402370f32fa62ecf848'
-            '68ebbb28d43fcf9234c820824226328fbaf5059329d439977399855339c063cf'
-            '23ec0f372fabde289fb32a6af638c6cd0d9771a57354b5356970422829ad9917'
-            'af4d6015c5220b4bda44ae05538d274d2f5c2652d531ea117f22c3ac51cb7eb8'
+sha256sums=('b2180bb087c12d583a45c462969ce4e1f3175cc7b4a2ca7a41d01fd2271d93b0'
+            '2c923b6210eb2f3220d5a956b28c901be91d7873d117a9a2379b0577fb5e413c'
+            '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
+            'ab0a37ad8fdac7bdae8ab2308c8909fb9cedf1d137e2db68e1214f156a50356e'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -509,5 +509,5 @@ sha256sums=('9e53a8268c25dcb948cd4002cf08be1a90a6cebfb0aef402370f32fa62ecf848'
             'ccb165048cc6ea41dc989277007b96f869dfd79519ffc4b07da5504c587f78f1'
             '20664c30098453fdb2dd20842a3abe1ee4598a95e7407710ed9437104a3bf476'
             'f6fc7409ed38cd594a25221c06872b8864ac2cf1e6c396f78e44d06923955df6'
-            'f76d22354956f22a4b16b63facfdca4d5d14c309ca702a87d603803e173fa017')
+            '68fbb938a8d0be913477fc2189ee8beafacbd0b5e536fc388d9ed99b69a2b607')
 
