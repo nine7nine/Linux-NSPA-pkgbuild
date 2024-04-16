@@ -18,7 +18,7 @@ diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
 index ee8b537c6..a07ab9519 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -6831,33 +6831,45 @@ enqueue_throttle:
+@@ -6848,33 +6848,45 @@ enqueue_throttle:
  static void set_next_buddy(struct sched_entity *se);
  
  /*
@@ -78,7 +78,7 @@ index ee8b537c6..a07ab9519 100644
  
  		/* Don't dequeue parent if it has other entities besides us */
  		if (cfs_rq->load.weight) {
-@@ -6877,36 +6889,53 @@ static bool dequeue_task_fair(struct rq
+@@ -6894,35 +6906,53 @@ static bool dequeue_task_fair(struct rq
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
  
@@ -104,10 +104,10 @@ index ee8b537c6..a07ab9519 100644
 -			goto dequeue_throttle;
 +			return 0;
 +	}
- 
++
 +	if (p) {
 +		sub_nr_running(rq, 1);
-+ 
+ 
 +		/* balance early to pull high priority tasks */
 +		if (unlikely(!was_sched_idle && sched_idle_rq(rq)))
 +			rq->next_balance = jiffies;
@@ -131,7 +131,8 @@ index ee8b537c6..a07ab9519 100644
 +	util_est_dequeue(&rq->cfs, p);
  
 -dequeue_throttle:
- 	if (!rq->cfs.h_nr_running)
+ 	if (!throttled_hierarchy(task_cfs_rq(p)) &&
+ 			!rq->cfs.h_nr_running)
  		dl_server_stop(&rq->fair_server);
  
 -	util_est_update(&rq->cfs, p, task_sleep);
@@ -141,10 +142,8 @@ index ee8b537c6..a07ab9519 100644
 +	// XXX figure out util_est; this is asymmetric for the delay case
 +	util_est_update(&rq->cfs, p, flags & DEQUEUE_SLEEP);
  	hrtick_update(rq);
--
- 	return true;
- }
  
+ 	return true;
 -- 
 2.44.0.325.g11c821f2f2
 
