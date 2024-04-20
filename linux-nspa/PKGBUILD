@@ -75,7 +75,11 @@ _nf_cone=y
 # using trusted VMs - I'm not overly worried about this vulnerability.
 #
 # !!! WARNING: Do NOT enable this: may have your system !!! 
-_vmx_hack=y
+_vmx_hack=
+
+# Disable RT Throttling (!!! DANGER ZONE !!!)
+# Don't enable unless you know what you are doing.
+_no_RT_throttle=
 
  pkgbase=linux-nspa
 _major=6.9
@@ -90,7 +94,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.9-rc4
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=7
+pkgrel=8
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -130,6 +134,8 @@ source=(
   "1008-sched-fair-Implement-delayed-dequeue.patch"
   "1009-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
   "1010-sched-eevdf-Use-sched_attr-sched_runtime-to-set-requ.patch"
+  "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
+  "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -148,8 +154,10 @@ prepare() {
     src="${src%%::*}"
     src="${src##*/}"
 
-    # Check if fo the VMX bios hack && if _vmx_hack=y is set
     if [[ $src == "0099-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack == "y" ]]; then
+      echo "Applying patch $src..."
+      patch -Np1 < "../$src"
+    elif [[ $src == "201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch" && $_no_RT_throttle == "y" ]]; then
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
     elif [[ $src == *.patch ]]; then
@@ -509,5 +517,7 @@ sha256sums=('b2180bb087c12d583a45c462969ce4e1f3175cc7b4a2ca7a41d01fd2271d93b0'
             '1a4edcb803c1a10b7a430902e6b96fc176440544d1b07ac88235b7b2e7250dc0'
             '20664c30098453fdb2dd20842a3abe1ee4598a95e7407710ed9437104a3bf476'
             'f6fc7409ed38cd594a25221c06872b8864ac2cf1e6c396f78e44d06923955df6'
-            '68fbb938a8d0be913477fc2189ee8beafacbd0b5e536fc388d9ed99b69a2b607')
+            '68fbb938a8d0be913477fc2189ee8beafacbd0b5e536fc388d9ed99b69a2b607'
+            '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
+            '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b')
 

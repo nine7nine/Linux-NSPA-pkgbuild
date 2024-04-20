@@ -1,0 +1,61 @@
+From 369aaaa73a4dc8cfa32df90ee6b3ad27c625095f Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Tue, 4 Jul 2023 20:46:18 -0700
+Subject: [PATCH] sched/fair: Always update CPU capacity when load balancing
+
+Limiting CPU capacity updates, which are quite cheap, results in worse
+balancing decisions during opportunistic balancing (e.g., SD_BALANCE_WAKE).
+This causes opportunistic placement decisions to be skewed using stale CPU
+capacity data, and when a CPU isn't idling much, its capacity suffers from
+even more staleness since the only exception to the 100 ms capacity update
+ratelimit is a CPU exiting idle.
+
+Since the capacity updates are cheap, always do it when load balancing in
+order to improve opportunistic task placement decisions.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ kernel/sched/fair.c  | 10 +---------
+ kernel/sched/sched.h |  1 -
+ 2 files changed, 1 insertion(+), 10 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 193e4f17baa55..9acf15b627950 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -8905,11 +8905,6 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
+ 	struct sched_domain *child = sd->child;
+ 	struct sched_group *group, *sdg = sd->groups;
+ 	unsigned long capacity, min_capacity, max_capacity;
+-	unsigned long interval;
+-
+-	interval = msecs_to_jiffies(sd->balance_interval);
+-	interval = clamp(interval, 1UL, max_load_balance_interval);
+-	sdg->sgc->next_update = jiffies + interval;
+ 
+ 	if (!child) {
+ 		update_cpu_capacity(sd, cpu);
+@@ -9741,10 +9736,7 @@ static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sd
+ 		if (local_group) {
+ 			sds->local = sg;
+ 			sgs = local;
+-
+-			if (env->idle != CPU_NEWLY_IDLE ||
+-			    time_after_eq(jiffies, sg->sgc->next_update))
+-				update_group_capacity(env->sd, env->dst_cpu);
++			update_group_capacity(env->sd, env->dst_cpu);
+ 		}
+ 
+ 		update_sg_lb_stats(env, sg, sgs, &sg_status);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index a09b36e908fcc..e2c4028faa355 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1835,7 +1835,6 @@ struct sched_group_capacity {
+ 	unsigned long		capacity;
+ 	unsigned long		min_capacity;		/* Min per-CPU capacity in group */
+ 	unsigned long		max_capacity;		/* Max per-CPU capacity in group */
+-	unsigned long		next_update;
+ 	int			imbalance;		/* XXX unrelated to capacity but shared group state */
+ 
+ #ifdef CONFIG_SCHED_DEBUG
