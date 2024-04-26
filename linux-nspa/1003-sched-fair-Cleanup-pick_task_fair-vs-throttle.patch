@@ -1,7 +1,7 @@
-From 5f90fb6d2cab7871cac0e0180a22564e53a92076 Mon Sep 17 00:00:00 2001
+From c483f8de75457db8954e6c8d59ff06d3b5d14442 Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
 Date: Wed, 3 Apr 2024 09:50:07 +0200
-Subject: [PATCH 03/10] sched/fair: Cleanup pick_task_fair() vs throttle
+Subject: sched/fair: Cleanup pick_task_fair() vs throttle
 
 Per 54d27365cae8 ("sched/fair: Prevent throttling in early
 pick_next_task_fair()") the reason check_cfs_rq_runtime() is under the
@@ -12,15 +12,16 @@ But then the pick_task_fair() 'copy' of all this made it restart the
 traversal anyway, so that seems to solve the issue too.
 
 Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Ben Segall <bsegall@google.com>
 ---
  kernel/sched/fair.c | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index dbafd3cd0..cebb13224 100644
+index 94b835c61c080a..b5dbd23662188a 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8374,11 +8374,11 @@ static struct task_struct *pick_task_fair(struct rq *rq)
+@@ -8441,11 +8441,11 @@ again:
  				update_curr(cfs_rq);
  			else
  				curr = NULL;
@@ -36,5 +37,4 @@ index dbafd3cd0..cebb13224 100644
  		cfs_rq = group_cfs_rq(se);
  	} while (cfs_rq);
 -- 
-2.44.0.325.g11c821f2f2
-
+cgit 1.2.3-korg

@@ -1,7 +1,7 @@
-From 39509bcadf04dbfcba49fcbbbff9546bf2feb9fd Mon Sep 17 00:00:00 2001
+From b0b3da03075cb7e957402b57b6bd963ebbc2b90e Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
 Date: Tue, 26 Sep 2023 14:32:32 +0200
-Subject: [PATCH 09/10] sched/eevdf: Allow shorter slices to wakeup-preempt
+Subject: sched/eevdf: Allow shorter slices to wakeup-preempt
 
 Part of the reason to have shorter slices is to improve
 responsiveness. Allow shorter slices to preempt longer slices on
@@ -42,34 +42,113 @@ switches and a slight increase in sum-delay.
 Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 Tested-by: Mike Galbraith <umgwanakikbuti@gmail.com>
 ---
- kernel/sched/fair.c     | 11 ++++++++---
+ kernel/sched/fair.c     | 55 +++++++++++++++++++++++++++++++++++++------------
  kernel/sched/features.h |  4 ++++
- 2 files changed, 12 insertions(+), 3 deletions(-)
+ 2 files changed, 46 insertions(+), 13 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index da37ed1f5..b52385a51 100644
+index 2ac567af1e4ca4..8880da0a1900d6 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8477,9 +8477,14 @@ static void check_preempt_wakeup_fair(struct rq *rq, struct task_struct *p, int
+@@ -861,6 +861,39 @@ struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
+ 	return __node_2_se(left);
+ }
+ 
++static inline bool pick_curr(struct cfs_rq *cfs_rq,
++			     struct sched_entity *curr, struct sched_entity *wakee)
++{
++	/*
++	 * Nothing to preserve...
++	 */
++	if (!curr || !sched_feat(RUN_TO_PARITY))
++		return false;
++
++	/*
++	 * Allow preemption at the 0-lag point -- even if not all of the slice
++	 * is consumed. Note: placement of positive lag can push V left and render
++	 * @curr instantly ineligible irrespective the time on-cpu.
++	 */
++	if (!entity_eligible(cfs_rq, curr))
++		return false;
++
++	/*
++	 * Don't preserve @curr when the @wakee has a shorter slice and earlier
++	 * deadline. IOW, explicitly allow preemption.
++	 */
++	if (sched_feat(PREEMPT_SHORT) && wakee &&
++	    wakee->slice < curr->slice &&
++	    (s64)(wakee->deadline - curr->deadline) < 0)
++		return false;
++
++	/*
++	 * Preserve @curr to allow it to finish its first slice.
++	 * See the HACK in set_next_entity().
++	 */
++	return curr->vlag == curr->deadline;
++}
++
+ /*
+  * Earliest Eligible Virtual Deadline First
+  *
+@@ -880,28 +913,27 @@ struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
+  *
+  * Which allows tree pruning through eligibility.
+  */
+-static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq)
++static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq, struct sched_entity *wakee)
+ {
+ 	struct rb_node *node = cfs_rq->tasks_timeline.rb_root.rb_node;
+ 	struct sched_entity *se = __pick_first_entity(cfs_rq);
+ 	struct sched_entity *curr = cfs_rq->curr;
+ 	struct sched_entity *best = NULL;
+ 
++	if (curr && !curr->on_rq)
++		curr = NULL;
++
+ 	/*
+ 	 * We can safely skip eligibility check if there is only one entity
+ 	 * in this cfs_rq, saving some cycles.
+ 	 */
+ 	if (cfs_rq->nr_running == 1)
+-		return curr && curr->on_rq ? curr : se;
+-
+-	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
+-		curr = NULL;
++		return curr ?: se;
+ 
+ 	/*
+-	 * Once selected, run a task until it either becomes non-eligible or
+-	 * until it gets a new slice. See the HACK in set_next_entity().
++	 * Preserve @curr to let it finish its slice.
+ 	 */
+-	if (sched_feat(RUN_TO_PARITY) && curr && curr->vlag == curr->deadline)
++	if (pick_curr(cfs_rq, curr, wakee))
+ 		return curr;
+ 
+ 	/* Pick the leftmost entity if it's eligible */
+@@ -5503,7 +5535,7 @@ pick_next_entity(struct rq *rq, struct cfs_rq *cfs_rq)
+ 		return cfs_rq->next;
+ 	}
+ 
+-	struct sched_entity *se = pick_eevdf(cfs_rq);
++	struct sched_entity *se = pick_eevdf(cfs_rq, NULL);
+ 	if (se->sched_delayed) {
+ 		dequeue_entities(rq, se, DEQUEUE_SLEEP | DEQUEUE_DELAYED);
+ 		SCHED_WARN_ON(se->sched_delayed);
+@@ -8565,10 +8597,7 @@ static void check_preempt_wakeup_fair(struct rq *rq, struct task_struct *p, int
  	cfs_rq = cfs_rq_of(se);
  	update_curr(cfs_rq);
  
 -	/*
 -	 * XXX pick_eevdf(cfs_rq) != se ?
 -	 */
-+	if (sched_feat(PREEMPT_SHORT) && pse->slice < se->slice &&
-+	    entity_eligible(cfs_rq, pse) &&
-+	    (s64)(pse->deadline - se->deadline) < 0 &&
-+	    se->vlag == se->deadline) {
-+		/* negate RUN_TO_PARITY */
-+		se->vlag = se->deadline - 1;
-+	}
-+
- 	if (pick_eevdf(cfs_rq) == pse)
+-	if (pick_eevdf(cfs_rq) == pse)
++	if (pick_eevdf(cfs_rq, pse) == pse)
  		goto preempt;
  
+ 	return;
 diff --git a/kernel/sched/features.h b/kernel/sched/features.h
-index b0cdff096..64ce99cf0 100644
+index b0cdff096736cf..64ce99cf04ec4e 100644
 --- a/kernel/sched/features.h
 +++ b/kernel/sched/features.h
 @@ -14,6 +14,10 @@ SCHED_FEAT(PLACE_DEADLINE_INITIAL, true)
@@ -84,5 +163,4 @@ index b0cdff096..64ce99cf0 100644
  /*
   * Prefer to schedule the task we woke last (assuming it failed
 -- 
-2.44.0.325.g11c821f2f2
-
+cgit 1.2.3-korg

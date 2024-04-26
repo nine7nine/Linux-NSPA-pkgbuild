@@ -1,7 +1,7 @@
-From 24869a040e07bf62e829c7f3c1160682e89e14dd Mon Sep 17 00:00:00 2001
+From b794b7290593a17b9a350b58545ac8290a2d9b6f Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
 Date: Wed, 3 Apr 2024 09:50:12 +0200
-Subject: [PATCH 04/10] sched/fair: Cleanup pick_task_fair()'s curr
+Subject: sched/fair: Cleanup pick_task_fair()'s curr
 
 With 4c456c9ad334 ("sched/fair: Remove unused 'curr' argument from
 pick_next_entity()") curr is no longer being used, so no point in
@@ -13,10 +13,10 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
  1 file changed, 2 insertions(+), 8 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index cebb13224..a79ee62ad 100644
+index b5dbd23662188a..d08150cca0ffbd 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8366,15 +8366,9 @@ static struct task_struct *pick_task_fair(struct rq *rq)
+@@ -8433,15 +8433,9 @@ again:
  		return NULL;
  
  	do {
@@ -35,5 +35,4 @@ index cebb13224..a79ee62ad 100644
  		if (unlikely(check_cfs_rq_runtime(cfs_rq)))
  			goto again;
 -- 
-2.44.0.325.g11c821f2f2
-
+cgit 1.2.3-korg

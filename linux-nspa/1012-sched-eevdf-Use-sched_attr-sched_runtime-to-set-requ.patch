@@ -1,8 +1,8 @@
-From d9fcf49f3f0c33060d51e5f17a78314d0c73afc3 Mon Sep 17 00:00:00 2001
+From be5a48e9d665243d7a1e8f43e34376e46478f8ab Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
 Date: Mon, 22 May 2023 13:46:30 +0200
-Subject: [PATCH 10/10] sched/eevdf: Use sched_attr::sched_runtime to set
- request/slice suggestion
+Subject: sched/eevdf: Use sched_attr::sched_runtime to set request/slice
+ suggestion
 
 Allow applications to directly set a suggested request/slice length using
 sched_attr::sched_runtime.
@@ -174,7 +174,7 @@ Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
  4 files changed, 36 insertions(+), 11 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index ef84d73ad..d309b43e4 100644
+index 238b855aa775e9..ccbf62821fcbdf 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -542,7 +542,10 @@ struct sched_entity {
@@ -190,7 +190,7 @@ index ef84d73ad..d309b43e4 100644
  	u64				exec_start;
  	u64				sum_exec_runtime;
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 62b8dfc6a..d9521b57c 100644
+index bbfaba600ad8ee..5ffd7e04739337 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -4550,7 +4550,6 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
@@ -233,7 +233,7 @@ index 62b8dfc6a..d9521b57c 100644
  
  	/*
  	 * __sched_setscheduler() ensures attr->sched_priority == 0 when
-@@ -7812,7 +7823,9 @@ static int __sched_setscheduler(struct task_struct *p,
+@@ -7812,7 +7823,9 @@ recheck:
  	 * but store a possible modification of reset_on_fork.
  	 */
  	if (unlikely(policy == p->policy)) {
@@ -254,7 +254,7 @@ index 62b8dfc6a..d9521b57c 100644
  	/* Fixup the legacy SCHED_RESET_ON_FORK hack. */
  	if ((policy != SETPARAM_POLICY) && (policy & SCHED_RESET_ON_FORK)) {
  		attr.sched_flags |= SCHED_FLAG_RESET_ON_FORK;
-@@ -8124,12 +8140,14 @@ static int sched_copy_attr(struct sched_attr __user *uattr, struct sched_attr *a
+@@ -8124,12 +8140,14 @@ err_size:
  
  static void get_params(struct task_struct *p, struct sched_attr *attr)
  {
@@ -281,7 +281,7 @@ index 62b8dfc6a..d9521b57c 100644
  	/*
  	 * The boot idle thread does lazy MMU switching as well:
 diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
-index 8d5d98a58..8f52e003b 100644
+index 8d5d98a5834dfd..8f52e003bac969 100644
 --- a/kernel/sched/debug.c
 +++ b/kernel/sched/debug.c
 @@ -579,11 +579,12 @@ print_task(struct seq_file *m, struct rq *rq, struct task_struct *p)
@@ -299,10 +299,10 @@ index 8d5d98a58..8f52e003b 100644
  		SPLIT_NS(p->se.sum_exec_runtime),
  		(long long)(p->nvcsw + p->nivcsw),
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index b52385a51..b0d40a73b 100644
+index 111b828d6c1dd1..7b903ef677955e 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -984,7 +984,8 @@ static void update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+@@ -1022,7 +1022,8 @@ static void update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
  	 * nice) while the request time r_i is determined by
  	 * sysctl_sched_base_slice.
  	 */
@@ -312,7 +312,7 @@ index b52385a51..b0d40a73b 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i / w_i
-@@ -5165,7 +5166,8 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
+@@ -5207,7 +5208,8 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
  	u64 vslice, vruntime = avg_vruntime(cfs_rq);
  	s64 lag = 0;
  
@@ -323,5 +323,4 @@ index b52385a51..b0d40a73b 100644
  
  	/*
 -- 
-2.44.0.325.g11c821f2f2
-
+cgit 1.2.3-korg

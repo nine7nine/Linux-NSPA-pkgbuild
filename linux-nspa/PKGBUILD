@@ -94,7 +94,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.9-rc5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=12
+pkgrel=13
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -125,6 +125,8 @@ source=(
   "0101-sched-Fair-DL-server_V6.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
   "0099-cpu-Force-Enable-VMX-hack.patch"
+  "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
+  "0203-sched-core-eevdf-updates-fixes-tip-6.9-rc5.patch"
   "1001-sched-eevdf-Add-feature-comments.patch"
   "1002-sched-eevdf-Remove-min_vruntime_copy.patch"
   "1003-sched-fair-Cleanup-pick_task_fair-vs-throttle.patch"
@@ -133,12 +135,10 @@ source=(
   "1006-sched-Allow-sched_class-dequeue_task-to-fail.patch"
   "1007-sched-fair-Re-organize-dequeue_task_fair.patch"
   "1008-sched-fair-Implement-delayed-dequeue.patch"
-  "1009-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
-  "1010-sched-eevdf-Use-sched_attr-sched_runtime-to-set-requ.patch"
-  "1011-sched-fair-delayed-dequeue-fixes.patch"
-  "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
-  "1012-EEVDF-urgent-fixes-tip-6.9-rc5.patch"
-  "1013-EEVDF-Respect_Slice-Run_To_Parity.patch"
+  "1009-sched-eevdf-Fixup_PELT-vs-DELAYED_DEQUEUE.patch"
+  "1010-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
+  "1011-sched-eevdf-Limit_preemption_a_little_more.patch"
+  "1012-sched-eevdf-Use-sched_attr-sched_runtime-to-set-requ.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -512,18 +512,18 @@ sha256sums=('1f80f8eaf946a4365386a0c752fa957951bc79c8fb2721547d7c90ae10270af5'
             'c5f27076e563cf1b7e5555cf6ebba97dc07c66feb5a5149b731ac1a4c92c5da9'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
             'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
-            'd16531952e0da603999ac9227cf6e055d8755f1fd2a3437a013720e4637c23bb'
-            '85ed8776081b2cd3679b47302c8ee3500e98a654a7ce0836a8a6d1c47bc291ad'
-            '0c116df3b67cf130592967ad4b2886d7d0178eaf5f6bb32aa86c01dc5cecb530'
-            'b4f2769c4303643ca680f3c870acd9e8468b01f5d37354bcc1ee8e5b7cb41a72'
-            '523f2e30a0234ecea2d9fc246152d4a1fa7f746a78146a6e73cb2ca04c4813d1'
-            '9d2033eb8671468883f8fadc95ed43f03f53a7cd3b061e4f94b542ea216e9d40'
-            '1a4edcb803c1a10b7a430902e6b96fc176440544d1b07ac88235b7b2e7250dc0'
-            '20664c30098453fdb2dd20842a3abe1ee4598a95e7407710ed9437104a3bf476'
-            'f6fc7409ed38cd594a25221c06872b8864ac2cf1e6c396f78e44d06923955df6'
-            '68fbb938a8d0be913477fc2189ee8beafacbd0b5e536fc388d9ed99b69a2b607'
-            '69aa82625df86d2df4a12d89e15556c4170bad8fc6662584e17807f97a44c795'
             '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
-            '07c633870f34f6c3a2531f4a50f7fbba1c2e95897c1737403d55b749dd4bb2b9'
-            'f71db734b6ec9de8a0ecdffe96618d220685363c1382faab8cac6bca00debd21')
+            '38800301090c361bd5cb38378c91bbc2518e15ee70fa7960ecaa37dd1422ce80'
+            'd16531952e0da603999ac9227cf6e055d8755f1fd2a3437a013720e4637c23bb'
+            '52b2cd1f42b7554af01e455fe7d51b25715ac1f79ca663c2488e471a55815953'
+            '2d7d33bf2eb6bfdaacd0d3a04ccc9f0478a09a1b6712d2316befed4899a7ec27'
+            '3d5e609dec000c09b56af236de03c10df6ebf4da746425574534bdbeab642c75'
+            'a5ef6490c4a969839cf78fa19b67892a244ba602c5cbced753c0dc06708f93af'
+            '78071773c8c16df0ece0747bd9d46c25221a80364c53d9db0b2c6dca6e9b2810'
+            'b0bbf3a1932d088811a7b5abac8b5a25fae7fb620d5a2197ca64440c0f49b1fd'
+            '3b3427dfb9e00fa0bdf2c7d071a6d0ce94c0dc817721fb3a3dd1418a57f7ac54'
+            '38696824a7a187888a45f3ad8a6278b9bdf600e45d85e05629a672777800e73c'
+            'c35556d4e9540e124e116ae295e67ecd4be2be620215d5c89eda7b4b6f35909c'
+            'aa965a4fc11e01ec58440c8443aed427c7c04805bee0ac44fbd05c28ab4fb845'
+            '281697f0dc321edfbb1025e392e497647d246c0ecbbecb4ddb6dc6aa563d1369')
 

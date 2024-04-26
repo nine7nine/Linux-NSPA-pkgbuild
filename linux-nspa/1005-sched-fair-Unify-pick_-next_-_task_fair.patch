@@ -1,7 +1,7 @@
-From 0e4992b0f3163d4a5c94e88d26d9730e9316c8a6 Mon Sep 17 00:00:00 2001
+From 53b2e679d6f59e9797741e3dde3bcccbd0d07130 Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
 Date: Wed, 3 Apr 2024 09:50:16 +0200
-Subject: [PATCH 05/10] sched/fair: Unify pick_{,next_}_task_fair()
+Subject: sched/fair: Unify pick_{,next_}_task_fair()
 
 Implement pick_next_task_fair() in terms of pick_task_fair() to
 de-duplicate the pick loop.
@@ -12,14 +12,14 @@ conditions in later patches.
 
 Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
 ---
- kernel/sched/fair.c | 60 ++++++---------------------------------------
+ kernel/sched/fair.c | 60 +++++++----------------------------------------------
  1 file changed, 8 insertions(+), 52 deletions(-)
 
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index a79ee62ad..ea283d9b9 100644
+index d08150cca0ffbd..8a61a85035b06d 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8354,7 +8354,6 @@ static void check_preempt_wakeup_fair(struct rq *rq, struct task_struct *p, int
+@@ -8421,7 +8421,6 @@ preempt:
  	resched_curr(rq);
  }
  
@@ -27,7 +27,7 @@ index a79ee62ad..ea283d9b9 100644
  static struct task_struct *pick_task_fair(struct rq *rq)
  {
  	struct sched_entity *se;
-@@ -8366,7 +8365,7 @@ static struct task_struct *pick_task_fair(struct rq *rq)
+@@ -8433,7 +8432,7 @@ again:
  		return NULL;
  
  	do {
@@ -36,7 +36,7 @@ index a79ee62ad..ea283d9b9 100644
  		if (cfs_rq->curr && cfs_rq->curr->on_rq)
  			update_curr(cfs_rq);
  
-@@ -8379,19 +8378,20 @@ static struct task_struct *pick_task_fair(struct rq *rq)
+@@ -8446,19 +8445,19 @@ again:
  
  	return task_of(se);
  }
@@ -48,7 +48,6 @@ index a79ee62ad..ea283d9b9 100644
 -	struct cfs_rq *cfs_rq = &rq->cfs;
  	struct sched_entity *se;
  	struct task_struct *p;
-+	struct cfs_rq *cfs_rq;
  	int new_tasks;
  
  again:
@@ -60,7 +59,7 @@ index a79ee62ad..ea283d9b9 100644
  
  #ifdef CONFIG_FAIR_GROUP_SCHED
  	if (!prev || prev->sched_class != &fair_sched_class)
-@@ -8403,46 +8403,7 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
+@@ -8470,52 +8469,14 @@ again:
  	 *
  	 * Therefore attempt to avoid putting and setting the entire cgroup
  	 * hierarchy, only change the part that actually changes.
@@ -108,7 +107,14 @@ index a79ee62ad..ea283d9b9 100644
  	 * Since we haven't yet done put_prev_entity and if the selected task
  	 * is a different task than we started out with, try and touch the
  	 * least amount of cfs_rqs.
-@@ -8474,13 +8435,8 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf
+ 	 */
+ 	if (prev != p) {
+ 		struct sched_entity *pse = &prev->se;
++		struct cfs_rq *cfs_rq;
+ 
+ 		while (!(cfs_rq = is_same_group(se, pse))) {
+ 			int se_depth = se->depth;
+@@ -8541,13 +8502,8 @@ simple:
  	if (prev)
  		put_prev_task(rq, prev);
  
@@ -125,5 +131,6 @@ index a79ee62ad..ea283d9b9 100644
  done: __maybe_unused;
  #ifdef CONFIG_SMP
 -- 
-2.44.0.325.g11c821f2f2
+cgit 1.2.3-korg
+
 
