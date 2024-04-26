@@ -91,17 +91,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.9-rc4
+_srcname=linux-6.9-rc5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=8
+pkgrel=12
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.9-rc4.tar.gz"
+  "https://git.kernel.org/torvalds/t/linux-6.9-rc5.tar.gz"
   "0000-patch-6.9-rc2-rt1.patch"
   "config"
   "config_surface7"
@@ -123,6 +123,7 @@ source=(
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0101-sched-Fair-DL-server_V6.patch"
+  "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
   "0099-cpu-Force-Enable-VMX-hack.patch"
   "1001-sched-eevdf-Add-feature-comments.patch"
   "1002-sched-eevdf-Remove-min_vruntime_copy.patch"
@@ -134,8 +135,10 @@ source=(
   "1008-sched-fair-Implement-delayed-dequeue.patch"
   "1009-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
   "1010-sched-eevdf-Use-sched_attr-sched_runtime-to-set-requ.patch"
+  "1011-sched-fair-delayed-dequeue-fixes.patch"
   "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
-  "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
+  "1012-EEVDF-urgent-fixes-tip-6.9-rc5.patch"
+  "1013-EEVDF-Respect_Slice-Run_To_Parity.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -485,7 +488,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('b2180bb087c12d583a45c462969ce4e1f3175cc7b4a2ca7a41d01fd2271d93b0'
+sha256sums=('1f80f8eaf946a4365386a0c752fa957951bc79c8fb2721547d7c90ae10270af5'
             '2c923b6210eb2f3220d5a956b28c901be91d7873d117a9a2379b0577fb5e413c'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
             'ab0a37ad8fdac7bdae8ab2308c8909fb9cedf1d137e2db68e1214f156a50356e'
@@ -506,7 +509,8 @@ sha256sums=('b2180bb087c12d583a45c462969ce4e1f3175cc7b4a2ca7a41d01fd2271d93b0'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
-            '91b335b2c58c4631a8e08e0d0f1aeda3d6e566142b19569757894db70b0dbee5'
+            'c5f27076e563cf1b7e5555cf6ebba97dc07c66feb5a5149b731ac1a4c92c5da9'
+            '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
             'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
             'd16531952e0da603999ac9227cf6e055d8755f1fd2a3437a013720e4637c23bb'
             '85ed8776081b2cd3679b47302c8ee3500e98a654a7ce0836a8a6d1c47bc291ad'
@@ -518,6 +522,8 @@ sha256sums=('b2180bb087c12d583a45c462969ce4e1f3175cc7b4a2ca7a41d01fd2271d93b0'
             '20664c30098453fdb2dd20842a3abe1ee4598a95e7407710ed9437104a3bf476'
             'f6fc7409ed38cd594a25221c06872b8864ac2cf1e6c396f78e44d06923955df6'
             '68fbb938a8d0be913477fc2189ee8beafacbd0b5e536fc388d9ed99b69a2b607'
+            '69aa82625df86d2df4a12d89e15556c4170bad8fc6662584e17807f97a44c795'
             '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
-            '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b')
+            '07c633870f34f6c3a2531f4a50f7fbba1c2e95897c1737403d55b749dd4bb2b9'
+            'f71db734b6ec9de8a0ecdffe96618d220685363c1382faab8cac6bca00debd21')
 

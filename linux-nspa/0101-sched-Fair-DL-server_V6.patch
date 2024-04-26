@@ -1,333 +1,7 @@
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
-	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
-	(No client certificate requested)
-	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 4CCDB1D530
-	for <linux-kernel@vger.kernel.org>; Fri,  5 Apr 2024 17:28:23 +0000 (UTC)
-Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
-ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
-	t=1712338104; cv=none; b=E7CgyCknnTjOfeEAPvvY+zI8k6npTNBcYv1C1r4jJtW6DfhgokSMo3qzEtn01pjHPI/RXgcBL2ie31k6/xb1cKwC3bqHqkPIi3kw4xDZa43U+t1qH8lKWFpzficEehyUp9DNQRNX7Wzb2h4ELG6nWtq5ChLtUnHsH8i67DLXuQc=
-ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
-	s=arc-20240116; t=1712338104; c=relaxed/simple;
-	bh=7QV3T09dvDijECOMG4oL2b7Ux9g6ettYH0q+0Xk2j50=;
-	h=From:To:Cc:Subject:Date:Message-ID:MIME-Version; b=oCXWk1+8KmJnnZgF/XrU+98objAMM2ewUa0IbFiWEezX03/X7DgFqP3VPJFGYLiaKzDEjyQjfpO0+P/ucaC4xCf+N/BT5ihkGC43mg8zRYHP8hOeChno+0kqjcW9NXttcUJzzvpLJSPQDTP2+wA8vsKI3/5DMmUQVvNuAjF9B4Y=
-ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=A2oxRYca; arc=none smtp.client-ip=10.30.226.201
-Authentication-Results: smtp.subspace.kernel.org;
-	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="A2oxRYca"
-Received: by smtp.kernel.org (Postfix) with ESMTPSA id 68E97C433F1;
-	Fri,  5 Apr 2024 17:28:19 +0000 (UTC)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
-	s=k20201202; t=1712338103;
-	bh=7QV3T09dvDijECOMG4oL2b7Ux9g6ettYH0q+0Xk2j50=;
-	h=From:To:Cc:Subject:Date:From;
-	b=A2oxRYcalwdxIQS1xWmE7ti4ktuFnX6pOySmjKEPwAF9aBvJpNEavkcmRLZ6BR5e6
-	 50xXcsH5H5Zl6sCSEL4/nvoiczr4Q3O5h2mgXA5df2Nym2tU+4qZYFZi2ZPm0h77Kt
-	 BX2Q/71kkiHpdHPhS3IKfwpfRFPu3Db+7/6MWHK1UJHP/gc1F1m9x7uVNmGY0uvy8A
-	 k05aK+49oBV60AwIa8vg4iVeVD/QL5XUoIIIzCvOrBMpIIOvI1rDkdQIwW7MPTqxUD
-	 MkNjoA2ean/mt8j+Sga7h4gMyR2I6vJ3qAl307HakiSv5vq+cLp9phK6Qs34mAhSjU
-	 Y8wSgwK6WTnUA==
-From: Daniel Bristot de Oliveira <bristot@kernel.org>
-To: Ingo Molnar <mingo@redhat.com>,
-	Peter Zijlstra <peterz@infradead.org>,
-	Juri Lelli <juri.lelli@redhat.com>,
-	Vincent Guittot <vincent.guittot@linaro.org>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>,
-	Steven Rostedt <rostedt@goodmis.org>,
-	Ben Segall <bsegall@google.com>,
-	Mel Gorman <mgorman@suse.de>,
-	Daniel Bristot de Oliveira <bristot@redhat.com>,
-	Valentin Schneider <vschneid@redhat.com>,
-	linux-kernel@vger.kernel.org,
-	Luca Abeni <luca.abeni@santannapisa.it>,
-	Tommaso Cucinotta <tommaso.cucinotta@santannapisa.it>,
-	Thomas Gleixner <tglx@linutronix.de>,
-	Joel Fernandes <joel@joelfernandes.org>,
-	Vineeth Pillai <vineeth@bitbyteword.org>,
-	Shuah Khan <skhan@linuxfoundation.org>,
-	bristot@kernel.org,
-	Phil Auld <pauld@redhat.com>,
-	Suleiman Souhlal <suleiman@google.com>,
-	Youssef Esmat <youssefesmat@google.com>
-Subject: [PATCH V6 0/6] SCHED_DEADLINE server infrastructure
-Date: Fri,  5 Apr 2024 19:27:59 +0200
-Message-ID: <cover.1712337227.git.bristot@kernel.org>
-X-Mailer: git-send-email 2.44.0
-Precedence: bulk
-X-Mailing-List: linux-kernel@vger.kernel.org
-List-Id: <linux-kernel.vger.kernel.org>
-List-Subscribe: <mailto:linux-kernel+subscribe@vger.kernel.org>
-List-Unsubscribe: <mailto:linux-kernel+unsubscribe@vger.kernel.org>
-MIME-Version: 1.0
-Content-Transfer-Encoding: 8bit
-
-This is v6 of Peter's SCHED_DEADLINE server infrastructure
-implementation [1].
-
-SCHED_DEADLINE servers can help fixing starvation issues of low priority
-tasks (e.g., SCHED_OTHER) when higher priority tasks monopolize CPU
-cycles. Today we have RT Throttling; DEADLINE servers should be able to
-replace and improve that.
-
-In the v1 there was discussion raised about the consequence of using
-deadline based servers on the fixed-priority workloads. For a demonstration
-here is the baseline of timerlat scheduling latency as-is, with kernel
-build background workload:
-
- # rtla timerlat top -u -d 10m
-
-  --------------------- %< ------------------------
-                                     Timer Latency
-  0 01:42:24   |          IRQ Timer Latency (us)        |         Thread Timer Latency (us)      |    Ret user Timer Latency (us)
-CPU COUNT      |      cur       min       avg       max |      cur       min       avg       max |      cur       min       avg       max
-  0 #6143559   |        0         0         0        92 |        2         1         3        98 |        4         1         5       100
-  1 #6143559   |        1         0         0        97 |        7         1         5       101 |        9         1         7       103
-  2 #6143559   |        0         0         0        88 |        3         1         5        95 |        5         1         7        99
-  3 #6143559   |        0         0         0        90 |        6         1         5       103 |       10         1         7       126
-  4 #6143558   |        1         0         0        81 |        7         1         4        86 |        9         1         7        90
-  5 #6143558   |        0         0         0        74 |        3         1         5        79 |        4         1         7        83
-  6 #6143558   |        0         0         0        83 |        2         1         5        89 |        3         0         7       108
-  7 #6143558   |        0         0         0        85 |        3         1         4       126 |        5         1         6       137
-  --------------------- >% ------------------------
-
-And this is the same tests with DL server activating without any delay:
-  --------------------- %< ------------------------
-  0 00:10:01   |          IRQ Timer Latency (us)        |         Thread Timer Latency (us)      |    Ret user Timer Latency (us)
-CPU COUNT      |      cur       min       avg       max |      cur       min       avg       max |      cur       min       avg       max
-  0 #579147    |        0         0         0        54 |        2         1        52     61095 |        2         2        56     61102
-  1 #578766    |        0         0         0        83 |        2         1        49     55824 |        3         2        53     55831
-  2 #578559    |        0         0         1        59 |        2         1        50     55760 |        3         2        54     55770
-  3 #578318    |        0         0         0        76 |        2         1        49     55751 |        3         2        54     55760
-  4 #578611    |        0         0         0        64 |        2         1        49     55811 |        3         2        53     55820
-  5 #578347    |        0         0         1        40 |        2         1        50     56121 |        3         2        55     56133
-  6 #578938    |        0         0         1        75 |        2         1        49     55755 |        3         2        53     55764
-  7 #578631    |        0         0         1        36 |        3         1        51     55528 |        4         2        55     55541
-  --------------------- >% ------------------------
-
-The problem with DL server only implementation is that FIFO tasks might
-suffer preemption from NORMAL even when spare CPU cycles are available.
-In fact, fair deadline server is enqueued right away when NORMAL tasks
-wake up and they are first scheduled by the server, thus potentially
-preempting a well behaving FIFO task. This is of course not ideal.
-
-We had discussions about it, and one of the possibilities would be
-using a different scheduling algorithm for this. But IMHO that is
-an overkill.
-
-Juri and I discussed this and though about delaying the server
-activation for the (period - runtime), thus enabling the server
-only if the fair scheduler is about to starve.
-
-The patch 2 adds the possibility to defer the server start to the
-(absolute deadline - runtime) point in time. This is achieved by
-starting the dl server throttled, with a next replenishing time
-set to activate the server at (absolute deadline - runtime).
-
-The server is enqueued with the runtime replenished. As the fair
-scheduler runs without boost, its runtime is consumed. If the
-fair server has its runtime before the runtime - deadline time,
-the a new period is set, and the timer armed for the new
-deadline.
-
-The patch 3 add a per_rq interface for the knobs:
-	fair_server_runtime (950 ms)
-	fair_server_period  (1s)
-	fair_server_defer   (enabled)
-
-With defer enabled on CPUs [0:3], the results get better, having a
-behavior similar to the one we have with the rt throttling.
-
-  --------------------- %< ------------------------
-                                     Timer Latency                                                                                       
-  0 00:10:01   |          IRQ Timer Latency (us)        |         Thread Timer Latency (us)      |    Ret user Timer Latency (us)
-CPU COUNT      |      cur       min       avg       max |      cur       min       avg       max |      cur       min       avg       max
-  0 #599979    |        0         0         0        64 |        4         1         4        67 |        6         1         5        69
-  1 #599979    |        0         0         1        17 |        6         1         5        50 |       10         2         7        71
-  2 #599984    |        1         0         1        22 |        4         1         5        78 |        5         2         7       107
-  3 #599986    |        0         0         1        72 |        7         1         5        79 |       10         2         7        82
-  4 #581580    |        1         0         1        37 |        6         1        38     52797 |       10         2        41     52805
-  5 #583270    |        1         0         1        41 |        9         1        36     52617 |       12         2        38     52623
-  6 #581240    |        0         0         1        25 |        7         1        39     52870 |       11         2        41     52876
-  7 #581208    |        0         0         1        69 |        6         1        39     52917 |        9         2        41     52923
-  --------------------- >% ------------------------
-
-Here are some osnoise measurement, with osnoise threads running as FIFO:1 with
-different setups (defer enabled):
- - CPU 2 isolated
- - CPU 3 isolated shared with a CFS busy loop task
- - CPU 8 non-isolated
- - CPU 9 non-isolated shared with a CFS busy loop task
-
-  --------------------- %< ------------------------
- ~# pgrep ktimer | while read pid; do chrt -p -f 2 $pid; done # for RT kernel
- ~# sysctl kernel.sched_rt_runtime_us=-1
- ~# tuna  isolate -c 2
- ~# tuna  isolate -c 3
- ~# taskset -c 3 ./f &
- ~# taskset -c 9 ./f &
- ~# osnoise -P f:1 -c 2,3,8,9 -T 1 -d 10m -H 1
-                                          Operating System Noise
-duration:   0 00:10:00 | time is in us
-CPU Period       Runtime        Noise  % CPU Aval   Max Noise   Max Single          HW          NMI          IRQ      Softirq       Thread
-  2 #599       599000000          178    99.99997          18            2           0            0          270            0            0
-  3 #598       598054434     31351553    94.75774      104442       104442           0            0      2837523            0         1794
-  8 #599       599000001       567456    99.90526        3260         2375           2           89       620490            0        13539
-  9 #598       598021196     31742537    94.69207       71707        53357           0           90      3411023            0         1762
-   --------------------- >% ------------------------
-
-the system runs fine!
-	- no crashes (famous last words)
-	- FIFO property is kept
-	- per cpu interface because it is more flexible - and to detach this from
-	  the throttling concept.
-
-Global is broken, but it will > /dev/null.
-
-The selftest mentioned in the sched/core patches is here:
-	https://lore.kernel.org/all/20240313012451.1693807-8-joel@joelfernandes.org/
-
-Thanks people at google for testing/suggesting:
- - Suleiman Souhlal <suleiman@google.com>
- - Youssef Esmat <youssefesmat@google.com>
- - Joel Fernandes (Google) <joel@joelfernandes.org>
- - Vineeth Pillai <vineeth@bitbyteword.org>
-
-Changes from V5:
-  - Fixes DL server for core scheduling (patches 3 and 4)
-  (Joel/Vineeth/Suleiman)
-  - Add a function to attach the fair server bandwidth to the
-    new root domain when the rq changes root domain (Daniel)
-  - Postpone the replenishment timer of the server if the defer reservation
-    could consume runtime while waiting to boost (patch 2) (Daniel)
-  - Add the running state to defer mode avoid forcing the defer mechanism
-    if the server continues to be activated due to starvation (patch 2)
-    (Daniel)
-  - Consider idle time as time for the defer server to avoid penalty on RT
-    tasks (patch 2) (Daniel)
-  - Mark DL server as unthrottled before enqueue (patch 2)(Joel)
-  - Make start_dl_timer callers more robust (patch 2) (Joel)
-  - Do not restart the DL server on replenish from timer (patch 2)(Joel)
-  - Fix Reverse args to dl_time_before in replenish (patch 2) (Suleiman Souhlal)
-  - Removed the negative runtime optimization (patch 2)
-  - Start the dl server as disabled in patch 1, enabling it only after
-    removing the RT throttling, to avoid having two mechanism together
-    by default (patch 1) (Daniel).
-  - Added a check need resched after dl_server_start (patch 1) (Daniel)
-  - reset dl_server pointer at put_prev_task_balance (patch 1) (Joel)
-  - Do not include the already merged patches
-  - Rebased to 6.9-rc2
-Changes from V4:
-  - Enable the server when nr fair tasks is > 0 (peter)
-  - Consume runtime if the zerolax server is not boosted (peterz)
-  - Adjust interface to deal with admission control (peterz)
-  - Rebased to 6.6
-Changes from V3:
-  - Add the defer server (Daniel)
-  - Add an per rq interface (Daniel with peter's feedback)
-  - Add an option not defer the server
-  - Typos and 1-liner fixes (Valentin, Luca, Peter)
-  - Fair scheduler running on dl server do not account as RT task (Daniel)
-  - Changed the condition to enable the server (RT & fair tasks) (Daniel)
-Changes from v2:
-  - Refactor/rephrase/typos changes
-  - Defferable server using throttling
-  - The server starts when RT && Fair tasks are enqueued
-  - Interface with runtime/period/defer option
-Changes from v1:
-  - rebased on 6.4-rc1 tip/sched/core
-
-Daniel Bristot de Oliveira (2):
-  sched/deadline: Deferrable dl server
-  sched/fair: Fair server interface
-
-Joel Fernandes (Google) (2):
-  sched/core: Fix priority checking for DL server picks
-  sched/core: Fix picking of tasks for core scheduling with DL server
-
-Peter Zijlstra (2):
-  sched/fair: Add trivial fair server
-  sched/rt: Remove default bandwidth control
-
- include/linux/sched.h   |   6 +-
- kernel/sched/core.c     |  56 +++--
- kernel/sched/deadline.c | 452 ++++++++++++++++++++++++++++++++++------
- kernel/sched/debug.c    | 209 +++++++++++++++++++
- kernel/sched/fair.c     |  66 +++++-
- kernel/sched/idle.c     |   2 +
- kernel/sched/rt.c       | 242 ++++++++++-----------
- kernel/sched/sched.h    |  17 +-
- kernel/sched/topology.c |   8 +
- 9 files changed, 843 insertions(+), 215 deletions(-)
-
--- 
-2.44.0
-
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
-	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
-	(No client certificate requested)
-	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 1B995171E47
-	for <linux-kernel@vger.kernel.org>; Fri,  5 Apr 2024 17:28:28 +0000 (UTC)
-Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
-ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
-	t=1712338109; cv=none; b=JOJJ3LwX8YAZ09Ru5zohRkHxF617pplI4ENK6r4Hy+hwhtohi9PsgI8OsQEC57Zr7a9VsOd0sIXjfXx1Zj9rZOSKsYBvjREt4ao1A/lI1ka5wv9ngcmohrQ4VUuR1zPx6HH7apsz0dERQfimIqQY/LUjrF8qdegBihyKgXfgCq0=
-ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
-	s=arc-20240116; t=1712338109; c=relaxed/simple;
-	bh=duyVCafABsJQnwShlexpY7ydtdqahkofOOyxVGW5Et8=;
-	h=From:To:Cc:Subject:Date:Message-ID:In-Reply-To:References:
-	 MIME-Version; b=kiyHbcB87d4fncIt4+7KH6T6jfuwAfSFTTgTy+V1fKfem4Xs5QYt5cV/lL1A4qVXQ4Kv9VbMdNf+Jx3+6hp1k+8VEP15h434Mi/FOyydmaFl5csi/7oHU5mbG67kGLgmChCB1BwKMdOpEz+ZGIMUCB7j5XfN4ftWKXYRo6u1kkA=
-ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=SxV+qsna; arc=none smtp.client-ip=10.30.226.201
-Authentication-Results: smtp.subspace.kernel.org;
-	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="SxV+qsna"
-Received: by smtp.kernel.org (Postfix) with ESMTPSA id 4C8B5C43394;
-	Fri,  5 Apr 2024 17:28:24 +0000 (UTC)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
-	s=k20201202; t=1712338108;
-	bh=duyVCafABsJQnwShlexpY7ydtdqahkofOOyxVGW5Et8=;
-	h=From:To:Cc:Subject:Date:In-Reply-To:References:From;
-	b=SxV+qsnaG+yg/iHqGNaB1rO9GuLVIaoyN2cd0jkb3kr74sLkVgCo1E+vV44toUka8
-	 WbRVmW5oNzlg4ZuMcebVkd3dHVkj0ZH5KYtFjgQsE8NvqTEI3jr3AHaHqcRjl5XOtx
-	 yjGjNiLuNfINPuHaiddo0+N05/KYFE3sH1J3dqRfrbPq/fY+bKm7lf95OijqTxpIZA
-	 JRq3azKC+yxUcDR9sAOkXJOrBWSywCCvAUiOy1CoOjuHTL022wNr1c7bnKFQCmDC85
-	 hZm0qVgmZ4ayO0iRUs6bMcw94entA0HulYOfNJunzzBjGV3N/Ny3T+CvZFU2+gc2wc
-	 gOWOFJyTyOAMw==
-From: Daniel Bristot de Oliveira <bristot@kernel.org>
-To: Ingo Molnar <mingo@redhat.com>,
-	Peter Zijlstra <peterz@infradead.org>,
-	Juri Lelli <juri.lelli@redhat.com>,
-	Vincent Guittot <vincent.guittot@linaro.org>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>,
-	Steven Rostedt <rostedt@goodmis.org>,
-	Ben Segall <bsegall@google.com>,
-	Mel Gorman <mgorman@suse.de>,
-	Daniel Bristot de Oliveira <bristot@redhat.com>,
-	Valentin Schneider <vschneid@redhat.com>,
-	linux-kernel@vger.kernel.org,
-	Luca Abeni <luca.abeni@santannapisa.it>,
-	Tommaso Cucinotta <tommaso.cucinotta@santannapisa.it>,
-	Thomas Gleixner <tglx@linutronix.de>,
-	Joel Fernandes <joel@joelfernandes.org>,
-	Vineeth Pillai <vineeth@bitbyteword.org>,
-	Shuah Khan <skhan@linuxfoundation.org>,
-	bristot@kernel.org,
-	Phil Auld <pauld@redhat.com>,
-	Suleiman Souhlal <suleiman@google.com>,
-	Youssef Esmat <youssefesmat@google.com>
-Subject: [PATCH V6 1/6] sched/fair: Add trivial fair server
-Date: Fri,  5 Apr 2024 19:28:00 +0200
-Message-ID: <d1e02419599172f4045a4711b9ff78081f568bb8.1712337227.git.bristot@kernel.org>
-X-Mailer: git-send-email 2.44.0
-In-Reply-To: <cover.1712337227.git.bristot@kernel.org>
-References: <cover.1712337227.git.bristot@kernel.org>
-Precedence: bulk
-X-Mailing-List: linux-kernel@vger.kernel.org
-List-Id: <linux-kernel.vger.kernel.org>
-List-Subscribe: <mailto:linux-kernel+subscribe@vger.kernel.org>
-List-Unsubscribe: <mailto:linux-kernel+unsubscribe@vger.kernel.org>
-MIME-Version: 1.0
-Content-Transfer-Encoding: 8bit
-
+From d1e02419599172f4045a4711b9ff78081f568bb8 Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
+Date: Sat, 4 Nov 2023 11:59:22 +0100
+Subject: sched/fair: Add trivial fair server
 
 Use deadline servers to service fair tasks.
 
@@ -345,7 +19,7 @@ Signed-off-by: Daniel Bristot de Oliveira <bristot@kernel.org>
  4 files changed, 68 insertions(+), 8 deletions(-)
 
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 7019a40457a6..04e2270487b7 100644
+index 7019a40457a6d..04e2270487b7e 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -6007,6 +6007,14 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
@@ -401,10 +75,10 @@ index 7019a40457a6..04e2270487b7 100644
  #ifdef CONFIG_SCHED_CORE
  		rq->core = rq;
 diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
-index a04a436af8cc..db5dc5c09106 100644
+index a04a436af8cc4..db5dc5c09106b 100644
 --- a/kernel/sched/deadline.c
 +++ b/kernel/sched/deadline.c
-@@ -1382,6 +1382,13 @@ static void update_curr_dl_se(struct rq *rq, struct sched_dl_entity *dl_se, s64
+@@ -1382,6 +1382,13 @@ throttle:
  			resched_curr(rq);
  	}
  
@@ -451,7 +125,7 @@ index a04a436af8cc..db5dc5c09106 100644
  }
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 03be0d1330a6..304697a80e9e 100644
+index 03be0d1330a6b..304697a80e9ed 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -6722,6 +6722,9 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
@@ -501,7 +175,7 @@ index 03be0d1330a6..304697a80e9e 100644
   * Account for a descheduled task:
   */
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index d2242679239e..205e56929e15 100644
+index d2242679239ec..205e56929e15e 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -340,6 +340,8 @@ extern void dl_server_init(struct sched_dl_entity *dl_se, struct rq *rq,
@@ -523,73 +197,12 @@ index d2242679239e..205e56929e15 100644
  	/* list of leaf cfs_rq on this CPU: */
  	struct list_head	leaf_cfs_rq_list;
 -- 
-2.44.0
+cgit 1.2.3-korg
 
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
-	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
-	(No client certificate requested)
-	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 9C476171675
-	for <linux-kernel@vger.kernel.org>; Fri,  5 Apr 2024 17:28:33 +0000 (UTC)
-Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
-ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
-	t=1712338113; cv=none; b=r12Ra/yM05ELJVD37cDODsR9/dvZjw5RnkadFsC8z6fXZ9SlktNw/8LVKoy+/1u5q3m5rNB7Ptyfs8pHCStiTLrnJLznz7wxdGsp+tQ0Ujk+ISSTqfvg3fQRaL66xcfyl6x0q1Uxpe9uMhquNK5t4BPW5W3olO1+kaQJKcqKu3o=
-ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
-	s=arc-20240116; t=1712338113; c=relaxed/simple;
-	bh=amxxtWFGOE1JGozhcxEvRnk4Kms40eihsREXxOMDgd8=;
-	h=From:To:Cc:Subject:Date:Message-ID:In-Reply-To:References:
-	 MIME-Version; b=kWxairhVS7BgyZ3lJZyS16Ftj6qaua/UymVPyDFsfzcnzgY748S1lBij6HOmPZzzm6cpOwIrTWa9DcZCAC42VZnfSDPj+XjnBpfSjkZS+BBjKybkG5iw0eCACciSIEFIzIS4AZXbHwpgJC10PtyQLpEOqf5P8AtPb7xp9gJ7XjQ=
-ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=DPYETBzo; arc=none smtp.client-ip=10.30.226.201
-Authentication-Results: smtp.subspace.kernel.org;
-	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="DPYETBzo"
-Received: by smtp.kernel.org (Postfix) with ESMTPSA id 2533DC433A6;
-	Fri,  5 Apr 2024 17:28:28 +0000 (UTC)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
-	s=k20201202; t=1712338113;
-	bh=amxxtWFGOE1JGozhcxEvRnk4Kms40eihsREXxOMDgd8=;
-	h=From:To:Cc:Subject:Date:In-Reply-To:References:From;
-	b=DPYETBzo1BUsmVKL31ivlMSv12JsW8h7JFgAgNAXb1NgmdxSy5PWis91cKF1U2Itw
-	 D59Jwca9OlbwiiCyYxOwS1spA5IQsCLWhlM3xQVyDLcm4RUAv2FwqOJrD+L55uxeHF
-	 q/9XW1Xr/+hwrZJDdEWfPbfgp/A4wAVecCdlwHnoRLX6WaiZ3MecKszHGosCa4PE/3
-	 KH56Y235MtPkS0CecpDYFhQOzN1Gp5S+nA0L8uVpeqEJZCbv1GGRV03qyWQ7oDWiSV
-	 odD5N/qYrMaffrXQApobKLkPlh2yTcOf9uIvrEOFii+OBQUqDAE/3Mfnuluj21Hjmj
-	 tCeqcPQsoTUhw==
+From 7b9c206e914ef257a2534199f25938ffafa3e59e Mon Sep 17 00:00:00 2001
 From: Daniel Bristot de Oliveira <bristot@kernel.org>
-To: Ingo Molnar <mingo@redhat.com>,
-	Peter Zijlstra <peterz@infradead.org>,
-	Juri Lelli <juri.lelli@redhat.com>,
-	Vincent Guittot <vincent.guittot@linaro.org>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>,
-	Steven Rostedt <rostedt@goodmis.org>,
-	Ben Segall <bsegall@google.com>,
-	Mel Gorman <mgorman@suse.de>,
-	Daniel Bristot de Oliveira <bristot@redhat.com>,
-	Valentin Schneider <vschneid@redhat.com>,
-	linux-kernel@vger.kernel.org,
-	Luca Abeni <luca.abeni@santannapisa.it>,
-	Tommaso Cucinotta <tommaso.cucinotta@santannapisa.it>,
-	Thomas Gleixner <tglx@linutronix.de>,
-	Joel Fernandes <joel@joelfernandes.org>,
-	Vineeth Pillai <vineeth@bitbyteword.org>,
-	Shuah Khan <skhan@linuxfoundation.org>,
-	bristot@kernel.org,
-	Phil Auld <pauld@redhat.com>,
-	Suleiman Souhlal <suleiman@google.com>,
-	Youssef Esmat <youssefesmat@google.com>
-Subject: [PATCH V6 2/6] sched/deadline: Deferrable dl server
-Date: Fri,  5 Apr 2024 19:28:01 +0200
-Message-ID: <7b9c206e914ef257a2534199f25938ffafa3e59e.1712337227.git.bristot@kernel.org>
-X-Mailer: git-send-email 2.44.0
-In-Reply-To: <cover.1712337227.git.bristot@kernel.org>
-References: <cover.1712337227.git.bristot@kernel.org>
-Precedence: bulk
-X-Mailing-List: linux-kernel@vger.kernel.org
-List-Id: <linux-kernel.vger.kernel.org>
-List-Subscribe: <mailto:linux-kernel+subscribe@vger.kernel.org>
-List-Unsubscribe: <mailto:linux-kernel+unsubscribe@vger.kernel.org>
-MIME-Version: 1.0
-Content-Transfer-Encoding: 8bit
+Date: Tue, 2 Apr 2024 15:06:03 +0200
+Subject: sched/deadline: Deferrable dl server
 
 Among the motivations for the DL servers is the real-time throttling
 mechanism. This mechanism works by throttling the rt_rq after
@@ -626,14 +239,14 @@ the starvation).
 Signed-off-by: Daniel Bristot de Oliveira <bristot@kernel.org>
 ---
  include/linux/sched.h   |   3 +
- kernel/sched/deadline.c | 296 ++++++++++++++++++++++++++++++++++------
+ kernel/sched/deadline.c | 296 +++++++++++++++++++++++++++++++++++++++++-------
  kernel/sched/fair.c     |  24 +++-
  kernel/sched/idle.c     |   2 +
  kernel/sched/sched.h    |   4 +-
  5 files changed, 284 insertions(+), 45 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 3c2abbc587b4..4a405f0e64f8 100644
+index 3c2abbc587b49..4a405f0e64f81 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -643,6 +643,9 @@ struct sched_dl_entity {
@@ -647,7 +260,7 @@ index 3c2abbc587b4..4a405f0e64f8 100644
  	/*
  	 * Bandwidth enforcement timer. Each -deadline task has its
 diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
-index db5dc5c09106..6ea9c05711ce 100644
+index db5dc5c09106b..6ea9c05711ceb 100644
 --- a/kernel/sched/deadline.c
 +++ b/kernel/sched/deadline.c
 @@ -772,6 +772,15 @@ static inline void replenish_dl_new_period(struct sched_dl_entity *dl_se,
@@ -958,7 +571,7 @@ index db5dc5c09106..6ea9c05711ce 100644
  throttle:
  	if (dl_runtime_exceeded(dl_se) || dl_se->dl_yielded) {
  		dl_se->dl_throttled = 1;
-@@ -1415,9 +1570,47 @@ static void update_curr_dl_se(struct rq *rq, struct sched_dl_entity *dl_se, s64
+@@ -1415,9 +1570,47 @@ throttle:
  	}
  }
  
@@ -1061,7 +674,7 @@ index db5dc5c09106..6ea9c05711ce 100644
  }
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index 304697a80e9e..fdeb4a61575c 100644
+index 304697a80e9ed..fdeb4a61575c6 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
 @@ -1156,12 +1156,13 @@ s64 update_curr_common(struct rq *rq)
@@ -1116,7 +729,7 @@ index 304697a80e9e..fdeb4a61575c 100644
  	/*
  	 * If in_iowait is set, the code below may not trigger any cpufreq
 diff --git a/kernel/sched/idle.c b/kernel/sched/idle.c
-index 6135fbe83d68..5f8806bc6924 100644
+index 6135fbe83d68c..5f8806bc6924d 100644
 --- a/kernel/sched/idle.c
 +++ b/kernel/sched/idle.c
 @@ -458,12 +458,14 @@ static void wakeup_preempt_idle(struct rq *rq, struct task_struct *p, int flags)
@@ -1135,7 +748,7 @@ index 6135fbe83d68..5f8806bc6924 100644
  
  #ifdef CONFIG_SMP
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index 205e56929e15..e70e17be83c3 100644
+index 205e56929e15e..e70e17be83c3f 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -312,7 +312,7 @@ extern bool __checkparam_dl(const struct sched_attr *attr);
@@ -1157,73 +770,12 @@ index 205e56929e15..e70e17be83c3 100644
  
  #ifdef CONFIG_CGROUP_SCHED
 -- 
-2.44.0
+cgit 1.2.3-korg
 
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
-	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
-	(No client certificate requested)
-	by smtp.subspace.kernel.org (Postfix) with ESMTPS id D9D68172761
-	for <linux-kernel@vger.kernel.org>; Fri,  5 Apr 2024 17:28:38 +0000 (UTC)
-Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
-ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
-	t=1712338118; cv=none; b=rhVXlqw0Z+Let5EMo027jiGdnClUUkb6aLcApgAy5JWICgFJBfKfOsC+vChdQWLaIWN5s8o9E1UI6O5eIsI4VRZ2xhSNZLXsfeRRwDZwCBJ7L2UtLXLXSC6CDXXBTBdOuSrOXk4K/CRcSwPxhdiKEWKt+AkF6zkbOmiYqRAjP88=
-ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
-	s=arc-20240116; t=1712338118; c=relaxed/simple;
-	bh=38MnuOR+fbynRkefesi1jVKTa5oG4c9AUn/MGCJwoM0=;
-	h=From:To:Cc:Subject:Date:Message-ID:In-Reply-To:References:
-	 MIME-Version; b=h8+Ac+qSlRoUJ6QO5abtxAMgsgaVV1wgllf3COKotwdHdu3tivNAT7P7JnkSAQUFTY0RyZYr+6ZVN0iVURiyKZXORPXSdWPgMSWwEOK47ocTthkeevHm9bfbwWubvm6BOMgCc25E6THP8k+11TRqbRjlaqSqGmckUD65kzakA4w=
-ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=iixnUawi; arc=none smtp.client-ip=10.30.226.201
-Authentication-Results: smtp.subspace.kernel.org;
-	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="iixnUawi"
-Received: by smtp.kernel.org (Postfix) with ESMTPSA id F141CC433C7;
-	Fri,  5 Apr 2024 17:28:33 +0000 (UTC)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
-	s=k20201202; t=1712338118;
-	bh=38MnuOR+fbynRkefesi1jVKTa5oG4c9AUn/MGCJwoM0=;
-	h=From:To:Cc:Subject:Date:In-Reply-To:References:From;
-	b=iixnUawi+l4UuT2ebEAecJ9t1WIiUhUWPCRt9du+ckkn7G0HQlW743d6bZ7lpchAK
-	 5cv1VI7D5aea9oka2+rN7B3rlpR8/ce/lDzZcFoeHK3xdGM/YM3MfWdY2rZKXYZ6wx
-	 ttRjswqCaRCH8BOEEVCKfGEXVEVOWspE+opJjsvI9iqRGqy5KuF2C5lcqqNmKaV+Tf
-	 qJ81DKgiLLdF7lUbLD+mYYZke23EN18jBR1N2AVENDRs0Pl5LyVqRAARGTgDRGOGYz
-	 UfgLssrhcup/YUgztCctWDN7Uls+1Idkiwd5CY/KWNv2/QFlVhz8o4SZzjvEByiqCN
-	 8psRrlwpEj78A==
+From 1abba9e7f47ad4a5dfd8b2dfb59aa607983cdce4 Mon Sep 17 00:00:00 2001
 From: Daniel Bristot de Oliveira <bristot@kernel.org>
-To: Ingo Molnar <mingo@redhat.com>,
-	Peter Zijlstra <peterz@infradead.org>,
-	Juri Lelli <juri.lelli@redhat.com>,
-	Vincent Guittot <vincent.guittot@linaro.org>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>,
-	Steven Rostedt <rostedt@goodmis.org>,
-	Ben Segall <bsegall@google.com>,
-	Mel Gorman <mgorman@suse.de>,
-	Daniel Bristot de Oliveira <bristot@redhat.com>,
-	Valentin Schneider <vschneid@redhat.com>,
-	linux-kernel@vger.kernel.org,
-	Luca Abeni <luca.abeni@santannapisa.it>,
-	Tommaso Cucinotta <tommaso.cucinotta@santannapisa.it>,
-	Thomas Gleixner <tglx@linutronix.de>,
-	Joel Fernandes <joel@joelfernandes.org>,
-	Vineeth Pillai <vineeth@bitbyteword.org>,
-	Shuah Khan <skhan@linuxfoundation.org>,
-	bristot@kernel.org,
-	Phil Auld <pauld@redhat.com>,
-	Suleiman Souhlal <suleiman@google.com>,
-	Youssef Esmat <youssefesmat@google.com>
-Subject: [PATCH V6 3/6] sched/fair: Fair server interface
-Date: Fri,  5 Apr 2024 19:28:02 +0200
-Message-ID: <1abba9e7f47ad4a5dfd8b2dfb59aa607983cdce4.1712337227.git.bristot@kernel.org>
-X-Mailer: git-send-email 2.44.0
-In-Reply-To: <cover.1712337227.git.bristot@kernel.org>
-References: <cover.1712337227.git.bristot@kernel.org>
-Precedence: bulk
-X-Mailing-List: linux-kernel@vger.kernel.org
-List-Id: <linux-kernel.vger.kernel.org>
-List-Subscribe: <mailto:linux-kernel+subscribe@vger.kernel.org>
-List-Unsubscribe: <mailto:linux-kernel+unsubscribe@vger.kernel.org>
-MIME-Version: 1.0
-Content-Transfer-Encoding: 8bit
+Date: Tue, 2 Apr 2024 16:16:09 +0200
+Subject: sched/fair: Fair server interface
 
 Add an interface for fair server setup on debugfs.
 
@@ -1240,14 +792,14 @@ The interface also add the server to the dl bandwidth accounting.
 
 Signed-off-by: Daniel Bristot de Oliveira <bristot@kernel.org>
 ---
- kernel/sched/deadline.c | 111 ++++++++++++++++++----
- kernel/sched/debug.c    | 206 ++++++++++++++++++++++++++++++++++++++++
+ kernel/sched/deadline.c | 111 ++++++++++++++++++++++----
+ kernel/sched/debug.c    | 206 ++++++++++++++++++++++++++++++++++++++++++++++++
  kernel/sched/sched.h    |   3 +
  kernel/sched/topology.c |   8 ++
  4 files changed, 311 insertions(+), 17 deletions(-)
 
 diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
-index 6ea9c05711ce..dd38370aa276 100644
+index 6ea9c05711ceb..dd38370aa2760 100644
 --- a/kernel/sched/deadline.c
 +++ b/kernel/sched/deadline.c
 @@ -321,19 +321,12 @@ void sub_running_bw(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
@@ -1405,7 +957,7 @@ index 6ea9c05711ce..dd38370aa276 100644
   * Update the current task's runtime statistics (provided it is still
   * a -deadline task and has not been removed from the dl_rq).
 diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
-index 8d5d98a5834d..5da3297270cd 100644
+index 8d5d98a5834df..5da3297270cd2 100644
 --- a/kernel/sched/debug.c
 +++ b/kernel/sched/debug.c
 @@ -333,8 +333,212 @@ static const struct file_operations sched_debug_fops = {
@@ -1631,7 +1183,7 @@ index 8d5d98a5834d..5da3297270cd 100644
  }
  late_initcall(sched_init_debug);
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index e70e17be83c3..a80a236da57c 100644
+index e70e17be83c3f..a80a236da57cd 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -343,6 +343,9 @@ extern void dl_server_init(struct sched_dl_entity *dl_se, struct rq *rq,
@@ -1645,7 +1197,7 @@ index e70e17be83c3..a80a236da57c 100644
  #ifdef CONFIG_CGROUP_SCHED
  
 diff --git a/kernel/sched/topology.c b/kernel/sched/topology.c
-index 99ea5986038c..ecb089c4967f 100644
+index 99ea5986038ce..ecb089c4967f4 100644
 --- a/kernel/sched/topology.c
 +++ b/kernel/sched/topology.c
 @@ -517,6 +517,14 @@ void rq_attach_root(struct rq *rq, struct root_domain *rd)
@@ -1664,75 +1216,12 @@ index 99ea5986038c..ecb089c4967f 100644
  
  	if (old_rd)
 -- 
-2.44.0
+cgit 1.2.3-korg
 
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
-	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
-	(No client certificate requested)
-	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 5EC571CFBC
-	for <linux-kernel@vger.kernel.org>; Fri,  5 Apr 2024 17:33:08 +0000 (UTC)
-Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
-ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
-	t=1712338389; cv=none; b=hgHVdmJFPrRJE7jg/K2NPEknXU5wmzbQoXVbwiBpilOmvAQHA33O/sXJ9YXCidlHYqDTL52Tukwvy96waEpZOncxs/ZjSpka0QEFA0DGyFaTsswUJaLlcfdGRIXD2LfmTsM+IHa5qNw9zwxzAwvhemWpsLUjYo1WtilrNzwIgso=
-ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
-	s=arc-20240116; t=1712338389; c=relaxed/simple;
-	bh=Sw94HTzOtmMY+TFVC6IZuLqXE+LH2LZl0+TfstCUCW4=;
-	h=From:To:Cc:Subject:Date:Message-ID:In-Reply-To:References:
-	 MIME-Version; b=TJr/Q9GgClrxxf6f03EsCeLu5Poq/LoVDqghzUEB2fWBhUIaV+BWWc8a4ScrtuU8B3DjJueZiWcv7MkkP6lMWaOrgQug0cO1TTVVs1YSzyFAyLDB3eXfoyRO4PWS8yeVXq8UKxOlUZ/hO1iR8Q/VMu3GHBuFTeHV3Rh2GA+Z/vE=
-ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=hMUYFlk5; arc=none smtp.client-ip=10.30.226.201
-Authentication-Results: smtp.subspace.kernel.org;
-	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="hMUYFlk5"
-Received: by smtp.kernel.org (Postfix) with ESMTPSA id 98008C433C7;
-	Fri,  5 Apr 2024 17:33:04 +0000 (UTC)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
-	s=k20201202; t=1712338388;
-	bh=Sw94HTzOtmMY+TFVC6IZuLqXE+LH2LZl0+TfstCUCW4=;
-	h=From:To:Cc:Subject:Date:In-Reply-To:References:From;
-	b=hMUYFlk5OwSfGVgl7biDNqdtdgTG+oKBSqTqsjTiqPfI567nkrVa8hblslsgHHMyh
-	 xGYe85tCN4zJEwwOTxnc1FinHJy7LtNecOhJ3i6FgtfH4+G/hYdl5e+QuZGpTZ3wbx
-	 dO0AtNVG7SC6C8GO4M7+kRIza6ihxOI9CI+CYiiKkTE/0L0aO0CCO0pv8rJgXdUrxA
-	 Nkz8eW7dmo+7rPclOgzyKoU00WW7cZ7z5zuTpyb2jd0qzciVcAbi1z95A90uRhEoD1
-	 eJHDrp6ou9VS7YaFVbW5Vt/H2+1proeqJk3zhI+aEd3yb32Y+qgBO4HXVGCvdVQTBE
-	 A6oQq9sMXKQrw==
-From: Daniel Bristot de Oliveira <bristot@kernel.org>
-To: Ingo Molnar <mingo@redhat.com>,
-	Peter Zijlstra <peterz@infradead.org>,
-	Juri Lelli <juri.lelli@redhat.com>,
-	Vincent Guittot <vincent.guittot@linaro.org>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>,
-	Steven Rostedt <rostedt@goodmis.org>,
-	Ben Segall <bsegall@google.com>,
-	Mel Gorman <mgorman@suse.de>,
-	Daniel Bristot de Oliveira <bristot@redhat.com>,
-	Valentin Schneider <vschneid@redhat.com>,
-	linux-kernel@vger.kernel.org,
-	Luca Abeni <luca.abeni@santannapisa.it>,
-	Tommaso Cucinotta <tommaso.cucinotta@santannapisa.it>,
-	Thomas Gleixner <tglx@linutronix.de>,
-	Joel Fernandes <joel@joelfernandes.org>,
-	Vineeth Pillai <vineeth@bitbyteword.org>,
-	Shuah Khan <skhan@linuxfoundation.org>,
-	bristot@kernel.org,
-	Phil Auld <pauld@redhat.com>,
-	Suleiman Souhlal <suleiman@google.com>,
-	Youssef Esmat <youssefesmat@google.com>
-Subject: [PATCH V6 4/6] sched/core: Fix priority checking for DL server picks
-Date: Fri,  5 Apr 2024 19:32:52 +0200
-Message-ID: <5c199284e572a65e71f445be3c26d2711834d910.1712337227.git.bristot@kernel.org>
-X-Mailer: git-send-email 2.44.0
-In-Reply-To: <cover.1712337227.git.bristot@kernel.org>
-References: <cover.1712337227.git.bristot@kernel.org>
-Precedence: bulk
-X-Mailing-List: linux-kernel@vger.kernel.org
-List-Id: <linux-kernel.vger.kernel.org>
-List-Subscribe: <mailto:linux-kernel+subscribe@vger.kernel.org>
-List-Unsubscribe: <mailto:linux-kernel+unsubscribe@vger.kernel.org>
-MIME-Version: 1.0
-Content-Transfer-Encoding: 8bit
-
+From 5c199284e572a65e71f445be3c26d2711834d910 Mon Sep 17 00:00:00 2001
 From: "Joel Fernandes (Google)" <joel@joelfernandes.org>
+Date: Tue, 12 Mar 2024 21:24:39 -0400
+Subject: sched/core: Fix priority checking for DL server picks
 
 In core scheduling, a DL server pick (which is CFS task) should be
 given higher priority than tasks in other classes.
@@ -1753,7 +1242,7 @@ Signed-off-by: Daniel Bristot de Oliveira <bristot@kernel.org>
  1 file changed, 21 insertions(+), 2 deletions(-)
 
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 04e2270487b7..4881e797ae07 100644
+index 04e2270487b7e..4881e797ae07f 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -162,6 +162,9 @@ static inline int __task_prio(const struct task_struct *p)
@@ -1794,75 +1283,12 @@ index 04e2270487b7..4881e797ae07 100644
  	if (pa == MAX_RT_PRIO + MAX_NICE)	/* fair */
  		return cfs_prio_less(a, b, in_fi);
 -- 
-2.44.0
+cgit 1.2.3-korg
 
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
-	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
-	(No client certificate requested)
-	by smtp.subspace.kernel.org (Postfix) with ESMTPS id D953F1CFBC
-	for <linux-kernel@vger.kernel.org>; Fri,  5 Apr 2024 17:33:50 +0000 (UTC)
-Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
-ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
-	t=1712338430; cv=none; b=X4O0S5oTMfxLDU2IuoHRfZF+UfTZoMbajTOa8Ex9MLDqh3A0w9iidY5ZvZiEl5AhDiJ0U0ctr8N/zxICMMlt4G+0Ne8q9oilV+dlglclLvPF2xavY3vE+ALvhldSbXeK10UZqk4BCWDJktq5f5FZ4LQqW67Jdaprfpfr5788OPM=
-ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
-	s=arc-20240116; t=1712338430; c=relaxed/simple;
-	bh=1BpkzgEXIu2Ef0PumiErjzWEX1nn+L3uV3QP5SZbExI=;
-	h=From:To:Cc:Subject:Date:Message-ID:In-Reply-To:References:
-	 MIME-Version; b=bWp3uXSfH+NA5/8XE6IBv9KJdSZMCjfFllkJy6thiIti1WIl/2rf1finefhDgdkDuj+B6IfBHegllGYfevk+MvsF8vp666OeglZ2u/X2DOIuYbtjyeLvKmxKm6C0UtJ+hb3yraNxs4g8woXzW3Eg5MVqLfMwcNGE9Zk36qMSVAQ=
-ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=f1Hy0+Hr; arc=none smtp.client-ip=10.30.226.201
-Authentication-Results: smtp.subspace.kernel.org;
-	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="f1Hy0+Hr"
-Received: by smtp.kernel.org (Postfix) with ESMTPSA id 45423C433F1;
-	Fri,  5 Apr 2024 17:33:46 +0000 (UTC)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
-	s=k20201202; t=1712338430;
-	bh=1BpkzgEXIu2Ef0PumiErjzWEX1nn+L3uV3QP5SZbExI=;
-	h=From:To:Cc:Subject:Date:In-Reply-To:References:From;
-	b=f1Hy0+Hr5YzJGuPpDrwJQO3y3Kj/6hfUCuAjrYQro2f/8g4g29XIlGUqGP3RUtRX2
-	 5gdAOtxBOQ6qf1rD0VvMbT+glG4AAlJzuMx76y+50DqbikknMefTKrPRgJTkvGUzWq
-	 cF5HUoqDr0SIJJjmunlFIUrg7TkTtDs8PGJRzqduhnvLh2S8JWg9yY8SbkNc70md6m
-	 xIqm2kIfviYOVdBtOfcUV5z1swJdDzpsHB3HMeDX7PimbSDh4RqtPkLGIirhPM5AUa
-	 AHsZ4aaKiFhWCFDflnc2DZLfWYq56cXJr6FUOTHnYtooKsi9Vri/JRX862Cnd7tyRT
-	 LXWueo0sM+uZQ==
-From: Daniel Bristot de Oliveira <bristot@kernel.org>
-To: Ingo Molnar <mingo@redhat.com>,
-	Peter Zijlstra <peterz@infradead.org>,
-	Juri Lelli <juri.lelli@redhat.com>,
-	Vincent Guittot <vincent.guittot@linaro.org>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>,
-	Steven Rostedt <rostedt@goodmis.org>,
-	Ben Segall <bsegall@google.com>,
-	Mel Gorman <mgorman@suse.de>,
-	Daniel Bristot de Oliveira <bristot@redhat.com>,
-	Valentin Schneider <vschneid@redhat.com>,
-	linux-kernel@vger.kernel.org,
-	Luca Abeni <luca.abeni@santannapisa.it>,
-	Tommaso Cucinotta <tommaso.cucinotta@santannapisa.it>,
-	Thomas Gleixner <tglx@linutronix.de>,
-	Joel Fernandes <joel@joelfernandes.org>,
-	Vineeth Pillai <vineeth@bitbyteword.org>,
-	Shuah Khan <skhan@linuxfoundation.org>,
-	bristot@kernel.org,
-	Phil Auld <pauld@redhat.com>,
-	Suleiman Souhlal <suleiman@google.com>,
-	Youssef Esmat <youssefesmat@google.com>
-Subject: [PATCH V6 5/6] sched/core: Fix picking of tasks for core scheduling with DL server
-Date: Fri,  5 Apr 2024 19:33:39 +0200
-Message-ID: <527a56dd5190a88da9135992d37285caa15024b3.1712337227.git.bristot@kernel.org>
-X-Mailer: git-send-email 2.44.0
-In-Reply-To: <cover.1712337227.git.bristot@kernel.org>
-References: <cover.1712337227.git.bristot@kernel.org>
-Precedence: bulk
-X-Mailing-List: linux-kernel@vger.kernel.org
-List-Id: <linux-kernel.vger.kernel.org>
-List-Subscribe: <mailto:linux-kernel+subscribe@vger.kernel.org>
-List-Unsubscribe: <mailto:linux-kernel+unsubscribe@vger.kernel.org>
-MIME-Version: 1.0
-Content-Transfer-Encoding: 8bit
-
+From 527a56dd5190a88da9135992d37285caa15024b3 Mon Sep 17 00:00:00 2001
 From: "Joel Fernandes (Google)" <joel@joelfernandes.org>
+Date: Tue, 2 Apr 2024 16:34:26 +0200
+Subject: sched/core: Fix picking of tasks for core scheduling with DL server
 
 * Use simple CFS pick_task for DL pick_task
 
@@ -1895,7 +1321,7 @@ Signed-off-by: Daniel Bristot de Oliveira <bristot@kernel.org>
  4 files changed, 47 insertions(+), 9 deletions(-)
 
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 4a405f0e64f8..b0a5983cf3d1 100644
+index 4a405f0e64f81..b0a5983cf3d15 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
 @@ -673,7 +673,8 @@ struct sched_dl_entity {
@@ -1909,7 +1335,7 @@ index 4a405f0e64f8..b0a5983cf3d1 100644
  #ifdef CONFIG_RT_MUTEXES
  	/*
 diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
-index dd38370aa276..45fde2fd3a1b 100644
+index dd38370aa2760..45fde2fd3a1b4 100644
 --- a/kernel/sched/deadline.c
 +++ b/kernel/sched/deadline.c
 @@ -1665,11 +1665,13 @@ void dl_server_stop(struct sched_dl_entity *dl_se)
@@ -1942,7 +1368,7 @@ index dd38370aa276..45fde2fd3a1b 100644
  {
  	struct sched_dl_entity *dl_se;
  	struct dl_rq *dl_rq = &rq->dl;
-@@ -2412,7 +2419,10 @@ static struct task_struct *pick_task_dl(struct rq *rq)
+@@ -2412,7 +2419,10 @@ again:
  	WARN_ON_ONCE(!dl_se);
  
  	if (dl_server(dl_se)) {
@@ -1954,7 +1380,7 @@ index dd38370aa276..45fde2fd3a1b 100644
  		if (!p) {
  			WARN_ON_ONCE(1);
  			dl_se->dl_yielded = 1;
-@@ -2427,11 +2437,18 @@ static struct task_struct *pick_task_dl(struct rq *rq)
+@@ -2427,11 +2437,18 @@ again:
  	return p;
  }
  
@@ -1975,10 +1401,10 @@ index dd38370aa276..45fde2fd3a1b 100644
  		return p;
  
 diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
-index fdeb4a61575c..b86bb3f23fb2 100644
+index fdeb4a61575c6..b86bb3f23fb26 100644
 --- a/kernel/sched/fair.c
 +++ b/kernel/sched/fair.c
-@@ -8406,6 +8406,14 @@ static struct task_struct *pick_task_fair(struct rq *rq)
+@@ -8406,6 +8406,14 @@ again:
  		cfs_rq = group_cfs_rq(se);
  	} while (cfs_rq);
  
@@ -2023,7 +1449,7 @@ index fdeb4a61575c..b86bb3f23fb2 100644
  
  /*
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index a80a236da57c..b200f09038db 100644
+index a80a236da57cd..b200f09038db4 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -338,7 +338,8 @@ extern void dl_server_start(struct sched_dl_entity *dl_se);
@@ -2037,75 +1463,12 @@ index a80a236da57c..b200f09038db 100644
  extern void dl_server_update_idle_time(struct rq *rq,
  		    struct task_struct *p);
 -- 
-2.44.0
+cgit 1.2.3-korg
 
-
-From mboxrd@z Thu Jan  1 00:00:00 1970
-Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
-	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
-	(No client certificate requested)
-	by smtp.subspace.kernel.org (Postfix) with ESMTPS id F150A171667
-	for <linux-kernel@vger.kernel.org>; Fri,  5 Apr 2024 17:34:26 +0000 (UTC)
-Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
-ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
-	t=1712338467; cv=none; b=NgGT8mkEczy+d1w1kO7E91fO6PoHC8UST+dsgSawEhdv2gJ2bPfkHt+WH87n4Vf9XaQhTAOygHCR5mUgmHpVhOac2hPVDmNKSlMBlFbvHLbXuJQLNcJ6XLlSWMUzgNg/YHg40s9CdXEr3jDtZ1jAbnIW8Qkdkbmw6ZBRoRQeA8s=
-ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
-	s=arc-20240116; t=1712338467; c=relaxed/simple;
-	bh=Hr9rAhQc8DmpXzIof5bunwZXhatCI7W4URuyANCeLqc=;
-	h=From:To:Cc:Subject:Date:Message-ID:In-Reply-To:References:
-	 MIME-Version; b=ZeCg8EXqNJG8RDLYZWqqW2poiTc9a/bVSHuQDcxMSttrA7RofWnEEGoUncJS2mbIWXEW0ZD2QE2kc+YF7aDigJN31YZKb45G6uG2lpyOhWvP/bn4CHZQqHuIFYHSWIA8Kvlwt+lV1FIB1+8OX8enUkQsYBMZpHK/Z694h3Wd1G0=
-ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=E7AP/Yl9; arc=none smtp.client-ip=10.30.226.201
-Authentication-Results: smtp.subspace.kernel.org;
-	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="E7AP/Yl9"
-Received: by smtp.kernel.org (Postfix) with ESMTPSA id 46E81C433F1;
-	Fri,  5 Apr 2024 17:34:22 +0000 (UTC)
-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
-	s=k20201202; t=1712338466;
-	bh=Hr9rAhQc8DmpXzIof5bunwZXhatCI7W4URuyANCeLqc=;
-	h=From:To:Cc:Subject:Date:In-Reply-To:References:From;
-	b=E7AP/Yl9Z+1TJ4Iz8dQdE10FbC+QR/XcDYiORZQv7wyaYXLQ4bZ/+w++elOEMj2Ms
-	 /BXJDa4rynGb2IBocYi0HL45yhWgul1ZT/HDbNCo3CZEGgjXh7Xp+9rbuh1wkI0F+v
-	 aKKw1vok9cCVpoVYbU9RreSjMtwTrNPtQqWaG13zhSHi/FXTYyWJoVhcpjj4ZZu1AJ
-	 LNGuvu4J5GWk0WvWIb76ufY53VrTJuRY+kJ++K50BjFkGxgj7KronGlZFh+u/qOFWk
-	 djV04WSF6v+9pfXRjqwaSz9CV9hpjwYdgGqvRp0zXPp+TJ7Po/6j1WrI86cvzprMbA
-	 x0v0jlpaq2OXw==
-From: Daniel Bristot de Oliveira <bristot@kernel.org>
-To: Ingo Molnar <mingo@redhat.com>,
-	Peter Zijlstra <peterz@infradead.org>,
-	Juri Lelli <juri.lelli@redhat.com>,
-	Vincent Guittot <vincent.guittot@linaro.org>
-Cc: Dietmar Eggemann <dietmar.eggemann@arm.com>,
-	Steven Rostedt <rostedt@goodmis.org>,
-	Ben Segall <bsegall@google.com>,
-	Mel Gorman <mgorman@suse.de>,
-	Daniel Bristot de Oliveira <bristot@redhat.com>,
-	Valentin Schneider <vschneid@redhat.com>,
-	linux-kernel@vger.kernel.org,
-	Luca Abeni <luca.abeni@santannapisa.it>,
-	Tommaso Cucinotta <tommaso.cucinotta@santannapisa.it>,
-	Thomas Gleixner <tglx@linutronix.de>,
-	Joel Fernandes <joel@joelfernandes.org>,
-	Vineeth Pillai <vineeth@bitbyteword.org>,
-	Shuah Khan <skhan@linuxfoundation.org>,
-	bristot@kernel.org,
-	Phil Auld <pauld@redhat.com>,
-	Suleiman Souhlal <suleiman@google.com>,
-	Youssef Esmat <youssefesmat@google.com>
-Subject: [PATCH V6 6/6] sched/rt: Remove default bandwidth control
-Date: Fri,  5 Apr 2024 19:33:57 +0200
-Message-ID: <03100a344f14806e2e965fd79319b2bd8615601b.1712337227.git.bristot@kernel.org>
-X-Mailer: git-send-email 2.44.0
-In-Reply-To: <cover.1712337227.git.bristot@kernel.org>
-References: <cover.1712337227.git.bristot@kernel.org>
-Precedence: bulk
-X-Mailing-List: linux-kernel@vger.kernel.org
-List-Id: <linux-kernel.vger.kernel.org>
-List-Subscribe: <mailto:linux-kernel+subscribe@vger.kernel.org>
-List-Unsubscribe: <mailto:linux-kernel+unsubscribe@vger.kernel.org>
-MIME-Version: 1.0
-Content-Transfer-Encoding: 8bit
-
+From 03100a344f14806e2e965fd79319b2bd8615601b Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
+Date: Tue, 2 Apr 2024 11:08:49 +0200
+Subject: sched/rt: Remove default bandwidth control
 
 Now that fair_server exists, we no longer need RT bandwidth control
 unless RT_GROUP_SCHED.
@@ -2118,12 +1481,12 @@ Signed-off-by: Daniel Bristot de Oliveira <bristot@kernel.org>
  kernel/sched/core.c     |   9 +-
  kernel/sched/deadline.c |   5 +-
  kernel/sched/debug.c    |   3 +
- kernel/sched/rt.c       | 242 ++++++++++++++++++----------------------
+ kernel/sched/rt.c       | 242 +++++++++++++++++++++---------------------------
  kernel/sched/sched.h    |   3 +-
  5 files changed, 120 insertions(+), 142 deletions(-)
 
 diff --git a/kernel/sched/core.c b/kernel/sched/core.c
-index 4881e797ae07..d70bfc7e3e7b 100644
+index 4881e797ae07f..d70bfc7e3e7b9 100644
 --- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
 @@ -9988,8 +9988,6 @@ void __init sched_init(void)
@@ -2151,10 +1514,10 @@ index 4881e797ae07..d70bfc7e3e7b 100644
  #endif
  #ifdef CONFIG_SMP
 diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
-index 45fde2fd3a1b..f0a7f0e43ff0 100644
+index 45fde2fd3a1b4..f0a7f0e43ff04 100644
 --- a/kernel/sched/deadline.c
 +++ b/kernel/sched/deadline.c
-@@ -1554,6 +1554,7 @@ static void update_curr_dl_se(struct rq *rq, struct sched_dl_entity *dl_se, s64
+@@ -1554,6 +1554,7 @@ throttle:
  	if (dl_se == &rq->fair_server)
  		return;
  
@@ -2162,7 +1525,7 @@ index 45fde2fd3a1b..f0a7f0e43ff0 100644
  	/*
  	 * Because -- for now -- we share the rt bandwidth, we need to
  	 * account our runtime there too, otherwise actual rt tasks
-@@ -1578,6 +1579,7 @@ static void update_curr_dl_se(struct rq *rq, struct sched_dl_entity *dl_se, s64
+@@ -1578,6 +1579,7 @@ throttle:
  			rt_rq->rt_time += delta_exec;
  		raw_spin_unlock(&rt_rq->rt_runtime_lock);
  	}
@@ -2181,7 +1544,7 @@ index 45fde2fd3a1b..f0a7f0e43ff0 100644
  
  		dl_server_apply_params(dl_se, runtime, period, 1);
 diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
-index 5da3297270cd..2e1f0ecdde38 100644
+index 5da3297270cd2..2e1f0ecdde38b 100644
 --- a/kernel/sched/debug.c
 +++ b/kernel/sched/debug.c
 @@ -935,9 +935,12 @@ void print_rt_rq(struct seq_file *m, int cpu, struct rt_rq *rt_rq)
@@ -2198,7 +1561,7 @@ index 5da3297270cd..2e1f0ecdde38 100644
  #undef PN
  #undef PU
 diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
-index 3261b067b67e..d3065fe35c61 100644
+index 3261b067b67e2..d3065fe35c61f 100644
 --- a/kernel/sched/rt.c
 +++ b/kernel/sched/rt.c
 @@ -8,10 +8,6 @@ int sched_rr_timeslice = RR_TIMESLICE;
@@ -2556,7 +1919,7 @@ index 3261b067b67e..d3065fe35c61 100644
  
  static int sched_rt_handler(struct ctl_table *table, int write, void *buffer,
 diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
-index b200f09038db..fb8826cf80a9 100644
+index b200f09038db4..fb8826cf80a99 100644
 --- a/kernel/sched/sched.h
 +++ b/kernel/sched/sched.h
 @@ -713,13 +713,13 @@ struct rt_rq {
@@ -2583,7 +1946,7 @@ index b200f09038db..fb8826cf80a9 100644
  extern bool sched_rt_bandwidth_account(struct rt_rq *rt_rq);
  
 -- 
-2.44.0
+cgit 1.2.3-korg
 
 Subject: [PATCH] sched/fair: fix dlserver duplicate start and stop
 Date: Fri, 12 Apr 2024 15:23:04 -0400	[thread overview]
