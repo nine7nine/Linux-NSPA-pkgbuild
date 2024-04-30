@@ -18,7 +18,7 @@ index 18f7d5e89e06b7..d4d183b5315b7b 100644
 +++ b/kernel/sched/fair.c
 @@ -6830,33 +6830,45 @@ enqueue_throttle:
  static void set_next_buddy(struct sched_entity *se);
- 
+
  /*
 - * The dequeue_task method is called before nr_running is
 - * decreased. We remove the task from the rbtree and
@@ -43,7 +43,7 @@ index 18f7d5e89e06b7..d4d183b5315b7b 100644
 +	struct task_struct *p = NULL;
 +	struct cfs_rq *cfs_rq;
 +	int idle_h_nr_running;
- 
+
 -	util_est_dequeue(&rq->cfs, p);
 +	if (entity_is_task(se)) {
 +		p = task_of(se);
@@ -51,71 +51,71 @@ index 18f7d5e89e06b7..d4d183b5315b7b 100644
 +	} else {
 +		idle_h_nr_running = cfs_rq_is_idle(group_cfs_rq(se));
 +	}
- 
+
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
  		dequeue_entity(cfs_rq, se, flags);
- 
+
 -		cfs_rq->h_nr_running--;
 -		cfs_rq->idle_h_nr_running -= idle_h_nr_running;
 +		/* h_nr_running is the hierachical count of tasks */
 +		if (p) {
 +			cfs_rq->h_nr_running--;
 +			cfs_rq->idle_h_nr_running -= idle_h_nr_running;
- 
+
 -		if (cfs_rq_is_idle(cfs_rq))
 -			idle_h_nr_running = 1;
 +			if (cfs_rq_is_idle(cfs_rq))
 +				idle_h_nr_running = 1;
 +		}
- 
+
  		/* end evaluation on encountering a throttled cfs_rq */
  		if (cfs_rq_throttled(cfs_rq))
 -			goto dequeue_throttle;
 +			return 0;
- 
+
  		/* Don't dequeue parent if it has other entities besides us */
  		if (cfs_rq->load.weight) {
 @@ -6929,37 +6941,52 @@ static bool dequeue_task_fair(struct rq
  	for_each_sched_entity(se) {
  		cfs_rq = cfs_rq_of(se);
- 
+
 +		// XXX avoid these load updates for delayed dequeues ?
  		update_load_avg(cfs_rq, se, UPDATE_TG);
  		se_update_runnable(se);
  		update_cfs_group(se);
- 
+
 -		cfs_rq->h_nr_running--;
 -		cfs_rq->idle_h_nr_running -= idle_h_nr_running;
 +		if (p) {
 +			cfs_rq->h_nr_running--;
 +			cfs_rq->idle_h_nr_running -= idle_h_nr_running;
- 
+
 -		if (cfs_rq_is_idle(cfs_rq))
 -			idle_h_nr_running = 1;
 +			if (cfs_rq_is_idle(cfs_rq))
 +				idle_h_nr_running = 1;
 +		}
- 
+
  		/* end evaluation on encountering a throttled cfs_rq */
  		if (cfs_rq_throttled(cfs_rq))
 -			goto dequeue_throttle;
 -
 +			return 0;
  	}
- 
+
 -	/* At this point se is NULL and we are at root level*/
 -	sub_nr_running(rq, 1);
 +	if (p) {
 +		sub_nr_running(rq, 1);
-+ 
++
 +		/* balance early to pull high priority tasks */
 +		if (unlikely(!was_sched_idle && sched_idle_rq(rq)))
 +			rq->next_balance = jiffies;
 +	}
 +	return 1;
 +}
- 
+
 -	/* balance early to pull high priority tasks */
 -	if (unlikely(!was_sched_idle && sched_idle_rq(rq)))
 -		rq->next_balance = jiffies;
@@ -127,23 +127,21 @@ index 18f7d5e89e06b7..d4d183b5315b7b 100644
 +static bool dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 +{
 +	util_est_dequeue(&rq->cfs, p);
- 
+
 -dequeue_throttle:
  	if (!throttled_hierarchy(task_cfs_rq(p)) &&
  			!rq->cfs.h_nr_running)
  		dl_server_stop(&rq->fair_server);
- 
+
 -	util_est_update(&rq->cfs, p, task_sleep);
 +	if (dequeue_entities(rq, &p->se, flags) < 0)
 +		return false;
-+ 
++
 +	util_est_update(&rq->cfs, p, flags & DEQUEUE_SLEEP);
  	hrtick_update(rq);
 -
  	return true;
  }
- 
--- 
+
+--
 cgit 1.2.3-korg
-
-

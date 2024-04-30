@@ -1,4 +1,4 @@
-From 53b2e679d6f59e9797741e3dde3bcccbd0d07130 Mon Sep 17 00:00:00 2001
+From 22f4ab4a46d2df6b304bf3d387fbc4f6ca02174a Mon Sep 17 00:00:00 2001
 From: Peter Zijlstra <peterz@infradead.org>
 Date: Wed, 3 Apr 2024 09:50:16 +0200
 Subject: sched/fair: Unify pick_{,next_}_task_fair()
@@ -22,26 +22,26 @@ index d08150cca0ffbd..8a61a85035b06d 100644
 @@ -8421,7 +8421,6 @@ preempt:
  	resched_curr(rq);
  }
- 
+
 -#ifdef CONFIG_SMP
  static struct task_struct *pick_task_fair(struct rq *rq)
  {
  	struct sched_entity *se;
 @@ -8433,7 +8432,7 @@ again:
  		return NULL;
- 
+
  	do {
 -		/* When we pick for a remote RQ, we'll not have done put_prev_entity() */
 +		/* Might not have done put_prev_entity() */
  		if (cfs_rq->curr && cfs_rq->curr->on_rq)
  			update_curr(cfs_rq);
- 
+
 @@ -8446,19 +8445,19 @@ again:
- 
+
  	return task_of(se);
  }
 -#endif
- 
+
  struct task_struct *
  pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
  {
@@ -49,14 +49,14 @@ index d08150cca0ffbd..8a61a85035b06d 100644
  	struct sched_entity *se;
  	struct task_struct *p;
  	int new_tasks;
- 
+
  again:
 -	if (!sched_fair_runnable(rq))
 +	p = pick_task_fair(rq);
 +	if (!p)
  		goto idle;
 +	se = &p->se;
- 
+
  #ifdef CONFIG_FAIR_GROUP_SCHED
  	if (!prev || prev->sched_class != &fair_sched_class)
 @@ -8470,52 +8469,14 @@ again:
@@ -111,13 +111,13 @@ index d08150cca0ffbd..8a61a85035b06d 100644
  	if (prev != p) {
  		struct sched_entity *pse = &prev->se;
 +		struct cfs_rq *cfs_rq;
- 
+
  		while (!(cfs_rq = is_same_group(se, pse))) {
  			int se_depth = se->depth;
 @@ -8541,13 +8502,8 @@ simple:
  	if (prev)
  		put_prev_task(rq, prev);
- 
+
 -	do {
 -		se = pick_next_entity(cfs_rq);
 -		set_next_entity(cfs_rq, se);
@@ -127,10 +127,8 @@ index d08150cca0ffbd..8a61a85035b06d 100644
 -	p = task_of(se);
 +	for_each_sched_entity(se)
 +		set_next_entity(cfs_rq_of(se), se);
- 
+
  done: __maybe_unused;
  #ifdef CONFIG_SMP
--- 
+--
 cgit 1.2.3-korg
-
-
