@@ -1,0 +1,174 @@
+From 503a54579332887e6511905acf9bf8da04d4e54a Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 27 May 2023 15:09:21 -0700
+Subject: [PATCH] kernel: Eliminate dynamic memory allocation in
+ prctl_set_vma()
+
+ANON_VMA_NAME_MAX_LEN is 256 bytes, which fits on the stack just fine.
+
+Open code strndup_user() without the kmalloc() so we can use an on-stack
+buffer, eliminating the dynamic memory allocation entirely.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ kernel/sys.c | 23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 2764b66b52dcf..e868e8928fe36 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2306,6 +2306,7 @@ static inline bool is_valid_name_char(char ch)
+ static int prctl_set_vma(unsigned long opt, unsigned long addr,
+ 			 unsigned long size, unsigned long arg)
+ {
++	char name[ANON_VMA_NAME_MAX_LEN] __aligned(sizeof(long));
+ 	struct mm_struct *mm = current->mm;
+ 	const char __user *uname;
+ 	struct anon_vma_name *anon_name = NULL;
+@@ -2315,21 +2316,27 @@ static int prctl_set_vma(unsigned long opt, unsigned long addr,
+ 	case PR_SET_VMA_ANON_NAME:
+ 		uname = (const char __user *)arg;
+ 		if (uname) {
+-			char *name, *pch;
++			char *pch;
++			long len;
+ 
+-			name = strndup_user(uname, ANON_VMA_NAME_MAX_LEN);
+-			if (IS_ERR(name))
+-				return PTR_ERR(name);
++			len = strnlen_user(uname, sizeof(name));
++			if (!len)
++				return -EFAULT;
++
++			if (len > sizeof(name))
++				return -EINVAL;
++
++			if (copy_from_user(name, uname, len))
++				return -EFAULT;
++
++			name[len - 1] = '\0';
+ 
+ 			for (pch = name; *pch != '\0'; pch++) {
+-				if (!is_valid_name_char(*pch)) {
+-					kfree(name);
++				if (!is_valid_name_char(*pch))
+ 					return -EINVAL;
+-				}
+ 			}
+ 			/* anon_vma has its own copy */
+ 			anon_name = anon_vma_name_alloc(name);
+-			kfree(name);
+ 			if (!anon_name)
+ 				return -ENOMEM;
+ 
+From 20ae91c7eff52ff15ff3e0923e3e67b1a0d2c250 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 27 May 2023 15:15:54 -0700
+Subject: [PATCH] drm/bridge: Eliminate dynamic memory allocation for one out
+ bus format
+
+When there's only one out bus format, there's no need to allocate memory
+dynamically from drm_atomic_bridge_chain_select_bus_fmts(). Use an on-stack
+buffer in this case to eliminate the dynamic memory allocation, as this is
+a hot path.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ drivers/gpu/drm/drm_bridge.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/drm_bridge.c b/drivers/gpu/drm/drm_bridge.c
+index 78bc315b0b737..ba246d707afb1 100644
+--- a/drivers/gpu/drm/drm_bridge.c
++++ b/drivers/gpu/drm/drm_bridge.c
+@@ -886,6 +886,7 @@ drm_atomic_bridge_chain_select_bus_fmts(struct drm_bridge *bridge,
+ 	struct drm_bridge_state *last_bridge_state;
+ 	unsigned int i, num_out_bus_fmts = 0;
+ 	struct drm_bridge *last_bridge;
++	u32 out_bus_fmts_onstack;
+ 	u32 *out_bus_fmts;
+ 	int ret = 0;
+ 
+@@ -915,9 +916,7 @@ drm_atomic_bridge_chain_select_bus_fmts(struct drm_bridge *bridge,
+ 			return -ENOMEM;
+ 	} else {
+ 		num_out_bus_fmts = 1;
+-		out_bus_fmts = kmalloc(sizeof(*out_bus_fmts), GFP_KERNEL);
+-		if (!out_bus_fmts)
+-			return -ENOMEM;
++		out_bus_fmts = &out_bus_fmts_onstack;
+ 
+ 		if (conn->display_info.num_bus_formats &&
+ 		    conn->display_info.bus_formats)
+@@ -933,7 +932,8 @@ drm_atomic_bridge_chain_select_bus_fmts(struct drm_bridge *bridge,
+ 			break;
+ 	}
+ 
+-	kfree(out_bus_fmts);
++	if (out_bus_fmts != &out_bus_fmts_onstack)
++		kfree(out_bus_fmts);
+ 
+ 	return ret;
+ }
+From 58159052b2db815f950ea8d2ac72fc2445208154 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 27 May 2023 15:42:16 -0700
+Subject: [PATCH] kernfs: Avoid dynamic memory allocation for small
+ write_iter() buffers
+
+Most write_iter() buffers are rather small and can fit on the stack,
+eliminating the need to allocate them dynamically. Reserve a 64 B stack
+buffer for this purpose to avoid the overhead of dynamic memory allocation.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ fs/kernfs/file.c | 21 +++++++++++++--------
+ 1 file changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/fs/kernfs/file.c b/fs/kernfs/file.c
+index 60e2a86c535eb..204acd57c759e 100644
+--- a/fs/kernfs/file.c
++++ b/fs/kernfs/file.c
+@@ -257,6 +257,7 @@ static ssize_t kernfs_fop_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+ 	struct kernfs_open_file *of = kernfs_of(iocb->ki_filp);
+ 	ssize_t len = iov_iter_count(iter);
+ 	const struct kernfs_ops *ops;
++	char buf_onstack[SZ_64] __aligned(sizeof(long));
+ 	char *buf;
+ 
+ 	if (of->atomic_write_len) {
+@@ -266,13 +267,17 @@ static ssize_t kernfs_fop_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+ 		len = min_t(size_t, len, PAGE_SIZE);
+ 	}
+ 
+-	buf = of->prealloc_buf;
+-	if (buf)
+-		mutex_lock(&of->prealloc_mutex);
+-	else
+-		buf = kmalloc(len + 1, GFP_KERNEL);
+-	if (!buf)
+-		return -ENOMEM;
++	if (len < sizeof(buf_onstack)) {
++		buf = buf_onstack;
++	} else {
++		buf = of->prealloc_buf;
++		if (buf)
++			mutex_lock(&of->prealloc_mutex);
++		else
++			buf = kmalloc(len + 1, GFP_KERNEL);
++		if (!buf)
++			return -ENOMEM;
++	}
+ 
+ 	if (copy_from_iter(buf, len, iter) != len) {
+ 		len = -EFAULT;
+@@ -306,7 +311,7 @@ static ssize_t kernfs_fop_write_iter(struct kiocb *iocb, struct iov_iter *iter)
+ out_free:
+ 	if (buf == of->prealloc_buf)
+ 		mutex_unlock(&of->prealloc_mutex);
+-	else
++	else if (buf != buf_onstack)
+ 		kfree(buf);
+ 	return len;
+ }

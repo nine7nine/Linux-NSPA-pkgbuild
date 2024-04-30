@@ -1,0 +1,99 @@
+From 8b30455458c994fd9ff7243d776cc624d0f4bece Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Thu, 16 Nov 2023 21:03:11 -0800
+Subject: [PATCH] sched/completion: Expose wait_for_common*() to drivers
+
+Allow drivers to wait with a custom task state specified by exposing the
+raw wait_for_common*() functions. This allows code to wait for completions
+that are invariant with respect to CPU performance *without* contributing
+to load avg, without requiring the wait to be interruptible.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ include/linux/completion.h | 2 ++
+ kernel/sched/completion.c  | 4 ++--
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/completion.h b/include/linux/completion.h
+index 51d9ab079629b..8d975b0a20e50 100644
+--- a/include/linux/completion.h
++++ b/include/linux/completion.h
+@@ -99,6 +99,8 @@ static inline void reinit_completion(struct completion *x)
+ 	x->done = 0;
+ }
+ 
++extern long wait_for_common(struct completion *x, long timeout, int state);
++extern long wait_for_common_io(struct completion *x, long timeout, int state);
+ extern void wait_for_completion(struct completion *);
+ extern void wait_for_completion_io(struct completion *);
+ extern int wait_for_completion_interruptible(struct completion *x);
+diff --git a/kernel/sched/completion.c b/kernel/sched/completion.c
+index a778554f9dad7..c60507d406ed4 100644
+--- a/kernel/sched/completion.c
++++ b/kernel/sched/completion.c
+@@ -111,13 +111,13 @@ __wait_for_common(struct completion *x,
+ 	return timeout;
+ }
+ 
+-static long __sched
++long __sched
+ wait_for_common(struct completion *x, long timeout, int state)
+ {
+ 	return __wait_for_common(x, schedule_timeout, timeout, state);
+ }
+ 
+-static long __sched
++long __sched
+ wait_for_common_io(struct completion *x, long timeout, int state)
+ {
+ 	return __wait_for_common(x, io_schedule_timeout, timeout, state);
+From 6f34ed4152a7dcd1ac1f829172020b6b0948d9ec Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Thu, 16 Nov 2023 21:06:37 -0800
+Subject: [PATCH] drm: Convert CPU-invariant uninterruptible waits to TASK_IDLE
+
+These waits are invariant with respect to CPU frequency, so make them use
+TASK_IDLE in order to not contribute to load avg.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ drivers/gpu/drm/drm_atomic.c        | 4 ++--
+ drivers/gpu/drm/drm_atomic_helper.c | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/drm_atomic.c b/drivers/gpu/drm/drm_atomic.c
+index 166d329de9397..875b375ffcafc 100644
+--- a/drivers/gpu/drm/drm_atomic.c
++++ b/drivers/gpu/drm/drm_atomic.c
+@@ -72,7 +72,7 @@ int drm_crtc_commit_wait(struct drm_crtc_commit *commit)
+ 	if (!commit)
+ 		return 0;
+ 
+-	ret = wait_for_completion_timeout(&commit->hw_done, timeout);
++	ret = wait_for_common(&commit->hw_done, timeout, TASK_IDLE);
+ 	if (!ret) {
+ 		DRM_ERROR("hw_done timed out\n");
+ 		return -ETIMEDOUT;
+@@ -82,7 +82,7 @@ int drm_crtc_commit_wait(struct drm_crtc_commit *commit)
+ 	 * Currently no support for overwriting flips, hence
+ 	 * stall for previous one to execute completely.
+ 	 */
+-	ret = wait_for_completion_timeout(&commit->flip_done, timeout);
++	ret = wait_for_common(&commit->flip_done, timeout, TASK_IDLE);
+ 	if (!ret) {
+ 		DRM_ERROR("flip_done timed out\n");
+ 		return -ETIMEDOUT;
+diff --git a/drivers/gpu/drm/drm_atomic_helper.c b/drivers/gpu/drm/drm_atomic_helper.c
+index c657cdc81a812..24cd9dd70a780 100644
+--- a/drivers/gpu/drm/drm_atomic_helper.c
++++ b/drivers/gpu/drm/drm_atomic_helper.c
+@@ -1575,7 +1575,7 @@ void drm_atomic_helper_wait_for_flip_done(struct drm_device *dev,
+ 		if (!crtc || !commit)
+ 			continue;
+ 
+-		ret = wait_for_completion_timeout(&commit->flip_done, 10 * HZ);
++		ret = wait_for_common(&commit->flip_done, 10 * HZ, TASK_IDLE);
+ 		if (ret == 0)
+ 			DRM_ERROR("[CRTC:%d:%s] flip_done timed out\n",
+ 				  crtc->base.id, crtc->name);
+

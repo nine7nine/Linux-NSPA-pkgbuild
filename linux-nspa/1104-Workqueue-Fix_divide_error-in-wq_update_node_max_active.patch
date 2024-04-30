@@ -1,0 +1,78 @@
+Subject: [PATCH] workqueue: Fix divide error in wq_update_node_max_active()
+Date: Tue, 23 Apr 2024 20:45:48 +0800	[thread overview]
+Message-ID: <20240423124548.1253842-1-jiangshanlai@gmail.com> (raw)
+In-Reply-To: <CAEkJfYPGS1_4JqvpSo0=FM0S1ytB8CEbyreLTtWpR900dUZymw@mail.gmail.com>
+
+From: Lai Jiangshan <jiangshan.ljs@antgroup.com>
+
+Yue Sun and xingwei lee reported a divide error bug in
+wq_update_node_max_active():
+
+divide error: 0000 [#1] PREEMPT SMP KASAN PTI
+CPU: 1 PID: 21 Comm: cpuhp/1 Not tainted 6.9.0-rc5 #1
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+RIP: 0010:wq_update_node_max_active+0x369/0x6b0 kernel/workqueue.c:1605
+Code: 24 bf 00 00 00 80 44 89 fe e8 83 27 33 00 41 83 fc ff 75 0d 41
+81 ff 00 00 00 80 0f 84 68 01 00 00 e8 fb 22 33 00 44 89 f8 99 <41> f7
+fc 89 c5 89 c7 44 89 ee e8 a8 24 33 00 89 ef 8b 5c 24 04 89
+RSP: 0018:ffffc9000018fbb0 EFLAGS: 00010293
+RAX: 00000000000000ff RBX: 0000000000000001 RCX: ffff888100ada500
+RDX: 0000000000000000 RSI: 00000000000000ff RDI: 0000000080000000
+RBP: 0000000000000001 R08: ffffffff815b1fcd R09: 1ffff1100364ad72
+R10: dffffc0000000000 R11: ffffed100364ad73 R12: 0000000000000000
+R13: 0000000000000100 R14: 0000000000000000 R15: 00000000000000ff
+FS:  0000000000000000(0000) GS:ffff888135c00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007fb8c06ca6f8 CR3: 000000010d6c6000 CR4: 0000000000750ef0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+PKRU: 55555554
+Call Trace:
+ <TASK>
+ workqueue_offline_cpu+0x56f/0x600 kernel/workqueue.c:6525
+ cpuhp_invoke_callback+0x4e1/0x870 kernel/cpu.c:194
+ cpuhp_thread_fun+0x411/0x7d0 kernel/cpu.c:1092
+ smpboot_thread_fn+0x544/0xa10 kernel/smpboot.c:164
+ kthread+0x2ed/0x390 kernel/kthread.c:388
+ ret_from_fork+0x4b/0x80 arch/x86/kernel/process.c:147
+ ret_from_fork_asm+0x11/0x20 arch/x86/entry/entry_64.S:244
+ </TASK>
+Modules linked in:
+---[ end trace 0000000000000000 ]---
+
+After analysis, it happens when all of the CPUs in a workqueue's affinity
+get offine.
+
+The problem can be easily reproduced by:
+
+ # echo 8 > /sys/devices/virtual/workqueue/<any-wq-name>/cpumask
+ # echo 0 > /sys/devices/system/cpu/cpu3/online
+
+Force the calculation of total_cpus which is used to be the divisor to
+be at least 1 to fix the problem.
+
+Link: https://lore.kernel.org/lkml/CAEkJfYPGS1_4JqvpSo0=FM0S1ytB8CEbyreLTtWpR900dUZymw@mail.gmail.com/
+Cc: stable@vger.kernel.org
+Fixes: 5797b1c18919 ("workqueue: Implement system-wide nr_active enforcement for unbound workqueues")
+Reported-by: Yue Sun <samsun1006219@gmail.com>
+Reported-by: xingwei lee <xrivendell7@gmail.com>
+Signed-off-by: Lai Jiangshan <jiangshan.ljs@antgroup.com>
+---
+ kernel/workqueue.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/workqueue.c b/kernel/workqueue.c
+index 0066c8f6c154..b31cd7faeb9f 100644
+--- a/kernel/workqueue.c
++++ b/kernel/workqueue.c
+@@ -1591,7 +1591,7 @@ static void wq_update_node_max_active(struct workqueue_struct *wq, int off_cpu)
+ 		off_cpu = -1;
+ 
+ 	total_cpus = cpumask_weight_and(effective, cpu_online_mask);
+-	if (off_cpu >= 0)
++	if (off_cpu >= 0 && total_cpus > 1)
+ 		total_cpus--;
+ 
+ 	for_each_node(node) {
+-- 
+2.19.1.6.gb485710b
