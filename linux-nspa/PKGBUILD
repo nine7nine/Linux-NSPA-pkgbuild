@@ -108,7 +108,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.9-rc6
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=19
+pkgrel=20
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -116,7 +116,7 @@ options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
   "https://git.kernel.org/torvalds/t/linux-6.9-rc6.tar.gz"
-  "0000-patch-6.9-rc2-rt1.patch"
+  "0000-patch-6.9-rc6-rt3.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -513,7 +513,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('da2a747ddffac0cd3f319fcb4bcb894ed943a21e22c93be19d2dbe7c1abe9d43'
-            '2c923b6210eb2f3220d5a956b28c901be91d7873d117a9a2379b0577fb5e413c'
+            'bd4d8795ae94e26a443bb997950a134cc2b6f5530188649c9e08723254133dca'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
             'bf80e82ec5369d4414e260c938f89c96df6fbb625ca54902d5a527b7b91e122f'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
