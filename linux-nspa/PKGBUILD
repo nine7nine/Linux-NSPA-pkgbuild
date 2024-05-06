@@ -105,17 +105,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.9-rc6
+_srcname=linux-6.9-rc7
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=21
+pkgrel=22
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.9-rc6.tar.gz"
+  "https://git.zx2c4.com/linux/snapshot/linux-6.9-rc7.tar.xz"
   "0000-patch-6.9-rc6-rt4.patch"
   "config"
   "config_surface7"
@@ -157,7 +157,6 @@ source=(
   "1102-misc-Avoid_Dynamic_Mem_Allocations.patch"
   "1103-drm-Convert_CPU-invariant_uninterruptible_waits_to_TASK_IDLE.patch"
   "1104-Workqueue-Fix_divide_error-in-wq_update_node_max_active.patch"
-  "1105-rcu-Fix_suspicious_RCU_usage_in-__do_softirq.patch"
   "1107-block-set_rq_affinity_to_force_full.patch"
   "9999-sched_feat-compile-time.patch"
 )
@@ -512,8 +511,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('da2a747ddffac0cd3f319fcb4bcb894ed943a21e22c93be19d2dbe7c1abe9d43'
-            '7780587b230e5f9a6fc10c2c199d04712386a9f536f7f1f94fe90ac20715ea15'
+sha256sums=('b475f181b8fa20b3616e32c6612ef98c6f1c194ac61bf9d287eb2edfcd30309f'
+            '27d8f234d034736ebb25dcb3f2e222fb40cdcb9dc945d1657f446378761813af'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
             'bf80e82ec5369d4414e260c938f89c96df6fbb625ca54902d5a527b7b91e122f'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -554,6 +553,5 @@ sha256sums=('da2a747ddffac0cd3f319fcb4bcb894ed943a21e22c93be19d2dbe7c1abe9d43'
             'db5b0d3d82736e8acd9289e7728af3845244c32ff7a8d2e4151e1efbe89f0c09'
             '79c6dcbf04c30c7edd21beaab80090fb7d00feddc5396e713617463879c65a8e'
             'a7776f80359426e1add5c3d2895953e7fd970aedb162e639b2df16d7a70fcb23'
-            '17191d2a46a1397eb8673cc37ec6b51926d9d20efabe64ccf72840a43b7cfc08'
             'a1f803ab71c0b18ffa845a7bfd1ee90d2b2f2ec656cf9bedf0a2db2a2c2869a3'
             '3085f7477e78ffbfea956aea86e020654fb7f2c81e070d1647419e7f83875238')
