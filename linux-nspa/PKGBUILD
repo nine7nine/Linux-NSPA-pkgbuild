@@ -108,14 +108,14 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.9-rc7
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=22
+pkgrel=23
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.zx2c4.com/linux/snapshot/linux-6.9-rc7.tar.xz"
+  "https://git.kernel.org/torvalds/t/linux-6.9-rc7.tar.gz"
   "0000-patch-6.9-rc6-rt4.patch"
   "config"
   "config_surface7"
@@ -136,11 +136,9 @@ source=(
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
-  "0101-sched-Fair-DL-server_V6.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
   "0203-sched-core-eevdf-updates-fixes-tip-6.9-rc5.patch"
   "0099-cpu-Force-Enable-VMX-hack.patch"
-  "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
   "1001-sched-eevdf-Add-feature-comments.patch"
   "1002-sched-eevdf-Remove-min_vruntime_copy.patch"
   "1003-sched-fair-Cleanup-pick_task_fair-vs-throttle.patch"
@@ -153,6 +151,8 @@ source=(
   "1010-sched-eevdf-Limit_preemption_a_little_more.patch"
   "1011-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
   "1012-sched-eevdf-Use-sched_attr-sched_runtime-to-set-requ.patch"
+  "0101-sched-Fair-DL-server_V7.patch"
+  "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
   "1101-sched-fair-Reduce_PELT_half-life_from_32ms_to_16ms.patch"
   "1102-misc-Avoid_Dynamic_Mem_Allocations.patch"
   "1103-drm-Convert_CPU-invariant_uninterruptible_waits_to_TASK_IDLE.patch"
@@ -511,7 +511,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('b475f181b8fa20b3616e32c6612ef98c6f1c194ac61bf9d287eb2edfcd30309f'
+sha256sums=('74a7b9cda13269ec4287f395ea8ae0398d187a97e8ed4f7400fe7fa366debda8'
             '27d8f234d034736ebb25dcb3f2e222fb40cdcb9dc945d1657f446378761813af'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
             'bf80e82ec5369d4414e260c938f89c96df6fbb625ca54902d5a527b7b91e122f'
@@ -532,23 +532,23 @@ sha256sums=('b475f181b8fa20b3616e32c6612ef98c6f1c194ac61bf9d287eb2edfcd30309f'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
-            'c5f27076e563cf1b7e5555cf6ebba97dc07c66feb5a5149b731ac1a4c92c5da9'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
             '8bc9e61b74e769ccc7eed5407180ede41f97cc17f3401e16c09e2c783d8e2ccb'
             'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
-            '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
             'd16531952e0da603999ac9227cf6e055d8755f1fd2a3437a013720e4637c23bb'
             '52b2cd1f42b7554af01e455fe7d51b25715ac1f79ca663c2488e471a55815953'
             '2d7d33bf2eb6bfdaacd0d3a04ccc9f0478a09a1b6712d2316befed4899a7ec27'
             '3d5e609dec000c09b56af236de03c10df6ebf4da746425574534bdbeab642c75'
             'e4b8700f7524200297dacbd900dfc7e8b5f4562f9ebdad04ac9ba0450b759812'
             '78071773c8c16df0ece0747bd9d46c25221a80364c53d9db0b2c6dca6e9b2810'
-            '3a5f45b7b6883fe095343d7b5aa7b9724798bcaca1e576a86cec082d88cb3e7f'
+            'e2697ce3cb6b4614cb4f18ffb8ce231cedee519d1042d02ffa54a35b37938b5d'
             '91b2c42b4e5d530dd158856b83fab3ce5d44b5d0c0e7716d4089e8ee845fb81d'
             '38696824a7a187888a45f3ad8a6278b9bdf600e45d85e05629a672777800e73c'
             '59149af11658e790e7d7c12df7258985b5fe8e154faf96514c8d33a259c5f840'
             '033c53bac1e449f5b2efba2442c14ba3876b1fefbf7be21bfcd85dc90b076295'
             'b3aa99b303d0ca74c7420bc32a7646b90055fcae7dc65c459840dc52df24fc0e'
+            'a995e52941b03700d4dbc8be01c9fa01680c3ca5b3481a0fab13f520e24f54b7'
+            '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
             '4352a282b865b2ee50b70d3d2537661dedc9617463cd3e61ddc52e12bb8b53ac'
             'db5b0d3d82736e8acd9289e7728af3845244c32ff7a8d2e4151e1efbe89f0c09'
             '79c6dcbf04c30c7edd21beaab80090fb7d00feddc5396e713617463879c65a8e'
