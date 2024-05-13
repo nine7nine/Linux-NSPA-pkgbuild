@@ -1,0 +1,130 @@
+From b5310e15518783a5bbb5c956f1186765b04d1141 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 28 Mar 2020 13:06:28 -0700
+Subject: [PATCH] mm: Disable watermark boosting by default
+
+What watermark boosting does is preemptively fire up kswapd to free
+memory when there hasn't been an allocation failure. It does this by
+increasing kswapd's high watermark goal and then firing up kswapd. The
+reason why this causes freezes is because, with the increased high
+watermark goal, kswapd will steal memory from processes that need it in
+order to make forward progress. These processes will, in turn, try to
+allocate memory again, which will cause kswapd to steal necessary pages
+from those processes again, in a positive feedback loop known as page
+thrashing. When page thrashing occurs, your system is essentially
+livelocked until the necessary forward progress can be made to stop
+processes from trying to continuously allocate memory and trigger
+kswapd to steal it back.
+
+This problem already occurs with kswapd *without* watermark boosting,
+but it's usually only encountered on machines with a small amount of
+memory and/or a slow CPU. Watermark boosting just makes the existing
+problem worse enough to notice on higher spec'd machines.
+
+Disable watermark boosting by default since it's a total dumpster fire.
+I can't imagine why anyone would want to explicitly enable it, but the
+option is there in case someone does.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ mm/page_alloc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index f2fc6a5b452a6..156ba150c9ffa 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -288,7 +288,7 @@ const char * const migratetype_names[MIG
+ 
+ int min_free_kbytes = 1024;
+ int user_min_free_kbytes = -1;
+-static int watermark_boost_factor __read_mostly = 15000;
++static int watermark_boost_factor __read_mostly;
+ static int watermark_scale_factor = 10;
+ 
+ /* movable_zone is the "real" zone pages in ZONE_MOVABLE are taken from */
+
+From 1f8589c899d06a379a1af3ff1e1c7f7cd9bac88f Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Wed, 20 Oct 2021 20:50:11 -0700
+Subject: [PATCH] mm: Lower the non-hugetlbpage pageblock size to reduce
+ scheduling delays
+
+The page allocator processes free pages in groups of pageblocks, where
+the size of a pageblock is typically quite large (1024 pages without
+hugetlbpage support). Pageblocks are processed atomically with the zone
+lock held, which can cause severe scheduling delays on both the CPU
+going through the pageblock and any other CPUs waiting to acquire the
+zone lock. A frequent offender is move_freepages_block(), which is used
+by rmqueue() for page allocation.
+
+As it turns out, there's no requirement for pageblocks to be so large,
+so the pageblock order can simply be reduced to ease the scheduling
+delays and zone lock contention. PAGE_ALLOC_COSTLY_ORDER is used as a
+reasonable setting to ensure non-costly page allocation requests can
+still be serviced without always needing to free up more than one
+pageblock's worth of pages at a time.
+
+This has a noticeable effect on overall system latency when memory
+pressure is elevated. The various mm functions which operate on
+pageblocks no longer appear in the preemptoff tracer, where previously
+they would spend up to 100 ms on a mobile arm64 CPU processing a
+pageblock with preemption disabled and the zone lock held.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ include/linux/pageblock-flags.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/linux/pageblock-flags.h b/include/linux/pageblock-flags.h
+index 973fd731a5206..4fd8f258972a9 100644
+--- a/include/linux/pageblock-flags.h
++++ b/include/linux/pageblock-flags.h
+@@ -48,7 +48,7 @@ extern unsigned int pageblock_order;
+ #else /* CONFIG_HUGETLB_PAGE */
+ 
+ /* If huge pages are not used, group by MAX_ORDER_NR_PAGES */
+-#define pageblock_order		MAX_PAGE_ORDER
++#define pageblock_order		PAGE_ALLOC_COSTLY_ORDER
+ 
+ #endif /* CONFIG_HUGETLB_PAGE */
+ 
+
+From 703a13188014d436463f51da1e00678358d72b62 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 6 Jul 2019 21:15:19 -0700
+Subject: [PATCH] mm: kmemleak: Don't die when memory allocation fails
+
+When memory is leaking, it's going to be harder to allocate more memory,
+making it more likely for this failure condition inside of kmemleak to
+manifest itself. This is extremely frustrating since kmemleak kills
+itself upon the first instance of memory allocation failure.
+
+Bypass that and make kmemleak more resilient when memory is running low.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ mm/kmemleak.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/mm/kmemleak.c b/mm/kmemleak.c
+index acd7cbb82e160..6ef0eda47487a 100644
+--- a/mm/kmemleak.c
++++ b/mm/kmemleak.c
+@@ -427,9 +427,12 @@ static struct kmemleak_object *mem_pool_alloc(gfp_t gfp)
+ 
+ 	/* try the slab allocator first */
+ 	if (object_cache) {
+-		object = kmem_cache_alloc(object_cache, gfp_kmemleak_mask(gfp));
+-		if (object)
+-			return object;
++		while (1) {
++			object = kmem_cache_alloc(object_cache,
++						  gfp_kmemleak_mask(gfp));
++			if (object)
++				return object;
++		}
+ 	}
+ 
+ 	/* slab allocation failed, try the memory pool */
+
