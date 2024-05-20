@@ -1,8 +1,8 @@
 diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
-index 213d0719e2b7a..adbaccfc1f5d4 100644
+index 396137ee018d7..4f572ec5bbd57 100644
 --- a/Documentation/admin-guide/kernel-parameters.txt
 +++ b/Documentation/admin-guide/kernel-parameters.txt
-@@ -6551,6 +6551,18 @@
+@@ -6552,6 +6552,18 @@
  			Force threading of all interrupt handlers except those
  			marked explicitly IRQF_NO_THREAD.
  
@@ -381,7 +381,7 @@ index afc0f6a613372..dc3f63c2687d4 100644
  	select MPIC
  	select OF_DYNAMIC
 diff --git a/arch/powerpc/platforms/pseries/iommu.c b/arch/powerpc/platforms/pseries/iommu.c
-index e8c4129697b14..c61e29deac8df 100644
+index b1e6d275cda9e..9a8d3970da3c5 100644
 --- a/arch/powerpc/platforms/pseries/iommu.c
 +++ b/arch/powerpc/platforms/pseries/iommu.c
 @@ -25,6 +25,7 @@
@@ -5800,7 +5800,7 @@ index ae50f212775e5..dc61da7d90d3c 100644
  
  extern struct rt_bandwidth def_rt_bandwidth;
 diff --git a/kernel/softirq.c b/kernel/softirq.c
-index b315b21fb28cd..abda7fc72dde6 100644
+index 02582017759a2..00e32e279fa95 100644
 --- a/kernel/softirq.c
 +++ b/kernel/softirq.c
 @@ -248,6 +248,19 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
@@ -5823,7 +5823,7 @@ index b315b21fb28cd..abda7fc72dde6 100644
  /*
   * Invoked from ksoftirqd_run() outside of the interrupt disabled section
   * to acquire the per CPU local lock for reentrancy protection.
-@@ -620,6 +633,24 @@ static inline void tick_irq_exit(void)
+@@ -624,6 +637,24 @@ static inline void tick_irq_exit(void)
  #endif
  }
  
@@ -5848,7 +5848,7 @@ index b315b21fb28cd..abda7fc72dde6 100644
  static inline void __irq_exit_rcu(void)
  {
  #ifndef __ARCH_IRQ_EXIT_IRQS_DISABLED
-@@ -632,6 +663,10 @@ static inline void __irq_exit_rcu(void)
+@@ -636,6 +667,10 @@ static inline void __irq_exit_rcu(void)
  	if (!in_interrupt() && local_softirq_pending())
  		invoke_softirq();
  
@@ -5859,7 +5859,7 @@ index b315b21fb28cd..abda7fc72dde6 100644
  	tick_irq_exit();
  }
  
-@@ -968,12 +1003,70 @@ static struct smp_hotplug_thread softirq_threads = {
+@@ -972,12 +1007,70 @@ static struct smp_hotplug_thread softirq_threads = {
  	.thread_comm		= "ksoftirqd/%u",
  };
  
@@ -6048,11 +6048,11 @@ index d8b302d010830..4f58a196e14c1 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..ad3da1bcab7e8
+index 0000000000000..0efe7ba1930e1
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt4
++-rt5
 diff --git a/net/core/dev.c b/net/core/dev.c
 index 331848eca7d31..1180675fd390c 100644
 --- a/net/core/dev.c
@@ -6498,10 +6498,10 @@ index 331848eca7d31..1180675fd390c 100644
  	dev_boot_phase = 0;
  
 diff --git a/net/core/skbuff.c b/net/core/skbuff.c
-index b99127712e670..17617c29be2df 100644
+index 4096e679f61c7..e03441de54b71 100644
 --- a/net/core/skbuff.c
 +++ b/net/core/skbuff.c
-@@ -7039,8 +7039,8 @@ nodefer:	__kfree_skb(skb);
+@@ -7050,8 +7050,8 @@ nodefer:	__kfree_skb(skb);
  	/* Make sure to trigger NET_RX_SOFTIRQ on the remote CPU
  	 * if we are unlucky enough (this seems very unlikely).
  	 */

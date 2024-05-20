@@ -329,14 +329,14 @@ index d82501c1350da..c3fd3ad4a5d85 100644
 
  		/*
  		 * If the owning (remote) CPU is still in the middle of schedule() with
-@@ -5726,7 +5740,9 @@ void sched_tick(void)
+@@ -5730,7 +5744,9 @@ void sched_tick(void)
  	struct task_struct *curr = rq->curr;
  	struct rq_flags rf;
- 	unsigned long thermal_pressure;
+ 	unsigned long hw_pressure;
 +#if SCHED_FEAT_WARN_DOUBLE_CLOCK
  	u64 resched_latency;
 +#endif
-
+ 
  	if (housekeeping_cpu(cpu, HK_TYPE_TICK))
  		arch_scale_freq_tick();
 @@ -5739,16 +5755,23 @@ void sched_tick(void)
@@ -986,3 +986,36 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	attach_entity_load_avg(cfs_rq, se);
  	update_tg_load_avg(cfs_rq);
  	propagate_entity_cfs_rq(se);
+
+--- a/kernel/sched/rt.c	2024-05-19 22:03:21.296924567 -0500
++++ b/kernel/sched/rt.c	2024-05-19 22:02:45.528746704 -0500
+@@ -776,14 +776,15 @@ static void __enable_runtime(struct rq *
+ 
+ static void balance_runtime(struct rt_rq *rt_rq)
+ {
+-	if (!sched_feat(RT_RUNTIME_SHARE))
+-		return;
++	/* RT_RUNTIME_SHARE = 0 */
++	return;
+ 
++	/* RT_RUNTIME_SHARE = 0
+ 	if (rt_rq->rt_time > rt_rq->rt_runtime) {
+ 		raw_spin_unlock(&rt_rq->rt_runtime_lock);
+ 		do_balance_runtime(rt_rq);
+ 		raw_spin_lock(&rt_rq->rt_runtime_lock);
+-	}
++	} */
+ }
+ #else /* !CONFIG_SMP */
+ static inline void balance_runtime(struct rt_rq *rt_rq) {}
+@@ -820,7 +821,8 @@ static int do_sched_rt_period_timer(stru
+ 		 * can be time-consuming. Try to avoid it when possible.
+ 		 */
+ 		raw_spin_lock(&rt_rq->rt_runtime_lock);
+-		if (!sched_feat(RT_RUNTIME_SHARE) && rt_rq->rt_runtime != RUNTIME_INF)
++		/* RT_RUNTIME_SHARE = 0 */
++		if (rt_rq->rt_runtime != RUNTIME_INF)
+ 			rt_rq->rt_runtime = rt_b->rt_runtime;
+ 		skip = !rt_rq->rt_time && !rt_rq->rt_nr_running;
+ 		raw_spin_unlock(&rt_rq->rt_runtime_lock);
+
