@@ -1,0 +1,82 @@
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 5ffd7e047393..43f061bcfe54 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2154,14 +2154,18 @@ void activate_task(struct rq *rq, struct task_struct *p, int flags)
+ 
+ void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
+ {
+-	bool sleep = flags & DEQUEUE_SLEEP;
++	SCHED_WARN_ON(flags & DEQUEUE_SLEEP);
+ 
+-	if (dequeue_task(rq, p, flags)) {
+-		WRITE_ONCE(p->on_rq, sleep ? 0 : TASK_ON_RQ_MIGRATING);
+-		ASSERT_EXCLUSIVE_WRITER(p->on_rq);
+-	} else {
+-		SCHED_WARN_ON(!sleep); /* only sleep can fail */
+-	}
++	dequeue_task(rq, p, flags);
++
++	WRITE_ONCE(p->on_rq, TASK_ON_RQ_MIGRATING);
++	ASSERT_EXCLUSIVE_WRITER(p->on_rq);
++}
++
++static void block_task(struct rq *rq, struct task_struct *p, int flags)
++{
++	if (dequeue_task(rq, p, DEQUEUE_SLEEP | flags))
++		__block_task(rq, p);
+ }
+ 
+ static inline int __normal_prio(int policy, int rt_prio, int nice)
+@@ -6693,9 +6697,6 @@ static void __sched notrace __schedule(unsigned int sched_mode)
+ 				!(prev_state & TASK_NOLOAD) &&
+ 				!(prev_state & TASK_FROZEN);
+ 
+-			if (prev->sched_contributes_to_load)
+-				rq->nr_uninterruptible++;
+-
+ 			/*
+ 			 * __schedule()			ttwu()
+ 			 *   prev_state = prev->state;    if (p->on_rq && ...)
+@@ -6707,7 +6708,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
+ 			 *
+ 			 * After this, schedule() must not care about p->state any more.
+ 			 */
+-			deactivate_task(rq, prev, DEQUEUE_SLEEP | DEQUEUE_NOCLOCK);
++			block_task(rq, prev, DEQUEUE_SLEEP | DEQUEUE_NOCLOCK);
+ 
+ 			if (prev->in_iowait) {
+ 				atomic_inc(&rq->nr_iowait);
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 536eabcb1a71..596a5fabe490 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -7032,8 +7032,8 @@ static int dequeue_entities(struct rq *rq, struct sched_entity *se, int flags)
+ 			util_est_update(&rq->cfs, p, task_sleep);
+ 			hrtick_update(rq);
+ 
+-			/* Fix-up what deactivate_task() skipped. */
+-			WRITE_ONCE(p->on_rq, 0);
++			/* Fix-up what block_task() skipped. */
++			__block_task(rq, p);
+ 		}
+ 	}
+ 
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 12841d8195c5..48e5f49d9bc2 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2560,6 +2560,14 @@ static inline void sub_nr_running(struct rq *rq, unsigned count)
+ 	sched_update_tick_dependency(rq);
+ }
+ 
++static inline void __block_task(struct rq *rq, struct task_struct *p)
++{
++	WRITE_ONCE(p->on_rq, 0);
++	ASSERT_EXCLUSIVE_WRITER(p->on_rq);
++	if (p->sched_contributes_to_load)
++		rq->nr_uninterruptible++;
++}
++
+ extern void activate_task(struct rq *rq, struct task_struct *p, int flags);
+ extern void deactivate_task(struct rq *rq, struct task_struct *p, int flags);

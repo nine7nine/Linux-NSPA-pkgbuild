@@ -96,7 +96,7 @@ _no_RT_throttle=
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.9.1
+_major=6.9.2
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -105,17 +105,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.9.1
+_srcname=linux-6.9.2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=3
+pkgrel=5
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.1.tar.xz"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.2.tar.xz"
   "0000-patch-6.9-rt5.patch"
   "config"
   "config_surface7"
@@ -161,6 +161,8 @@ source=(
   "1107-block-set_rq_affinity_to_force_full.patch"
   "1108-Add_sysctl_and_CONFIG_to_disallow_unprivileged.patch"
   "1110-add-acs-overrides_iommu.patch"
+  "1111-eevdf-fair-fixup-loadavg-issues.patch"
+  "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -514,7 +516,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('01b414ba98fd189ecd544435caf3860ae2a790e3ec48f5aa70fdf42dc4c5c04a'
+sha256sums=('d46c5bdf2c5961cc2a4dedefe0434d456865e95e4a7cd9f93fff054f9090e5f9'
             'cc97edf307ed87eb2fdda6292e5490ccf976fe33ee7a0d9a0283e3e9ee528e76'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
             '70f3d7c35847eb2faeb8be157bcc08230b1b397f1b1ab30862373f7703b738ff'
@@ -560,4 +562,6 @@ sha256sums=('01b414ba98fd189ecd544435caf3860ae2a790e3ec48f5aa70fdf42dc4c5c04a'
             'a1f803ab71c0b18ffa845a7bfd1ee90d2b2f2ec656cf9bedf0a2db2a2c2869a3'
             '8d4570520b9e7259c788e60e8e6d7c58c58bb5c5a99e46f03d13a23515491a18'
             'f3e6c8c98ea5172f424971bc20f128c7f1f6416af6944f58dad1048ba4dff168'
+            'f022ece72f3d33f5c1759244e19d995fc457a283647919f74082f57ddbf270f4'
+            'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
             'cd743120827b6238fb3f83ed8b78c506b39de7b8a93397d12ad518379541ae3e')
