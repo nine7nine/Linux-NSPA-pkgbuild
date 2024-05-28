@@ -108,7 +108,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.9.2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=5
+pkgrel=7
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -163,6 +163,8 @@ source=(
   "1110-add-acs-overrides_iommu.patch"
   "1111-eevdf-fair-fixup-loadavg-issues.patch"
   "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
+  "1113-mm-lru-misc_optimizations.patch"
+  "1114-crypto-patchwork.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -519,7 +521,7 @@ done
 sha256sums=('d46c5bdf2c5961cc2a4dedefe0434d456865e95e4a7cd9f93fff054f9090e5f9'
             'cc97edf307ed87eb2fdda6292e5490ccf976fe33ee7a0d9a0283e3e9ee528e76'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
-            '70f3d7c35847eb2faeb8be157bcc08230b1b397f1b1ab30862373f7703b738ff'
+            'a818a1651f01b2278865118a875c1d2034ee44189a0d50c5c334abab0a1694ad'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -564,4 +566,6 @@ sha256sums=('d46c5bdf2c5961cc2a4dedefe0434d456865e95e4a7cd9f93fff054f9090e5f9'
             'f3e6c8c98ea5172f424971bc20f128c7f1f6416af6944f58dad1048ba4dff168'
             'f022ece72f3d33f5c1759244e19d995fc457a283647919f74082f57ddbf270f4'
             'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
+            'c6c2b07ba61d624a3e2b351dc5d3d914183bdecb61fa975486f64b046f88a55e'
+            '72df02c4aabf84ff3d2af13c14e44ee8f43e659e978aa2cf52754a46e16cea9e'
             'cd743120827b6238fb3f83ed8b78c506b39de7b8a93397d12ad518379541ae3e')
