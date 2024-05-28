@@ -11,23 +11,27 @@ Google, KernelToast, Mainline/Upstream and various other sources.
 ### Features/Patchwork:
 
 * PREEMPT_RT_FULL : Realtime Linux Patchset
-* Fair/RT Scheduler optimizations, modifications + backports
-* Locking backport and modifications
-* MM Multi-Gnerational LRU (https://lwn.net/Articles/856931/)
-* MM Maple-Tree patchwork 
+* Scheduler backports, optimizations, modifications, etc.
+* Locking backports, hacks && modifications
 * Tunable WorkingSet Protection Mechanism 
 * Subset of Intel Clear Linux Kernel patches
+* Subset of KernelToast's kernel patchwork
 * Various Performance / interactivity related changes
 * Wine-related performance patchwork
-* Power management improvements
-* Numerous subsystem backports from mainline, -next and tip
-* Subset KernelToast's kernel patchwork
-* Misc fixes/changes
+* Linux-Surface Patchwork (Microsoft Surface Devices)
+* Subsystem backports from mainline & -tip
+* Misc fixups, hacks and tweaks
+
+Non-exhuastive feature list, because it tends to shift and change over-time.
+Generally, I follow linux-rt-devel RT versions, but also try to follow mainline. 
+It's not uncommon that I rebase an RT patch (when trivial) and/or jump to using 
+mainline linux -RC kernels. However, it depends on how significant kernel changes 
+are VS. my patchwork...
 
 SPECIAL NOTE:
 
 The pkgbuild by default will use a kernel config for my Microsoft Surface 7.
-This can be overriden and the generic kernel config can be used instead, but
+This can be overridden and the generic kernel config can be used instead, but
 that means that all modules will be build, increasing compile time 
 significantly.
 
