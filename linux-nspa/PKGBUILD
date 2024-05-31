@@ -96,7 +96,7 @@ _no_RT_throttle=
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.9.2
+_major=6.10
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -105,18 +105,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.9.2
+_srcname=linux-6.10-rc1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=7
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.2.tar.xz"
-  "0000-patch-6.9-rt5.patch"
+  "https://git.kernel.org/torvalds/t/linux-6.10-rc1.tar.gz"
+  "0000-patch-6.10-rc1-rt1.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -138,8 +138,6 @@ source=(
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
-  "0303-sched-updates-6.10.patch"
-  "0099-cpu-Force-Enable-VMX-hack.patch"
   "1001-sched-eevdf-Add-feature-comments.patch"
   "1002-sched-eevdf-Remove-min_vruntime_copy.patch"
   "1003-sched-fair-Cleanup-pick_task_fair-vs-throttle.patch"
@@ -164,7 +162,6 @@ source=(
   "1111-eevdf-fair-fixup-loadavg-issues.patch"
   "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
   "1113-mm-lru-misc_optimizations.patch"
-  "1114-crypto-patchwork.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -518,10 +515,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('d46c5bdf2c5961cc2a4dedefe0434d456865e95e4a7cd9f93fff054f9090e5f9'
-            'cc97edf307ed87eb2fdda6292e5490ccf976fe33ee7a0d9a0283e3e9ee528e76'
+sha256sums=('102823885970d7d7bcf05a9b55dbe851ef95d99ba4b2d779e3e6343bdd4b6ecc'
+            '82f4c632b59432d5d2dfcaaeeb4b68acc1e5422c6e8f7bd144711c66f794428b'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
-            'a818a1651f01b2278865118a875c1d2034ee44189a0d50c5c334abab0a1694ad'
+            '5d39331ebde909922ddc98307b7b4e7c1728708dd5ad424f2e2e77f34eec4c54'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -533,16 +530,14 @@ sha256sums=('d46c5bdf2c5961cc2a4dedefe0434d456865e95e4a7cd9f93fff054f9090e5f9'
             '2869b0de2899a50903598bedc5ddb8f699516ed35da5e349342632feb5fc5b7a'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
-            'a83e272ab9b2c2c5ab008fcc290150bae84b3775ae7f6498403dd81fc5b3dd21'
+            '5296f32319a13f532e285ea7a814530ff3a2976f0b90d7167350bfd5f15e9286'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '015690390c7aaf64ad7794bc458cc191d6b2b0be6e18b62ae65855a57fb46bea'
-            'c48cebdd355d84fe88d400c947b54e4656a2f082c8c4ed156eb68bef10d1f951'
+            'dfe193c5f6ee4edf806ad80a9935f4763f3b49da7b1d0804245cc3a4a0e8ecc3'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
-            '6ef8c76cd909e80958e57f5f649d8c2182773ca417a64ca39e56711752d94181'
-            'fe46b085b9f04957eb941eb44c5276f5af6630a22e55c0487566d76c7ad28558'
             'd16531952e0da603999ac9227cf6e055d8755f1fd2a3437a013720e4637c23bb'
             '52b2cd1f42b7554af01e455fe7d51b25715ac1f79ca663c2488e471a55815953'
             '2d7d33bf2eb6bfdaacd0d3a04ccc9f0478a09a1b6712d2316befed4899a7ec27'
@@ -567,5 +562,4 @@ sha256sums=('d46c5bdf2c5961cc2a4dedefe0434d456865e95e4a7cd9f93fff054f9090e5f9'
             'f022ece72f3d33f5c1759244e19d995fc457a283647919f74082f57ddbf270f4'
             'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
             'c6c2b07ba61d624a3e2b351dc5d3d914183bdecb61fa975486f64b046f88a55e'
-            '72df02c4aabf84ff3d2af13c14e44ee8f43e659e978aa2cf52754a46e16cea9e'
             'cd743120827b6238fb3f83ed8b78c506b39de7b8a93397d12ad518379541ae3e')

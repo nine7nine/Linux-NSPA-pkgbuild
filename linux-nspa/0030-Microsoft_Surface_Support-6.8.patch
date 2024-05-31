@@ -692,17 +692,19 @@ index 897159dba47d..cc6569613255 100644
  #define IS_AZALIA(pdev) ((pdev)->vendor == 0x8086 && (pdev)->device == 0x3a3e)
  
  #define IOAPIC_RANGE_START	(0xfee00000)
-@@ -291,12 +293,14 @@ int intel_iommu_enabled = 0;
+@@ -217,12 +225,16 @@ int intel_iommu_sm = IS_ENABLED(CONFIG_I
+ int intel_iommu_enabled = 0;
  EXPORT_SYMBOL_GPL(intel_iommu_enabled);
  
- static int dmar_map_gfx = 1;
 +static int dmar_map_ipts = 1;
++static int dmar_map_ipu = 1;
  static int intel_iommu_superpage = 1;
  static int iommu_identity_mapping;
  static int iommu_skip_te_disable;
+ static int disable_igfx_iommu;
  
- #define IDENTMAP_GFX		2
  #define IDENTMAP_AZALIA		4
++#define IDENTMAP_IPU		8
 +#define IDENTMAP_IPTS		16
  
  const struct iommu_ops intel_iommu_ops;
@@ -5735,7 +5737,7 @@ index 2bc4977037fc..26cb6229ad16 100644
  	&ssam_node_root,
  	&ssam_node_bat_ac,
  	&ssam_node_bat_main,
-@@ -263,6 +263,20 @@ static const struct software_node *ssam_node_group_sls[] = {
+@@ -289,6 +295,21 @@ static const struct software_node *ssam_
  	NULL,
  };
  
@@ -5744,7 +5746,7 @@ index 2bc4977037fc..26cb6229ad16 100644
 +	&ssam_node_root,
 +	&ssam_node_bat_ac,
 +	&ssam_node_bat_main,
-+	&ssam_node_tmp_pprof,
++	&ssam_node_tmp_sensors,
 +	&ssam_node_pos_tablet_switch,
 +	&ssam_node_hid_sam_keyboard,
 +	&ssam_node_hid_sam_penstash,
@@ -5752,6 +5754,7 @@ index 2bc4977037fc..26cb6229ad16 100644
 +	&ssam_node_hid_sam_ucm_ucsi,
 +	NULL,
 +};
++
 +
  /* Devices for Surface Laptop Go. */
  static const struct software_node *ssam_node_group_slg1[] = {
@@ -6193,49 +6196,6 @@ index 48c3e826713f..4c08926139db 100644
  	hwmon_dev = devm_hwmon_device_register_with_info(&sdev->dev,
  			"surface_thermal", ssam_temp, &ssam_temp_hwmon_chip_info,
  			NULL);
--- 
-2.43.0
-
-From 8ccf7b86ad270655bd1e8cd0ab8d2ff475ad0ea7 Mon Sep 17 00:00:00 2001
-From: Maximilian Luz <luzmaximilian@gmail.com>
-Date: Sat, 30 Dec 2023 18:21:12 +0100
-Subject: [PATCH] platform/surface: aggregator_registry: Add support for
- thermal sensors on the Surface Pro 9
-
-The Surface Pro 9 has thermal sensors connected via the Surface
-Aggregator Module. Add a device node to support those.
-
-Signed-off-by: Maximilian Luz <luzmaximilian@gmail.com>
-Patchset: surface-sam
----
- drivers/platform/surface/surface_aggregator_registry.c | 7 +++++++
- 1 file changed, 7 insertions(+)
-
-diff --git a/drivers/platform/surface/surface_aggregator_registry.c b/drivers/platform/surface/surface_aggregator_registry.c
-index f02a933160ff..67686042e009 100644
---- a/drivers/platform/surface/surface_aggregator_registry.c
-+++ b/drivers/platform/surface/surface_aggregator_registry.c
-@@ -74,6 +74,12 @@ static const struct software_node ssam_node_tmp_pprof = {
- 	.parent = &ssam_node_root,
- };
- 
-+/* Thermal sensors. */
-+static const struct software_node ssam_node_tmp_sensors = {
-+	.name = "ssam:01:03:01:00:02",
-+	.parent = &ssam_node_root,
-+};
-+
- /* Fan speed function. */
- static const struct software_node ssam_node_fan_speed = {
- 	.name = "ssam:01:05:01:01:01",
-@@ -325,6 +331,7 @@ static const struct software_node *ssam_node_group_sp9[] = {
- 	&ssam_node_bat_ac,
- 	&ssam_node_bat_main,
- 	&ssam_node_tmp_pprof,
-+	&ssam_node_tmp_sensors,
- 	&ssam_node_fan_speed,
- 	&ssam_node_pos_tablet_switch,
- 	&ssam_node_hid_kip_keyboard,
 -- 
 2.43.0
 
@@ -7338,11 +7298,10 @@ diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
 index d55a3ffae4b8..e8614d8476fe 100644
 --- a/drivers/pci/quirks.c
 +++ b/drivers/pci/quirks.c
-@@ -6227,3 +6227,39 @@ static void pci_fixup_d3cold_delay_1sec(struct pci_dev *pdev)
- 	pdev->d3cold_delay = 1000;
+@@ -6254,6 +6254,42 @@ static void pci_fixup_d3cold_delay_1sec(
  }
  DECLARE_PCI_FIXUP_FINAL(0x5555, 0x0004, pci_fixup_d3cold_delay_1sec);
-+
+ 
 +static const struct dmi_system_id no_shutdown_dmi_table[] = {
 +	/*
 +	 * Systems on which some devices should not be touched during shutdown.
@@ -7378,6 +7337,10 @@ index d55a3ffae4b8..e8614d8476fe 100644
 +DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x462f, quirk_no_shutdown);  // Thunderbolt 4 PCI Express Root Port
 +DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x466d, quirk_no_shutdown);  // Thunderbolt 4 NHI
 +DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x46a8, quirk_no_shutdown);  // GPU
++
+ #ifdef CONFIG_PCIEAER
+ static void pci_mask_replay_timer_timeout(struct pci_dev *pdev)
+ {
 diff --git a/include/linux/pci.h b/include/linux/pci.h
 index bc80960fad7c..eec5704d1000 100644
 --- a/include/linux/pci.h
@@ -7562,21 +7525,6 @@ index cc6569613255..8a532d32efdd 100644
  #define IS_IPTS(pdev) ((pdev)->vendor == PCI_VENDOR_ID_INTEL &&	\
  			    ((pdev)->device == 0x9d3e))
  #define IS_AZALIA(pdev) ((pdev)->vendor == 0x8086 && (pdev)->device == 0x3a3e)
-@@ -294,12 +300,14 @@ EXPORT_SYMBOL_GPL(intel_iommu_enabled);
- 
- static int dmar_map_gfx = 1;
- static int dmar_map_ipts = 1;
-+static int dmar_map_ipu = 1;
- static int intel_iommu_superpage = 1;
- static int iommu_identity_mapping;
- static int iommu_skip_te_disable;
- 
- #define IDENTMAP_GFX		2
- #define IDENTMAP_AZALIA		4
-+#define IDENTMAP_IPU		8
- #define IDENTMAP_IPTS		16
- 
- const struct iommu_ops intel_iommu_ops;
 @@ -2553,6 +2561,9 @@ static int device_def_domain_type(struct device *dev)
  		if ((iommu_identity_mapping & IDENTMAP_GFX) && IS_GFX_DEVICE(pdev))
  			return IOMMU_DOMAIN_IDENTITY;
@@ -11017,7 +10965,7 @@ diff --git a/drivers/platform/surface/aggregator/core.c b/drivers/platform/surfa
 index 9591a28bc38a..72a521dd729c 100644
 --- a/drivers/platform/surface/aggregator/core.c
 +++ b/drivers/platform/surface/aggregator/core.c
-@@ -645,9 +645,20 @@ static int ssam_serial_hub_probe(struct serdev_device *serdev)
+@@ -649,7 +649,15 @@ static int ssam_serial_hub_probe(struct
  	/* Set up serdev device. */
  	serdev_device_set_drvdata(serdev, ctrl);
  	serdev_device_set_client_ops(serdev, &ssam_serdev_ops);
@@ -11028,106 +10976,9 @@ index 9591a28bc38a..72a521dd729c 100644
 +	 * the probing by returning -EPROBE_DEFER so that the kernel would be
 +	 * able to retry later. */
  	status = serdev_device_open(serdev);
--	if (status)
 +	if (status == -ENXIO)
 +		status = -EPROBE_DEFER;
-+	if (status) {
-+		dev_err_probe(&serdev->dev, status,
-+			      "failed to open serdev device\n");
+ 	if (status) {
+ 		dev_err_probe(dev, status, "failed to open serdev device\n");
  		goto err_devopen;
-+	}
- 
- 	astatus = ssam_serdev_setup_via_acpi(ssh->handle, serdev);
- 	if (ACPI_FAILURE(astatus)) {
-
-From 2e98a157c9f2ac66445eb8b9f8fc647f260e5929 Mon Sep 17 00:00:00 2001
-From: Weifeng Liu <weifeng.liu.z@gmail.com>
-Date: Wed, 24 Apr 2024 22:24:08 +0800
-Subject: [PATCH] platform/surface: aggregator: Log critical errors during SAM
- probing
-
-Emits messages upon errors during probing of SAM.  Hopefully this could
-provide useful context to user for the purpose of diagnosis when
-something miserable happen.
-
-Signed-off-by: Weifeng Liu <weifeng.liu.z@gmail.com>
----
- drivers/platform/surface/aggregator/core.c | 26 +++++++++++++++++-----
- 1 file changed, 20 insertions(+), 6 deletions(-)
-
-diff --git a/drivers/platform/surface/aggregator/core.c b/drivers/platform/surface/aggregator/core.c
-index 72a521dd729c..4e2e70f4dcf5 100644
---- a/drivers/platform/surface/aggregator/core.c
-+++ b/drivers/platform/surface/aggregator/core.c
-@@ -623,8 +623,10 @@ static int ssam_serial_hub_probe(struct serdev_device *serdev)
- 	acpi_status astatus;
- 	int status;
- 
--	if (gpiod_count(&serdev->dev, NULL) < 0)
-+	if (gpiod_count(&serdev->dev, NULL) < 0) {
-+		dev_err(&serdev->dev, "no GPIO found\n");
- 		return -ENODEV;
-+	}
- 
- 	status = devm_acpi_dev_add_driver_gpios(&serdev->dev, ssam_acpi_gpios);
- 	if (status)
-@@ -637,8 +639,11 @@ static int ssam_serial_hub_probe(struct serdev_device *serdev)
- 
- 	/* Initialize controller. */
- 	status = ssam_controller_init(ctrl, serdev);
--	if (status)
-+	if (status) {
-+		dev_err_probe(&serdev->dev, status,
-+			      "failed to initialize ssam controller\n");
- 		goto err_ctrl_init;
-+	}
- 
- 	ssam_controller_lock(ctrl);
- 
-@@ -663,6 +668,7 @@ static int ssam_serial_hub_probe(struct serdev_device *serdev)
- 	astatus = ssam_serdev_setup_via_acpi(ssh->handle, serdev);
- 	if (ACPI_FAILURE(astatus)) {
- 		status = -ENXIO;
-+		dev_err(&serdev->dev, "failed to setup serdev\n");
- 		goto err_devinit;
- 	}
- 
-@@ -678,16 +684,22 @@ static int ssam_serial_hub_probe(struct serdev_device *serdev)
- 	 * states.
- 	 */
- 	status = ssam_log_firmware_version(ctrl);
--	if (status)
-+	if (status) {
-+		dev_err(&serdev->dev, "failed to get firmware version\n");
- 		goto err_initrq;
-+	}
- 
- 	status = ssam_ctrl_notif_d0_entry(ctrl);
--	if (status)
-+	if (status) {
-+		dev_err(&serdev->dev, "failed to notify EC of entry of D0\n");
- 		goto err_initrq;
-+	}
- 
- 	status = ssam_ctrl_notif_display_on(ctrl);
--	if (status)
-+	if (status) {
-+		dev_err(&serdev->dev, "failed to notify EC of display on\n");
- 		goto err_initrq;
-+	}
- 
- 	status = sysfs_create_group(&serdev->dev.kobj, &ssam_sam_group);
- 	if (status)
-@@ -695,8 +707,10 @@ static int ssam_serial_hub_probe(struct serdev_device *serdev)
- 
- 	/* Set up IRQ. */
- 	status = ssam_irq_setup(ctrl);
--	if (status)
-+	if (status) {
-+		dev_err_probe(&serdev->dev, status, "failed to setup IRQ\n");
- 		goto err_irq;
-+	}
- 
- 	/* Finally, set main controller reference. */
- 	status = ssam_try_set_controller(ctrl);
 

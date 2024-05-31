@@ -111,16 +111,17 @@ diff --git a/mm/kmemleak.c b/mm/kmemleak.c
 index acd7cbb82e160..6ef0eda47487a 100644
 --- a/mm/kmemleak.c
 +++ b/mm/kmemleak.c
-@@ -427,9 +427,12 @@ static struct kmemleak_object *mem_pool_alloc(gfp_t gfp)
+@@ -457,10 +457,12 @@ static struct kmemleak_object *mem_pool_
  
  	/* try the slab allocator first */
  	if (object_cache) {
--		object = kmem_cache_alloc(object_cache, gfp_kmemleak_mask(gfp));
+-		object = kmem_cache_alloc_noprof(object_cache,
+-						 gfp_nested_mask(gfp));
 -		if (object)
 -			return object;
 +		while (1) {
-+			object = kmem_cache_alloc(object_cache,
-+						  gfp_kmemleak_mask(gfp));
++			object = kmem_cache_alloc_noprof(object_cache,
++							 gfp_nested_mask(gfp));
 +			if (object)
 +				return object;
 +		}
