@@ -1426,7 +1426,7 @@ index 3261b067b67e2c..d3065fe35c61f7 100644
  static enum hrtimer_restart sched_rt_period_timer(struct hrtimer *timer)
  {
  	struct rt_bandwidth *rt_b =
-@@ -131,35 +161,6 @@ static void start_rt_bandwidth(struct rt_bandwidth *rt_b)
+@@ -130,35 +160,6 @@ static void start_rt_bandwidth(struct rt
  	do_start_rt_bandwidth(rt_b);
  }
  
@@ -1440,7 +1440,7 @@ index 3261b067b67e2c..d3065fe35c61f7 100644
 -		INIT_LIST_HEAD(array->queue + i);
 -		__clear_bit(i, array->bitmap);
 -	}
--	/* delimiter for bitsearch: */
+-	/* delimiter for bit-search: */
 -	__set_bit(MAX_RT_PRIO, array->bitmap);
 -
 -#if defined CONFIG_SMP
@@ -1754,4 +1754,18 @@ index 9d101855984119..d859db7a7442c1 100644
 -extern struct rt_bandwidth def_rt_bandwidth;
  extern void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime);
  extern bool sched_rt_bandwidth_account(struct rt_rq *rt_rq);
+ 
+
+// Compilation Fixup
+
+--- a/kernel/sched/fair.c	2024-06-07 14:23:12.953641462 -0500
++++ b/kernel/sched/fair.c	2024-06-07 14:22:33.083952452 -0500
+@@ -7313,6 +7313,8 @@ static int
+ wake_affine_weight(struct sched_domain *sd, struct task_struct *p,
+ 		   int this_cpu, int prev_cpu, int sync)
+ {
++	struct cfs_rq *cfs_rq = task_cfs_rq(p);
++	struct rq *rq = rq_of(cfs_rq);
+ 	s64 this_eff_load, prev_eff_load;
+ 	unsigned long task_load;
  

@@ -108,7 +108,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.10-rc2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=2
+pkgrel=6
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -116,7 +116,7 @@ options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
   "https://git.kernel.org/torvalds/t/linux-6.10-rc2.tar.gz"
-  "0000-patch-6.10-rc1-rt1.patch"
+  "0000-patch-6.10-rc2-rt3.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -138,18 +138,8 @@ source=(
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
-  "1001-sched-eevdf-Add-feature-comments.patch"
-  "1002-sched-eevdf-Remove-min_vruntime_copy.patch"
-  "1003-sched-fair-Cleanup-pick_task_fair-vs-throttle.patch"
-  "1004-sched-fair-Cleanup-pick_task_fair-s-curr.patch"
-  "1005-sched-fair-Unify-pick_-next_-_task_fair.patch"
-  "1006-sched-Allow-sched_class-dequeue_task-to-fail.patch"
-  "1007-sched-fair-Re-organize-dequeue_task_fair.patch"
-  "1008-sched-fair-Implement-delayed-dequeue.patch"
-  "1009-sched-eevdf-Fixup_PELT-vs-DELAYED_DEQUEUE.patch"
-  "1010-sched-eevdf-Limit_preemption_a_little_more.patch"
-  "1011-sched-eevdf-Allow-shorter-slices-to-wakeup-preempt.patch"
-  "1012-sched-eevdf-Use-sched_attr-sched_runtime-to-set-requ.patch"
+  "1000-sched-core-devel.patch"
+  "1001-sched-eevdf-devel.patch"
   "0101-sched-Fair-DL-server_V7.patch"
   "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
   "1101-sched-fair-Reduce_PELT_half-life_from_32ms_to_16ms.patch"
@@ -159,7 +149,6 @@ source=(
   "1107-block-set_rq_affinity_to_force_full.patch"
   "1108-Add_sysctl_and_CONFIG_to_disallow_unprivileged.patch"
   "1110-add-acs-overrides_iommu.patch"
-  "1111-eevdf-fair-fixup-loadavg-issues.patch"
   "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
   "1113-mm-lru-misc_optimizations.patch"
   "9999-sched_feat-compile-time.patch"
@@ -516,7 +505,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('8515af8a929ec52ba48829ac49aea1ad1226050dc6add0943f5b1301d99fa2fa'
-            '3d7a7c8a5eb4167581ba5a144800e89d48f2b4758eb313fa61ec89a5a03cb0b7'
+            'b5905f26c82e978d8043e0f094dfc8915f5b15e5202a1d65d9e80727a563c7a0'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
             '5d39331ebde909922ddc98307b7b4e7c1728708dd5ad424f2e2e77f34eec4c54'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -538,19 +527,9 @@ sha256sums=('8515af8a929ec52ba48829ac49aea1ad1226050dc6add0943f5b1301d99fa2fa'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
-            'd16531952e0da603999ac9227cf6e055d8755f1fd2a3437a013720e4637c23bb'
-            '52b2cd1f42b7554af01e455fe7d51b25715ac1f79ca663c2488e471a55815953'
-            '2d7d33bf2eb6bfdaacd0d3a04ccc9f0478a09a1b6712d2316befed4899a7ec27'
-            '3d5e609dec000c09b56af236de03c10df6ebf4da746425574534bdbeab642c75'
-            'e4b8700f7524200297dacbd900dfc7e8b5f4562f9ebdad04ac9ba0450b759812'
-            '78071773c8c16df0ece0747bd9d46c25221a80364c53d9db0b2c6dca6e9b2810'
-            'e2697ce3cb6b4614cb4f18ffb8ce231cedee519d1042d02ffa54a35b37938b5d'
-            '91b2c42b4e5d530dd158856b83fab3ce5d44b5d0c0e7716d4089e8ee845fb81d'
-            '38696824a7a187888a45f3ad8a6278b9bdf600e45d85e05629a672777800e73c'
-            '59149af11658e790e7d7c12df7258985b5fe8e154faf96514c8d33a259c5f840'
-            '033c53bac1e449f5b2efba2442c14ba3876b1fefbf7be21bfcd85dc90b076295'
-            'b3aa99b303d0ca74c7420bc32a7646b90055fcae7dc65c459840dc52df24fc0e'
-            'a995e52941b03700d4dbc8be01c9fa01680c3ca5b3481a0fab13f520e24f54b7'
+            '27c51dc8327193ecf5732a1cb88715b8b573ab8cce86c3a1aa23557a0ed96833'
+            'a2756bd85de0f09fc0e805ce4c7015790c01a0a81be14899b7fa4b69536d594c'
+            '5a8ef40c3e9855991d37c3e7fdbc74a769288241150c028a9eca39fa77a62536'
             '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
             '4352a282b865b2ee50b70d3d2537661dedc9617463cd3e61ddc52e12bb8b53ac'
             'db5b0d3d82736e8acd9289e7728af3845244c32ff7a8d2e4151e1efbe89f0c09'
@@ -559,7 +538,6 @@ sha256sums=('8515af8a929ec52ba48829ac49aea1ad1226050dc6add0943f5b1301d99fa2fa'
             'a1f803ab71c0b18ffa845a7bfd1ee90d2b2f2ec656cf9bedf0a2db2a2c2869a3'
             '8d4570520b9e7259c788e60e8e6d7c58c58bb5c5a99e46f03d13a23515491a18'
             'f3e6c8c98ea5172f424971bc20f128c7f1f6416af6944f58dad1048ba4dff168'
-            'f022ece72f3d33f5c1759244e19d995fc457a283647919f74082f57ddbf270f4'
             'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
             'c6c2b07ba61d624a3e2b351dc5d3d914183bdecb61fa975486f64b046f88a55e'
-            'cd743120827b6238fb3f83ed8b78c506b39de7b8a93397d12ad518379541ae3e')
+            'fd6603b5748f1bf10d4a0130f3b5380ea9dfc117170f5768cb8ded30d152fff6')
