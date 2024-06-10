@@ -6669,19 +6669,6 @@ index 0000000000000..1445cd65885cd
 +++ b/localversion-rt
 @@ -0,0 +1 @@
 +-rt3
-diff --git a/mm/memcontrol.c b/mm/memcontrol.c
-index 7fad15b2290c7..36793e509f470 100644
---- a/mm/memcontrol.c
-+++ b/mm/memcontrol.c
-@@ -3147,8 +3147,6 @@ static inline void __mod_objcg_mlstate(struct obj_cgroup *objcg,
- 	struct mem_cgroup *memcg;
- 	struct lruvec *lruvec;
- 
--	lockdep_assert_irqs_disabled();
--
- 	rcu_read_lock();
- 	memcg = obj_cgroup_memcg(objcg);
- 	lruvec = mem_cgroup_lruvec(memcg, pgdat);
 diff --git a/net/bpf/test_run.c b/net/bpf/test_run.c
 index f6aad4ed2ab2f..600cc8e428c1a 100644
 --- a/net/bpf/test_run.c
