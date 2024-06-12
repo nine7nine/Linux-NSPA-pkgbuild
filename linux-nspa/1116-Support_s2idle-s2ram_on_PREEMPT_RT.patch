@@ -1,0 +1,488 @@
+From: Ulf Hansson <ulf.hansson@linaro.org>
+To: "Rafael J . Wysocki" <rafael@kernel.org>,
+	Sudeep Holla <sudeep.holla@arm.com>,
+	linux-pm@vger.kernel.org
+Cc: Lorenzo Pieralisi <Lorenzo.Pieralisi@arm.com>,
+	Nikunj Kela <nkela@quicinc.com>,
+	Prasad Sodagudi <psodagud@quicinc.com>,
+	Maulik Shah <quic_mkshah@quicinc.com>,
+	Daniel Lezcano <daniel.lezcano@linaro.org>,
+	Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>,
+	Ulf Hansson <ulf.hansson@linaro.org>,
+	linux-rt-users@vger.kernel.org,
+	linux-arm-kernel@lists.infradead.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH v2 1/7] pmdomain: core: Enable s2idle for CPU PM domains on PREEMPT_RT
+Date: Mon, 27 May 2024 16:25:51 +0200	[thread overview]
+Message-ID: <20240527142557.321610-2-ulf.hansson@linaro.org> (raw)
+In-Reply-To: <20240527142557.321610-1-ulf.hansson@linaro.org>
+
+To allow a genpd provider for a CPU PM domain to enter a domain-idle-state
+during s2idle on a PREEMPT_RT based configuration, we can't use the regular
+spinlock, as they are turned into sleepable locks on PREEMPT_RT.
+
+To address this problem, let's convert into using the raw spinlock, but
+only for genpd providers that have the GENPD_FLAG_CPU_DOMAIN bit set. In
+this way, the lock can still be acquired/released in atomic context, which
+is needed in the idle-path for PREEMPT_RT.
+
+Do note that the genpd power-on/off notifiers may also be fired during
+s2idle, but these are already prepared for PREEMPT_RT as they are based on
+the raw notifiers. However, consumers of them may need to adopt accordingly
+to work properly on PREEMPT_RT.
+
+Signed-off-by: Ulf Hansson <ulf.hansson@linaro.org>
+---
+
+Changes in v2:
+	- None.
+
+---
+ drivers/pmdomain/core.c   | 47 ++++++++++++++++++++++++++++++++++++++-
+ include/linux/pm_domain.h |  5 ++++-
+ 2 files changed, 50 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+index 623d15b68707..072e6bdb6ee6 100644
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -159,6 +159,48 @@ static const struct genpd_lock_ops genpd
+ 	.unlock = genpd_unlock_rawspin,
+ };
+ 
++static void genpd_lock_raw_spin(struct generic_pm_domain *genpd)
++	__acquires(&genpd->raw_slock)
++{
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&genpd->raw_slock, flags);
++	genpd->raw_lock_flags = flags;
++}
++
++static void genpd_lock_nested_raw_spin(struct generic_pm_domain *genpd,
++					int depth)
++	__acquires(&genpd->raw_slock)
++{
++	unsigned long flags;
++
++	raw_spin_lock_irqsave_nested(&genpd->raw_slock, flags, depth);
++	genpd->raw_lock_flags = flags;
++}
++
++static int genpd_lock_interruptible_raw_spin(struct generic_pm_domain *genpd)
++	__acquires(&genpd->raw_slock)
++{
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&genpd->raw_slock, flags);
++	genpd->raw_lock_flags = flags;
++	return 0;
++}
++
++static void genpd_unlock_raw_spin(struct generic_pm_domain *genpd)
++	__releases(&genpd->raw_slock)
++{
++	raw_spin_unlock_irqrestore(&genpd->raw_slock, genpd->raw_lock_flags);
++}
++
++static const struct genpd_lock_ops genpd_raw_spin_ops = {
++	.lock = genpd_lock_raw_spin,
++	.lock_nested = genpd_lock_nested_raw_spin,
++	.lock_interruptible = genpd_lock_interruptible_raw_spin,
++	.unlock = genpd_unlock_raw_spin,
++};
++
+ #define genpd_lock(p)			p->lock_ops->lock(p)
+ #define genpd_lock_nested(p, d)		p->lock_ops->lock_nested(p, d)
+ #define genpd_lock_interruptible(p)	p->lock_ops->lock_interruptible(p)
+@@ -1807,12 +1849,13 @@ static int genpd_remove_device(struct ge
+ 		genpd->gd->max_off_time_changed = true;
+ 
+ 	genpd_clear_cpumask(genpd, gpd_data->cpu);
+-	dev_pm_domain_set(dev, NULL);
+ 
+ 	list_del_init(&pdd->list_node);
+ 
+ 	genpd_unlock(genpd);
+ 
++	dev_pm_domain_set(dev, NULL);
++
+ 	if (genpd->detach_dev)
+ 		genpd->detach_dev(genpd, dev);
+ 
+@@ -2133,11 +2176,11 @@ static void genpd_free_data(struct gener
+ 
+ static void genpd_lock_init(struct generic_pm_domain *genpd)
+ {
+-	if (genpd->flags & GENPD_FLAG_IRQ_SAFE) {
++	if (genpd->flags & GENPD_FLAG_IRQ_DOMAIN) {
+ 		if (genpd->flags & GENPD_FLAG_RT_SAFE) {
+ 			raw_spin_lock_init(&genpd->rslock);
+ 			genpd->lock_ops = &genpd_rawspin_ops;
+-		} else {
++		} else if (genpd->flags & GENPD_FLAG_IRQ_SAFE) {
+ 			spin_lock_init(&genpd->slock);
+ 			genpd->lock_ops = &genpd_spin_ops;
+ 		}
+@@ -3195,7 +3238,6 @@ static int genpd_summary_one(struct seq_
+ 		[GENPD_STATE_OFF] = "off"
+ 	};
+ 	struct pm_domain_data *pm_data;
+-	const char *kobj_path;
+ 	struct gpd_link *link;
+ 	char state[16];
+ 	int ret;
+@@ -3228,16 +3270,9 @@ static int genpd_summary_one(struct seq_
+ 	}
+ 
+ 	list_for_each_entry(pm_data, &genpd->dev_list, list_node) {
+-		kobj_path = kobject_get_path(&pm_data->dev->kobj,
+-				genpd_is_irq_safe(genpd) ?
+-				GFP_ATOMIC : GFP_KERNEL);
+-		if (kobj_path == NULL)
+-			continue;
+-
+-		seq_printf(s, "\n    %-50s  ", kobj_path);
++		seq_printf(s, "\n    %-50s  ", dev_name(pm_data->dev));
+ 		rtpm_status_str(s, pm_data->dev);
+ 		perf_status_str(s, pm_data->dev);
+-		kfree(kobj_path);
+ 	}
+ 
+ 	seq_puts(s, "\n");
+@@ -3406,23 +3441,14 @@ static int devices_show(struct seq_file
+ {
+ 	struct generic_pm_domain *genpd = s->private;
+ 	struct pm_domain_data *pm_data;
+-	const char *kobj_path;
+ 	int ret = 0;
+ 
+ 	ret = genpd_lock_interruptible(genpd);
+ 	if (ret)
+ 		return -ERESTARTSYS;
+ 
+-	list_for_each_entry(pm_data, &genpd->dev_list, list_node) {
+-		kobj_path = kobject_get_path(&pm_data->dev->kobj,
+-				genpd_is_irq_safe(genpd) ?
+-				GFP_ATOMIC : GFP_KERNEL);
+-		if (kobj_path == NULL)
+-			continue;
+-
+-		seq_printf(s, "%s\n", kobj_path);
+-		kfree(kobj_path);
+-	}
++	list_for_each_entry(pm_data, &genpd->dev_list, list_node)
++		seq_printf(s, "%s\n", dev_name(pm_data->dev));
+ 
+ 	genpd_unlock(genpd);
+ 	return ret;
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+index f24546a3d3db..0d7fc47de3bc 100644
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -194,8 +194,11 @@ struct generic_pm_domain {
+ 			spinlock_t slock;
+ 			unsigned long lock_flags;
+ 		};
++		struct {
++			raw_spinlock_t raw_slock;
++			unsigned long raw_lock_flags;
++		};
+ 	};
+-
+ };
+ 
+ static inline struct generic_pm_domain *pd_to_genpd(struct dev_pm_domain *pd)
+-- 
+2.34.1
+
+From: Ulf Hansson <ulf.hansson@linaro.org>
+To: "Rafael J . Wysocki" <rafael@kernel.org>,
+	Sudeep Holla <sudeep.holla@arm.com>,
+	linux-pm@vger.kernel.org
+Cc: Lorenzo Pieralisi <Lorenzo.Pieralisi@arm.com>,
+	Nikunj Kela <nkela@quicinc.com>,
+	Prasad Sodagudi <psodagud@quicinc.com>,
+	Maulik Shah <quic_mkshah@quicinc.com>,
+	Daniel Lezcano <daniel.lezcano@linaro.org>,
+	Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>,
+	Ulf Hansson <ulf.hansson@linaro.org>,
+	linux-rt-users@vger.kernel.org,
+	linux-arm-kernel@lists.infradead.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH v2 4/7] cpuidle: psci-domain: Enable system-wide suspend on PREEMPT_RT
+Date: Mon, 27 May 2024 16:25:54 +0200	[thread overview]
+Message-ID: <20240527142557.321610-5-ulf.hansson@linaro.org> (raw)
+In-Reply-To: <20240527142557.321610-1-ulf.hansson@linaro.org>
+
+The domain-idle-states are currently disabled on a PREEMPT_RT based
+configuration for the cpuidle-psci-domain. To enable them to be used for
+system-wide suspend and in particular during s2idle, let's set the
+GENPD_FLAG_RPM_ALWAYS_ON instead of GENPD_FLAG_ALWAYS_ON for the
+corresponding genpd provider.
+
+In this way, the runtime PM path remains disabled in genpd for its attached
+devices, while powering-on/off the PM domain during system-wide suspend
+becomes allowed.
+
+Signed-off-by: Ulf Hansson <ulf.hansson@linaro.org>
+---
+Changes in v2:
+	- None.
+---
+ drivers/cpuidle/cpuidle-psci-domain.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci-domain.c b/drivers/cpuidle/cpuidle-psci-domain.c
+index fae958794339..ea28b73ef3fb 100644
+--- a/drivers/cpuidle/cpuidle-psci-domain.c
++++ b/drivers/cpuidle/cpuidle-psci-domain.c
+@@ -67,12 +67,16 @@ static int psci_pd_init(struct device_node *np, bool use_osi)
+ 
+ 	/*
+ 	 * Allow power off when OSI has been successfully enabled.
+-	 * PREEMPT_RT is not yet ready to enter domain idle states.
++	 * On a PREEMPT_RT based configuration the domain idle states are
++	 * supported, but only during system-wide suspend.
+ 	 */
+-	if (use_osi && !IS_ENABLED(CONFIG_PREEMPT_RT))
++	if (use_osi) {
+ 		pd->power_off = psci_pd_power_off;
+-	else
++		if (IS_ENABLED(CONFIG_PREEMPT_RT))
++			pd->flags |= GENPD_FLAG_RPM_ALWAYS_ON;
++	} else {
+ 		pd->flags |= GENPD_FLAG_ALWAYS_ON;
++	}
+ 
+ 	/* Use governor for CPU PM domains if it has some states to manage. */
+ 	pd_gov = pd->states ? &pm_domain_cpu_gov : NULL;
+-- 
+2.34.1
+
+From: Ulf Hansson <ulf.hansson@linaro.org>
+To: "Rafael J . Wysocki" <rafael@kernel.org>,
+	Sudeep Holla <sudeep.holla@arm.com>,
+	linux-pm@vger.kernel.org
+Cc: Lorenzo Pieralisi <Lorenzo.Pieralisi@arm.com>,
+	Nikunj Kela <nkela@quicinc.com>,
+	Prasad Sodagudi <psodagud@quicinc.com>,
+	Maulik Shah <quic_mkshah@quicinc.com>,
+	Daniel Lezcano <daniel.lezcano@linaro.org>,
+	Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>,
+	Ulf Hansson <ulf.hansson@linaro.org>,
+	linux-rt-users@vger.kernel.org,
+	linux-arm-kernel@lists.infradead.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH v2 5/7] cpuidle: psci: Drop redundant assignment of CPUIDLE_FLAG_RCU_IDLE
+Date: Mon, 27 May 2024 16:25:55 +0200	[thread overview]
+Message-ID: <20240527142557.321610-6-ulf.hansson@linaro.org> (raw)
+In-Reply-To: <20240527142557.321610-1-ulf.hansson@linaro.org>
+
+When using the hierarchical topology and PSCI OSI-mode we may end up
+overriding the deepest idle-state's ->enter|enter_s2idle() callbacks, but
+there is no point to also re-assign the CPUIDLE_FLAG_RCU_IDLE for the
+idle-state in question, as that has already been set when parsing the
+states from DT. See init_state_node().
+
+Signed-off-by: Ulf Hansson <ulf.hansson@linaro.org>
+---
+Changes in v2:
+	- None.
+---
+ drivers/cpuidle/cpuidle-psci.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index 782030a27703..d82a8bc1b194 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -234,7 +234,6 @@ static int psci_dt_cpu_init_topology(struct cpuidle_driver *drv,
+ 	 * of a shared state for the domain, assumes the domain states are all
+ 	 * deeper states.
+ 	 */
+-	drv->states[state_count - 1].flags |= CPUIDLE_FLAG_RCU_IDLE;
+ 	drv->states[state_count - 1].enter = psci_enter_domain_idle_state;
+ 	drv->states[state_count - 1].enter_s2idle = psci_enter_s2idle_domain_idle_state;
+ 	psci_cpuidle_use_cpuhp = true;
+-- 
+2.34.1
+
+From: Ulf Hansson <ulf.hansson@linaro.org>
+To: "Rafael J . Wysocki" <rafael@kernel.org>,
+	Sudeep Holla <sudeep.holla@arm.com>,
+	linux-pm@vger.kernel.org
+Cc: Lorenzo Pieralisi <Lorenzo.Pieralisi@arm.com>,
+	Nikunj Kela <nkela@quicinc.com>,
+	Prasad Sodagudi <psodagud@quicinc.com>,
+	Maulik Shah <quic_mkshah@quicinc.com>,
+	Daniel Lezcano <daniel.lezcano@linaro.org>,
+	Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>,
+	Ulf Hansson <ulf.hansson@linaro.org>,
+	linux-rt-users@vger.kernel.org,
+	linux-arm-kernel@lists.infradead.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH v2 6/7] cpuidle: psci: Enable the hierarchical topology for s2ram on PREEMPT_RT
+Date: Mon, 27 May 2024 16:25:56 +0200	[thread overview]
+Message-ID: <20240527142557.321610-7-ulf.hansson@linaro.org> (raw)
+In-Reply-To: <20240527142557.321610-1-ulf.hansson@linaro.org>
+
+The hierarchical PM domain topology are currently disabled on a PREEMPT_RT
+based configuration. As a first step to enable it to be used, let's try to
+attach the CPU devices to their PM domains on PREEMPT_RT. In this way the
+syscore ops becomes available, allowing the PM domain topology to be
+managed during s2ram.
+
+For the moment let's leave the support for CPU hotplug outside PREEMPT_RT,
+as it's depending on using runtime PM. For s2ram, this isn't a problem as
+all CPUs are managed via the syscore ops.
+
+Signed-off-by: Ulf Hansson <ulf.hansson@linaro.org>
+---
+Changes in v2:
+	- None.
+---
+ drivers/cpuidle/cpuidle-psci.c | 20 +++++++++++++++-----
+ 1 file changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index d82a8bc1b194..ad6ce9fe12b4 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -37,6 +37,7 @@ struct psci_cpuidle_data {
+ 
+ static DEFINE_PER_CPU_READ_MOSTLY(struct psci_cpuidle_data, psci_cpuidle_data);
+ static DEFINE_PER_CPU(u32, domain_state);
++static bool psci_cpuidle_use_syscore;
+ static bool psci_cpuidle_use_cpuhp;
+ 
+ void psci_set_domain_state(u32 state)
+@@ -166,6 +167,12 @@ static struct syscore_ops psci_idle_syscore_ops = {
+ 	.resume = psci_idle_syscore_resume,
+ };
+ 
++static void psci_idle_init_syscore(void)
++{
++	if (psci_cpuidle_use_syscore)
++		register_syscore_ops(&psci_idle_syscore_ops);
++}
++
+ static void psci_idle_init_cpuhp(void)
+ {
+ 	int err;
+@@ -173,8 +180,6 @@ static void psci_idle_init_cpuhp(void)
+ 	if (!psci_cpuidle_use_cpuhp)
+ 		return;
+ 
+-	register_syscore_ops(&psci_idle_syscore_ops);
+-
+ 	err = cpuhp_setup_state_nocalls(CPUHP_AP_CPU_PM_STARTING,
+ 					"cpuidle/psci:online",
+ 					psci_idle_cpuhp_up,
+@@ -222,13 +227,16 @@ static int psci_dt_cpu_init_topology(struct cpuidle_driver *drv,
+ 	if (!psci_has_osi_support())
+ 		return 0;
+ 
+-	if (IS_ENABLED(CONFIG_PREEMPT_RT))
+-		return 0;
+-
+ 	data->dev = dt_idle_attach_cpu(cpu, "psci");
+ 	if (IS_ERR_OR_NULL(data->dev))
+ 		return PTR_ERR_OR_ZERO(data->dev);
+ 
++	psci_cpuidle_use_syscore = true;
++
++	/* The hierarchical topology is limited to s2ram on PREEMPT_RT. */
++	if (IS_ENABLED(CONFIG_PREEMPT_RT))
++		return 0;
++
+ 	/*
+ 	 * Using the deepest state for the CPU to trigger a potential selection
+ 	 * of a shared state for the domain, assumes the domain states are all
+@@ -312,6 +320,7 @@ static void psci_cpu_deinit_idle(int cpu)
+ 	struct psci_cpuidle_data *data = per_cpu_ptr(&psci_cpuidle_data, cpu);
+ 
+ 	dt_idle_detach_cpu(data->dev);
++	psci_cpuidle_use_syscore = false;
+ 	psci_cpuidle_use_cpuhp = false;
+ }
+ 
+@@ -408,6 +417,7 @@ static int psci_cpuidle_probe(struct platform_device *pdev)
+ 			goto out_fail;
+ 	}
+ 
++	psci_idle_init_syscore();
+ 	psci_idle_init_cpuhp();
+ 	return 0;
+ 
+-- 
+2.34.1
+
+From: Ulf Hansson <ulf.hansson@linaro.org>
+To: "Rafael J . Wysocki" <rafael@kernel.org>,
+	Sudeep Holla <sudeep.holla@arm.com>,
+	linux-pm@vger.kernel.org
+Cc: Lorenzo Pieralisi <Lorenzo.Pieralisi@arm.com>,
+	Nikunj Kela <nkela@quicinc.com>,
+	Prasad Sodagudi <psodagud@quicinc.com>,
+	Maulik Shah <quic_mkshah@quicinc.com>,
+	Daniel Lezcano <daniel.lezcano@linaro.org>,
+	Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>,
+	Ulf Hansson <ulf.hansson@linaro.org>,
+	linux-rt-users@vger.kernel.org,
+	linux-arm-kernel@lists.infradead.org,
+	linux-kernel@vger.kernel.org
+Subject: [PATCH v2 7/7] cpuidle: psci: Enable the hierarchical topology for s2idle on PREEMPT_RT
+Date: Mon, 27 May 2024 16:25:57 +0200	[thread overview]
+Message-ID: <20240527142557.321610-8-ulf.hansson@linaro.org> (raw)
+In-Reply-To: <20240527142557.321610-1-ulf.hansson@linaro.org>
+
+To enable the domain-idle-states to be used during s2idle on a PREEMPT_RT
+based configuration, let's allow the re-assignment of the ->enter_s2idle()
+callback to psci_enter_s2idle_domain_idle_state().
+
+Similar to s2ram, let's leave the support for CPU hotplug outside
+PREEMPT_RT, as it's depending on using runtime PM. For s2idle, this means
+that an offline CPU's PM domain will remain powered-on. In practise this
+may lead to that a shallower idle-state than necessary gets selected, which
+shouldn't be an issue (besides wasting power).
+
+Signed-off-by: Ulf Hansson <ulf.hansson@linaro.org>
+---
+Changes in v2:
+	- None.
+---
+ drivers/cpuidle/cpuidle-psci.c | 13 ++++++-------
+ 1 file changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index ad6ce9fe12b4..2562dc001fc1 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -233,18 +233,17 @@ static int psci_dt_cpu_init_topology(struct cpuidle_driver *drv,
+ 
+ 	psci_cpuidle_use_syscore = true;
+ 
+-	/* The hierarchical topology is limited to s2ram on PREEMPT_RT. */
+-	if (IS_ENABLED(CONFIG_PREEMPT_RT))
+-		return 0;
+-
+ 	/*
+ 	 * Using the deepest state for the CPU to trigger a potential selection
+ 	 * of a shared state for the domain, assumes the domain states are all
+-	 * deeper states.
++	 * deeper states. On PREEMPT_RT the hierarchical topology is limited to
++	 * s2ram and s2idle.
+ 	 */
+-	drv->states[state_count - 1].enter = psci_enter_domain_idle_state;
+ 	drv->states[state_count - 1].enter_s2idle = psci_enter_s2idle_domain_idle_state;
+-	psci_cpuidle_use_cpuhp = true;
++	if (!IS_ENABLED(CONFIG_PREEMPT_RT)) {
++		drv->states[state_count - 1].enter = psci_enter_domain_idle_state;
++		psci_cpuidle_use_cpuhp = true;
++	}
+ 
+ 	return 0;
+ }
+-- 
+2.34.1

@@ -108,7 +108,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.10-rc3
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=7
+pkgrel=8
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -151,6 +151,10 @@ source=(
   "1110-add-acs-overrides_iommu.patch"
   "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
   "1113-mm-lru-misc_optimizations.patch"
+  "1116-kt-pm-suspend_patches.patch"
+  "1115-pmdomain-vs-RT-suspend.patch"
+  "1116-Support_s2idle-s2ram_on_PREEMPT_RT.patch"
+  "1117-serial-Fix-blocked_suspend.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -540,4 +544,8 @@ sha256sums=('cf967cf62073f58a23482dd1a579443e3a978570add40231aa52bb0cbf659e48'
             'f3e6c8c98ea5172f424971bc20f128c7f1f6416af6944f58dad1048ba4dff168'
             'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
             'c6c2b07ba61d624a3e2b351dc5d3d914183bdecb61fa975486f64b046f88a55e'
+            '15f2e5b9c8ff3539dfb250abcf1d381aa379be9ac3f1c3db5b89061cbe193b8f'
+            '95b8d13755145350a4566aaa0c81b1d2f73d670ca977a2631ebe055b2647b45f'
+            'b38c042ad4a408c2d30e53590afcc9ee195033204ed22ab86515e219c0fcc456'
+            'bcd270d35dee3fb2733a1697ec0f818ae7f1e0a00967cee7c3e37cd0d61103df'
             'fd6603b5748f1bf10d4a0130f3b5380ea9dfc117170f5768cb8ded30d152fff6')
