@@ -1693,11 +1693,30 @@ index 6813171afccb2..674a622c91be2 100644
  struct kvm_vcpu;
  
 diff --git a/include/linux/filter.h b/include/linux/filter.h
-index 0f12cf01070e3..2fc16ce4a404b 100644
+index 0f12cf01070e3..62662ab99d1f4 100644
 --- a/include/linux/filter.h
 +++ b/include/linux/filter.h
-@@ -744,7 +744,72 @@ struct bpf_redirect_info {
+@@ -733,21 +733,101 @@ struct bpf_nh_params {
+ 	};
+ };
+ 
++/* flags for bpf_redirect_info kern_flags */
++#define BPF_RI_F_RF_NO_DIRECT	BIT(0)	/* no napi_direct on return_frame */
++#define BPF_RI_F_RI_INIT	BIT(1)
++#define BPF_RI_F_CPU_MAP_INIT	BIT(2)
++#define BPF_RI_F_DEV_MAP_INIT	BIT(3)
++#define BPF_RI_F_XSK_MAP_INIT	BIT(4)
++
+ struct bpf_redirect_info {
+ 	u64 tgt_index;
+ 	void *tgt_value;
+ 	struct bpf_map *map;
+ 	u32 flags;
+-	u32 kern_flags;
+ 	u32 map_id;
+ 	enum bpf_map_type map_type;
  	struct bpf_nh_params nh;
++	u32 kern_flags;
  };
  
 -DECLARE_PER_CPU(struct bpf_redirect_info, bpf_redirect_info);
@@ -1707,21 +1726,16 @@ index 0f12cf01070e3..2fc16ce4a404b 100644
 +	struct list_head dev_map_flush_list;
 +	struct list_head xskmap_map_flush_list;
 +};
-+
+ 
+-/* flags for bpf_redirect_info kern_flags */
+-#define BPF_RI_F_RF_NO_DIRECT	BIT(0)	/* no napi_direct on return_frame */
 +static inline struct bpf_net_context *bpf_net_ctx_set(struct bpf_net_context *bpf_net_ctx)
 +{
 +	struct task_struct *tsk = current;
 +
 +	if (tsk->bpf_net_context != NULL)
 +		return NULL;
-+	memset(&bpf_net_ctx->ri, 0, sizeof(bpf_net_ctx->ri));
-+
-+	if (IS_ENABLED(CONFIG_BPF_SYSCALL)) {
-+		INIT_LIST_HEAD(&bpf_net_ctx->cpu_map_flush_list);
-+		INIT_LIST_HEAD(&bpf_net_ctx->dev_map_flush_list);
-+	}
-+	if (IS_ENABLED(CONFIG_XDP_SOCKETS))
-+		INIT_LIST_HEAD(&bpf_net_ctx->xskmap_map_flush_list);
++	bpf_net_ctx->ri.kern_flags = 0;
 +
 +	tsk->bpf_net_context = bpf_net_ctx;
 +	return bpf_net_ctx;
@@ -1742,12 +1756,22 @@ index 0f12cf01070e3..2fc16ce4a404b 100644
 +{
 +	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
 +
++	if (!(bpf_net_ctx->ri.kern_flags & BPF_RI_F_RI_INIT)) {
++		memset(&bpf_net_ctx->ri, 0, offsetof(struct bpf_net_context, ri.nh));
++		bpf_net_ctx->ri.kern_flags |= BPF_RI_F_RI_INIT;
++	}
++
 +	return &bpf_net_ctx->ri;
 +}
 +
 +static inline struct list_head *bpf_net_ctx_get_cpu_map_flush_list(void)
 +{
 +	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
++
++	if (!(bpf_net_ctx->ri.kern_flags & BPF_RI_F_CPU_MAP_INIT)) {
++		INIT_LIST_HEAD(&bpf_net_ctx->cpu_map_flush_list);
++		bpf_net_ctx->ri.kern_flags |= BPF_RI_F_CPU_MAP_INIT;
++	}
 +
 +	return &bpf_net_ctx->cpu_map_flush_list;
 +}
@@ -1756,6 +1780,11 @@ index 0f12cf01070e3..2fc16ce4a404b 100644
 +{
 +	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
 +
++	if (!(bpf_net_ctx->ri.kern_flags & BPF_RI_F_DEV_MAP_INIT)) {
++		INIT_LIST_HEAD(&bpf_net_ctx->dev_map_flush_list);
++		bpf_net_ctx->ri.kern_flags |= BPF_RI_F_DEV_MAP_INIT;
++	}
++
 +	return &bpf_net_ctx->dev_map_flush_list;
 +}
 +
@@ -1763,14 +1792,17 @@ index 0f12cf01070e3..2fc16ce4a404b 100644
 +{
 +	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
 +
++	if (!(bpf_net_ctx->ri.kern_flags & BPF_RI_F_XSK_MAP_INIT)) {
++		INIT_LIST_HEAD(&bpf_net_ctx->xskmap_map_flush_list);
++		bpf_net_ctx->ri.kern_flags |= BPF_RI_F_XSK_MAP_INIT;
++	}
++
 +	return &bpf_net_ctx->xskmap_map_flush_list;
 +}
-+
-+DEFINE_FREE(bpf_net_ctx_clear, struct bpf_net_context *, bpf_net_ctx_clear(_T));
  
- /* flags for bpf_redirect_info kern_flags */
- #define BPF_RI_F_RF_NO_DIRECT	BIT(0)	/* no napi_direct on return_frame */
-@@ -1018,25 +1083,23 @@ struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
+ /* Compute the linear packet data range [data, data_end) which
+  * will be accessed by various program types (cls_bpf, act_bpf,
+@@ -1018,25 +1098,23 @@ struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
  				       const struct bpf_insn *patch, u32 len);
  int bpf_remove_insns(struct bpf_prog *prog, u32 off, u32 cnt);
  
@@ -1799,7 +1831,7 @@ index 0f12cf01070e3..2fc16ce4a404b 100644
  
  	ri->kern_flags &= ~BPF_RI_F_RF_NO_DIRECT;
  }
-@@ -1592,7 +1655,7 @@ static __always_inline long __bpf_xdp_redirect_map(struct bpf_map *map, u64 inde
+@@ -1592,7 +1670,7 @@ static __always_inline long __bpf_xdp_redirect_map(struct bpf_map *map, u64 inde
  						   u64 flags, const u64 flag_mask,
  						   void *lookup_elem(struct bpf_map *map, u32 key))
  {
@@ -1933,10 +1965,10 @@ index 975e33b793a77..8dd71fbbb6d2b 100644
 +
  #endif /* CONFIG_PREEMPT_RT */
 diff --git a/include/linux/lockdep.h b/include/linux/lockdep.h
-index 5e51b0de4c4b5..fcc02812bf31e 100644
+index 08b0d1d9d78b7..3f5a551579cc9 100644
 --- a/include/linux/lockdep.h
 +++ b/include/linux/lockdep.h
-@@ -605,6 +605,8 @@ do {									\
+@@ -600,6 +600,8 @@ do {									\
  		     (!in_softirq() || in_irq() || in_nmi()));		\
  } while (0)
  
@@ -1945,7 +1977,7 @@ index 5e51b0de4c4b5..fcc02812bf31e 100644
  #else
  # define might_lock(lock) do { } while (0)
  # define might_lock_read(lock) do { } while (0)
-@@ -618,6 +620,7 @@ do {									\
+@@ -613,6 +615,7 @@ do {									\
  # define lockdep_assert_preemption_enabled() do { } while (0)
  # define lockdep_assert_preemption_disabled() do { } while (0)
  # define lockdep_assert_in_softirq() do { } while (0)
@@ -2684,7 +2716,7 @@ index a8e34416e960f..068e994ed781a 100644
 -
 -subsys_initcall(cpu_map_init);
 diff --git a/kernel/bpf/devmap.c b/kernel/bpf/devmap.c
-index 4e2cdbb5629f2..c8267ed580840 100644
+index 7f3b34452243c..317ac2d66ebd1 100644
 --- a/kernel/bpf/devmap.c
 +++ b/kernel/bpf/devmap.c
 @@ -83,7 +83,6 @@ struct bpf_dtab {
@@ -2738,7 +2770,7 @@ index 4e2cdbb5629f2..c8267ed580840 100644
  	struct xdp_dev_bulk_queue *bq = this_cpu_ptr(dev->xdp_bulkq);
  
  	if (unlikely(bq->count == DEV_MAP_BULK_SIZE))
-@@ -1156,15 +1162,11 @@ static struct notifier_block dev_map_notifier = {
+@@ -1153,15 +1159,11 @@ static struct notifier_block dev_map_notifier = {
  
  static int __init dev_map_init(void)
  {
@@ -2790,7 +2822,7 @@ index 2e0f75bcb7fd1..d952fa5ee8801 100644
  
  		if (ti_work & _TIF_NOTIFY_RESUME)
 diff --git a/kernel/events/core.c b/kernel/events/core.c
-index f0128c5ff2789..4dc151221124f 100644
+index 8f908f0779354..c51a782374aff 100644
 --- a/kernel/events/core.c
 +++ b/kernel/events/core.c
 @@ -2283,21 +2283,6 @@ event_sched_out(struct perf_event *event, struct perf_event_context *ctx)
@@ -2841,7 +2873,7 @@ index f0128c5ff2789..4dc151221124f 100644
  
  	unaccount_event(event);
  
-@@ -6737,7 +6723,7 @@ static void perf_sigtrap(struct perf_event *event)
+@@ -6750,7 +6736,7 @@ static void perf_sigtrap(struct perf_event *event)
  /*
   * Deliver the pending work in-event-context or follow the context.
   */
@@ -2850,7 +2882,7 @@ index f0128c5ff2789..4dc151221124f 100644
  {
  	int cpu = READ_ONCE(event->oncpu);
  
-@@ -6752,11 +6738,6 @@ static void __perf_pending_irq(struct perf_event *event)
+@@ -6765,11 +6751,6 @@ static void __perf_pending_irq(struct perf_event *event)
  	 * Yay, we hit home and are in the context of the event.
  	 */
  	if (cpu == smp_processor_id()) {
@@ -2862,7 +2894,7 @@ index f0128c5ff2789..4dc151221124f 100644
  		if (event->pending_disable) {
  			event->pending_disable = 0;
  			perf_event_disable_local(event);
-@@ -6780,11 +6761,26 @@ static void __perf_pending_irq(struct perf_event *event)
+@@ -6793,11 +6774,26 @@ static void __perf_pending_irq(struct perf_event *event)
  	 *				  irq_work_queue(); // FAILS
  	 *
  	 *  irq_work_run()
@@ -2891,7 +2923,7 @@ index f0128c5ff2789..4dc151221124f 100644
  }
  
  static void perf_pending_irq(struct irq_work *entry)
-@@ -6807,8 +6803,6 @@ static void perf_pending_irq(struct irq_work *entry)
+@@ -6820,8 +6816,6 @@ static void perf_pending_irq(struct irq_work *entry)
  		perf_event_wakeup(event);
  	}
  
@@ -2900,7 +2932,7 @@ index f0128c5ff2789..4dc151221124f 100644
  	if (rctx >= 0)
  		perf_swevent_put_recursion_context(rctx);
  }
-@@ -6816,14 +6810,6 @@ static void perf_pending_irq(struct irq_work *entry)
+@@ -6829,14 +6823,6 @@ static void perf_pending_irq(struct irq_work *entry)
  static void perf_pending_task(struct callback_head *head)
  {
  	struct perf_event *event = container_of(head, struct perf_event, pending_task);
@@ -2915,7 +2947,7 @@ index f0128c5ff2789..4dc151221124f 100644
  
  	if (event->pending_work) {
  		event->pending_work = 0;
-@@ -6831,10 +6817,6 @@ static void perf_pending_task(struct callback_head *head)
+@@ -6844,10 +6830,6 @@ static void perf_pending_task(struct callback_head *head)
  		local_dec(&event->ctx->nr_pending);
  	}
  
@@ -2926,7 +2958,7 @@ index f0128c5ff2789..4dc151221124f 100644
  	put_event(event);
  }
  
-@@ -9696,13 +9678,23 @@ static int __perf_event_overflow(struct perf_event *event,
+@@ -9709,13 +9691,23 @@ static int __perf_event_overflow(struct perf_event *event,
  
  		if (regs)
  			pending_id = hash32_ptr((void *)instruction_pointer(regs)) ?: 1;
@@ -2953,7 +2985,7 @@ index f0128c5ff2789..4dc151221124f 100644
  			 *
  			 *  1. Where !exclude_kernel, events can overflow again
  			 *     in the kernel without returning to user space.
-@@ -9712,13 +9704,12 @@ static int __perf_event_overflow(struct perf_event *event,
+@@ -9725,13 +9717,12 @@ static int __perf_event_overflow(struct perf_event *event,
  			 *     To approximate progress (with false negatives),
  			 *     check 32-bit hash of the current IP.
  			 */
@@ -2968,7 +3000,7 @@ index f0128c5ff2789..4dc151221124f 100644
  	}
  
  	READ_ONCE(event->overflow_handler)(event, data, regs);
-@@ -11948,6 +11939,7 @@ perf_event_alloc(struct perf_event_attr *attr, int cpu,
+@@ -11961,6 +11952,7 @@ perf_event_alloc(struct perf_event_attr *attr, int cpu,
  
  	init_waitqueue_head(&event->waitq);
  	init_irq_work(&event->pending_irq, perf_pending_irq);
@@ -2976,7 +3008,7 @@ index f0128c5ff2789..4dc151221124f 100644
  	init_task_work(&event->pending_task, perf_pending_task);
  
  	mutex_init(&event->mmap_mutex);
-@@ -13060,6 +13052,13 @@ static void sync_child_event(struct perf_event *child_event)
+@@ -13073,6 +13065,13 @@ static void sync_child_event(struct perf_event *child_event)
  		     &parent_event->child_total_time_running);
  }
  
@@ -2990,7 +3022,7 @@ index f0128c5ff2789..4dc151221124f 100644
  static void
  perf_event_exit_event(struct perf_event *event, struct perf_event_context *ctx)
  {
-@@ -13099,6 +13098,17 @@ perf_event_exit_event(struct perf_event *event, struct perf_event_context *ctx)
+@@ -13112,6 +13111,17 @@ perf_event_exit_event(struct perf_event *event, struct perf_event_context *ctx)
  		 * Kick perf_poll() for is_event_hup();
  		 */
  		perf_event_wakeup(parent_event);
@@ -6664,13 +6696,13 @@ index d8b302d010830..4f58a196e14c1 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..1445cd65885cd
+index 0000000000000..0efe7ba1930e1
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt3
++-rt5
 diff --git a/net/bpf/test_run.c b/net/bpf/test_run.c
-index f6aad4ed2ab2f..600cc8e428c1a 100644
+index 36ae54f57bf57..a6d7f790cdda8 100644
 --- a/net/bpf/test_run.c
 +++ b/net/bpf/test_run.c
 @@ -283,9 +283,10 @@ static int xdp_recv_frames(struct xdp_frame **frames, int nframes,
@@ -6726,7 +6758,7 @@ index f6aad4ed2ab2f..600cc8e428c1a 100644
  	} while (bpf_test_timer_continue(&t, 1, repeat, &ret, time));
  	bpf_reset_run_ctx(old_ctx);
 diff --git a/net/bridge/br_netfilter_hooks.c b/net/bridge/br_netfilter_hooks.c
-index bf30c50b56895..9596ad19224ad 100644
+index bf30c50b56895..3c9f6538990ea 100644
 --- a/net/bridge/br_netfilter_hooks.c
 +++ b/net/bridge/br_netfilter_hooks.c
 @@ -137,6 +137,7 @@ static inline bool is_pppoe_ipv6(const struct sk_buff *skb,
@@ -6748,24 +6780,58 @@ index bf30c50b56895..9596ad19224ad 100644
  
  static void nf_bridge_info_free(struct sk_buff *skb)
  {
-@@ -882,6 +885,7 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
+@@ -850,6 +853,7 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
+ {
+ 	struct nf_bridge_info *nf_bridge = nf_bridge_info_get(skb);
+ 	unsigned int mtu, mtu_reserved;
++	int ret;
+ 
+ 	mtu_reserved = nf_bridge_mtu_reduction(skb);
+ 	mtu = skb->dev->mtu;
+@@ -882,6 +886,7 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
  
  		IPCB(skb)->frag_max_size = nf_bridge->frag_max_size;
  
-+		guard(local_lock_nested_bh)(&brnf_frag_data_storage.bh_lock);
++		local_lock_nested_bh(&brnf_frag_data_storage.bh_lock);
  		data = this_cpu_ptr(&brnf_frag_data_storage);
  
  		if (skb_vlan_tag_present(skb)) {
-@@ -909,6 +913,7 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
+@@ -897,7 +902,9 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
+ 		skb_copy_from_linear_data_offset(skb, -data->size, data->mac,
+ 						 data->size);
+ 
+-		return br_nf_ip_fragment(net, sk, skb, br_nf_push_frag_xmit);
++		ret = br_nf_ip_fragment(net, sk, skb, br_nf_push_frag_xmit);
++		local_unlock_nested_bh(&brnf_frag_data_storage.bh_lock);
++		return ret;
+ 	}
+ 	if (IS_ENABLED(CONFIG_NF_DEFRAG_IPV6) &&
+ 	    skb->protocol == htons(ETH_P_IPV6)) {
+@@ -909,6 +916,7 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
  
  		IP6CB(skb)->frag_max_size = nf_bridge->frag_max_size;
  
-+		guard(local_lock_nested_bh)(&brnf_frag_data_storage.bh_lock);
++		local_lock_nested_bh(&brnf_frag_data_storage.bh_lock);
  		data = this_cpu_ptr(&brnf_frag_data_storage);
  		data->encap_size = nf_bridge_encap_header_len(skb);
  		data->size = ETH_HLEN + data->encap_size;
+@@ -916,8 +924,12 @@ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff
+ 		skb_copy_from_linear_data_offset(skb, -data->size, data->mac,
+ 						 data->size);
+ 
+-		if (v6ops)
+-			return v6ops->fragment(net, sk, skb, br_nf_push_frag_xmit);
++		if (v6ops) {
++			ret = v6ops->fragment(net, sk, skb, br_nf_push_frag_xmit);
++			local_unlock_nested_bh(&brnf_frag_data_storage.bh_lock);
++			return ret;
++		}
++		local_unlock_nested_bh(&brnf_frag_data_storage.bh_lock);
+ 
+ 		kfree_skb(skb);
+ 		return -EMSGSIZE;
 diff --git a/net/core/dev.c b/net/core/dev.c
-index e1bb6d7856d92..363dfa7a7986d 100644
+index 4d4de9008f6f3..85702022c5cd4 100644
 --- a/net/core/dev.c
 +++ b/net/core/dev.c
 @@ -229,7 +229,7 @@ static inline void backlog_lock_irq_save(struct softnet_data *sd,
@@ -6815,13 +6881,11 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  EXPORT_PER_CPU_SYMBOL(softnet_data);
  
  /* Page_pool has a lockless array/stack to alloc/recycle pages.
-@@ -4028,11 +4030,15 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
- 		   struct net_device *orig_dev, bool *another)
+@@ -4029,10 +4031,13 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
  {
  	struct bpf_mprog_entry *entry = rcu_dereference_bh(skb->dev->tcx_ingress);
-+	struct bpf_net_context *bpf_net_ctx __free(bpf_net_ctx_clear) = NULL;
  	enum skb_drop_reason drop_reason = SKB_DROP_REASON_TC_INGRESS;
-+	struct bpf_net_context __bpf_net_ctx;
++	struct bpf_net_context __bpf_net_ctx, *bpf_net_ctx;
  	int sch_ret;
  
  	if (!entry)
@@ -6831,14 +6895,35 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  	if (*pt_prev) {
  		*ret = deliver_skb(skb, *pt_prev, orig_dev);
  		*pt_prev = NULL;
-@@ -4083,13 +4089,17 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
- static __always_inline struct sk_buff *
- sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
+@@ -4061,10 +4066,12 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
+ 			break;
+ 		}
+ 		*ret = NET_RX_SUCCESS;
++		bpf_net_ctx_clear(bpf_net_ctx);
+ 		return NULL;
+ 	case TC_ACT_SHOT:
+ 		kfree_skb_reason(skb, drop_reason);
+ 		*ret = NET_RX_DROP;
++		bpf_net_ctx_clear(bpf_net_ctx);
+ 		return NULL;
+ 	/* used by tc_run */
+ 	case TC_ACT_STOLEN:
+@@ -4074,8 +4081,10 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
+ 		fallthrough;
+ 	case TC_ACT_CONSUMED:
+ 		*ret = NET_RX_SUCCESS;
++		bpf_net_ctx_clear(bpf_net_ctx);
+ 		return NULL;
+ 	}
++	bpf_net_ctx_clear(bpf_net_ctx);
+ 
+ 	return skb;
+ }
+@@ -4085,11 +4094,14 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
  {
-+	struct bpf_net_context *bpf_net_ctx __free(bpf_net_ctx_clear) = NULL;
  	struct bpf_mprog_entry *entry = rcu_dereference_bh(dev->tcx_egress);
  	enum skb_drop_reason drop_reason = SKB_DROP_REASON_TC_EGRESS;
-+	struct bpf_net_context __bpf_net_ctx;
++	struct bpf_net_context __bpf_net_ctx, *bpf_net_ctx;
  	int sch_ret;
  
  	if (!entry)
@@ -6849,7 +6934,31 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  	/* qdisc_skb_cb(skb)->pkt_len & tcx_set_ingress() was
  	 * already set by the caller.
  	 */
-@@ -5934,6 +5944,7 @@ static void flush_backlog(struct work_struct *work)
+@@ -4105,10 +4117,12 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
+ 		/* No need to push/pop skb's mac_header here on egress! */
+ 		skb_do_redirect(skb);
+ 		*ret = NET_XMIT_SUCCESS;
++		bpf_net_ctx_clear(bpf_net_ctx);
+ 		return NULL;
+ 	case TC_ACT_SHOT:
+ 		kfree_skb_reason(skb, drop_reason);
+ 		*ret = NET_XMIT_DROP;
++		bpf_net_ctx_clear(bpf_net_ctx);
+ 		return NULL;
+ 	/* used by tc_run */
+ 	case TC_ACT_STOLEN:
+@@ -4118,8 +4132,10 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
+ 		fallthrough;
+ 	case TC_ACT_CONSUMED:
+ 		*ret = NET_XMIT_SUCCESS;
++		bpf_net_ctx_clear(bpf_net_ctx);
+ 		return NULL;
+ 	}
++	bpf_net_ctx_clear(bpf_net_ctx);
+ 
+ 	return skb;
+ }
+@@ -5935,6 +5951,7 @@ static void flush_backlog(struct work_struct *work)
  	}
  	backlog_unlock_irq_enable(sd);
  
@@ -6857,7 +6966,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  	skb_queue_walk_safe(&sd->process_queue, skb, tmp) {
  		if (skb->dev->reg_state == NETREG_UNREGISTERING) {
  			__skb_unlink(skb, &sd->process_queue);
-@@ -5941,6 +5952,7 @@ static void flush_backlog(struct work_struct *work)
+@@ -5942,6 +5959,7 @@ static void flush_backlog(struct work_struct *work)
  			rps_input_queue_head_incr(sd);
  		}
  	}
@@ -6865,7 +6974,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  	local_bh_enable();
  }
  
-@@ -6062,7 +6074,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6063,7 +6081,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
  	while (again) {
  		struct sk_buff *skb;
  
@@ -6875,7 +6984,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  			rcu_read_lock();
  			__netif_receive_skb(skb);
  			rcu_read_unlock();
-@@ -6071,7 +6085,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6072,7 +6092,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
  				return work;
  			}
  
@@ -6885,7 +6994,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  
  		backlog_lock_irq_disable(sd);
  		if (skb_queue_empty(&sd->input_pkt_queue)) {
-@@ -6086,8 +6102,10 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6087,8 +6109,10 @@ static int process_backlog(struct napi_struct *napi, int quota)
  			napi->state &= NAPIF_STATE_THREADED;
  			again = false;
  		} else {
@@ -6896,7 +7005,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  		}
  		backlog_unlock_irq_enable(sd);
  	}
-@@ -6348,11 +6366,11 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6349,6 +6373,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  {
  	unsigned long start_time = loop_end ? busy_loop_current_time() : 0;
  	int (*napi_poll)(struct napi_struct *napi, int budget);
@@ -6904,12 +7013,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  	void *have_poll_lock = NULL;
  	struct napi_struct *napi;
  
- 	WARN_ON_ONCE(!rcu_read_lock_held());
--
- restart:
- 	napi_poll = NULL;
- 
-@@ -6366,6 +6384,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6367,6 +6392,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  		int work = 0;
  
  		local_bh_disable();
@@ -6917,7 +7021,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  		if (!napi_poll) {
  			unsigned long val = READ_ONCE(napi->state);
  
-@@ -6396,6 +6415,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6397,6 +6423,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  			__NET_ADD_STATS(dev_net(napi->dev),
  					LINUX_MIB_BUSYPOLLRXPACKETS, work);
  		skb_defer_free_flush(this_cpu_ptr(&softnet_data));
@@ -6925,7 +7029,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  		local_bh_enable();
  
  		if (!loop_end || loop_end(loop_end_arg, start_time))
-@@ -6823,6 +6843,7 @@ static int napi_thread_wait(struct napi_struct *napi)
+@@ -6824,6 +6851,7 @@ static int napi_thread_wait(struct napi_struct *napi)
  
  static void napi_threaded_poll_loop(struct napi_struct *napi)
  {
@@ -6933,7 +7037,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  	struct softnet_data *sd;
  	unsigned long last_qs = jiffies;
  
-@@ -6831,6 +6852,8 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
+@@ -6832,6 +6860,8 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
  		void *have;
  
  		local_bh_disable();
@@ -6942,7 +7046,7 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  		sd = this_cpu_ptr(&softnet_data);
  		sd->in_napi_threaded_poll = true;
  
-@@ -6846,6 +6869,7 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
+@@ -6847,6 +6877,7 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
  			net_rps_action_and_irq_enable(sd);
  		}
  		skb_defer_free_flush(sd);
@@ -6950,16 +7054,12 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  		local_bh_enable();
  
  		if (!repoll)
-@@ -6868,13 +6892,16 @@ static int napi_threaded_poll(void *data)
- 
- static __latent_entropy void net_rx_action(struct softirq_action *h)
- {
-+	struct bpf_net_context *bpf_net_ctx __free(bpf_net_ctx_clear) = NULL;
+@@ -6872,10 +6903,12 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
  	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
  	unsigned long time_limit = jiffies +
  		usecs_to_jiffies(READ_ONCE(net_hotdata.netdev_budget_usecs));
++	struct bpf_net_context __bpf_net_ctx, *bpf_net_ctx;
  	int budget = READ_ONCE(net_hotdata.netdev_budget);
-+	struct bpf_net_context __bpf_net_ctx;
  	LIST_HEAD(list);
  	LIST_HEAD(repoll);
  
@@ -6967,6 +7067,16 @@ index e1bb6d7856d92..363dfa7a7986d 100644
  start:
  	sd->in_net_rx_action = true;
  	local_irq_disable();
+@@ -6928,7 +6961,8 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+ 		sd->in_net_rx_action = false;
+ 
+ 	net_rps_action_and_irq_enable(sd);
+-end:;
++end:
++	bpf_net_ctx_clear(bpf_net_ctx);
+ }
+ 
+ struct netdev_adjacent {
 diff --git a/net/core/dev.h b/net/core/dev.h
 index b7b518bc2be55..2f96d63053ad0 100644
 --- a/net/core/dev.h
@@ -7005,7 +7115,7 @@ index b7b518bc2be55..2f96d63053ad0 100644
  
  #endif
 diff --git a/net/core/filter.c b/net/core/filter.c
-index 2510464692af0..64a1696a52920 100644
+index 2510464692af0..f00cc56123013 100644
 --- a/net/core/filter.c
 +++ b/net/core/filter.c
 @@ -1658,9 +1658,12 @@ struct bpf_scratchpad {
@@ -7022,15 +7132,32 @@ index 2510464692af0..64a1696a52920 100644
  
  static inline int __bpf_try_make_writable(struct sk_buff *skb,
  					  unsigned int write_len)
-@@ -2029,6 +2032,7 @@ BPF_CALL_5(bpf_csum_diff, __be32 *, from, u32, from_size,
+@@ -2016,6 +2019,7 @@ BPF_CALL_5(bpf_csum_diff, __be32 *, from, u32, from_size,
+ 	struct bpf_scratchpad *sp = this_cpu_ptr(&bpf_sp);
+ 	u32 diff_size = from_size + to_size;
+ 	int i, j = 0;
++	__wsum ret;
+ 
+ 	/* This is quite flexible, some examples:
+ 	 *
+@@ -2029,12 +2033,15 @@ BPF_CALL_5(bpf_csum_diff, __be32 *, from, u32, from_size,
  		     diff_size > sizeof(sp->diff)))
  		return -EINVAL;
  
-+	guard(local_lock_nested_bh)(&bpf_sp.bh_lock);
++	local_lock_nested_bh(&bpf_sp.bh_lock);
  	for (i = 0; i < from_size / sizeof(__be32); i++, j++)
  		sp->diff[j] = ~from[i];
  	for (i = 0; i <   to_size / sizeof(__be32); i++, j++)
-@@ -2471,9 +2475,6 @@ static const struct bpf_func_proto bpf_clone_redirect_proto = {
+ 		sp->diff[j] = to[i];
+ 
+-	return csum_partial(sp->diff, diff_size, seed);
++	ret = csum_partial(sp->diff, diff_size, seed);
++	local_unlock_nested_bh(&bpf_sp.bh_lock);
++	return ret;
+ }
+ 
+ static const struct bpf_func_proto bpf_csum_diff_proto = {
+@@ -2471,9 +2478,6 @@ static const struct bpf_func_proto bpf_clone_redirect_proto = {
  	.arg3_type      = ARG_ANYTHING,
  };
  
@@ -7040,7 +7167,7 @@ index 2510464692af0..64a1696a52920 100644
  static struct net_device *skb_get_peer_dev(struct net_device *dev)
  {
  	const struct net_device_ops *ops = dev->netdev_ops;
-@@ -2486,7 +2487,7 @@ static struct net_device *skb_get_peer_dev(struct net_device *dev)
+@@ -2486,7 +2490,7 @@ static struct net_device *skb_get_peer_dev(struct net_device *dev)
  
  int skb_do_redirect(struct sk_buff *skb)
  {
@@ -7049,7 +7176,7 @@ index 2510464692af0..64a1696a52920 100644
  	struct net *net = dev_net(skb->dev);
  	struct net_device *dev;
  	u32 flags = ri->flags;
-@@ -2519,7 +2520,7 @@ int skb_do_redirect(struct sk_buff *skb)
+@@ -2519,7 +2523,7 @@ int skb_do_redirect(struct sk_buff *skb)
  
  BPF_CALL_2(bpf_redirect, u32, ifindex, u64, flags)
  {
@@ -7058,7 +7185,7 @@ index 2510464692af0..64a1696a52920 100644
  
  	if (unlikely(flags & (~(BPF_F_INGRESS) | BPF_F_REDIRECT_INTERNAL)))
  		return TC_ACT_SHOT;
-@@ -2540,7 +2541,7 @@ static const struct bpf_func_proto bpf_redirect_proto = {
+@@ -2540,7 +2544,7 @@ static const struct bpf_func_proto bpf_redirect_proto = {
  
  BPF_CALL_2(bpf_redirect_peer, u32, ifindex, u64, flags)
  {
@@ -7067,7 +7194,7 @@ index 2510464692af0..64a1696a52920 100644
  
  	if (unlikely(flags))
  		return TC_ACT_SHOT;
-@@ -2562,7 +2563,7 @@ static const struct bpf_func_proto bpf_redirect_peer_proto = {
+@@ -2562,7 +2566,7 @@ static const struct bpf_func_proto bpf_redirect_peer_proto = {
  BPF_CALL_4(bpf_redirect_neigh, u32, ifindex, struct bpf_redir_neigh *, params,
  	   int, plen, u64, flags)
  {
@@ -7076,7 +7203,7 @@ index 2510464692af0..64a1696a52920 100644
  
  	if (unlikely((plen && plen < sizeof(*params)) || flags))
  		return TC_ACT_SHOT;
-@@ -4288,30 +4289,13 @@ void xdp_do_check_flushed(struct napi_struct *napi)
+@@ -4288,30 +4292,13 @@ void xdp_do_check_flushed(struct napi_struct *napi)
  }
  #endif
  
@@ -7108,7 +7235,7 @@ index 2510464692af0..64a1696a52920 100644
  
  	master = netdev_master_upper_dev_get_rcu(xdp->rxq->dev);
  	slave = master->netdev_ops->ndo_xdp_get_xmit_slave(master, xdp);
-@@ -4383,7 +4367,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
+@@ -4383,7 +4370,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
  			map = READ_ONCE(ri->map);
  
  			/* The map pointer is cleared when the map is being torn
@@ -7117,7 +7244,7 @@ index 2510464692af0..64a1696a52920 100644
  			 */
  			if (unlikely(!map)) {
  				err = -ENOENT;
-@@ -4428,7 +4412,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
+@@ -4428,7 +4415,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
  int xdp_do_redirect(struct net_device *dev, struct xdp_buff *xdp,
  		    struct bpf_prog *xdp_prog)
  {
@@ -7126,7 +7253,7 @@ index 2510464692af0..64a1696a52920 100644
  	enum bpf_map_type map_type = ri->map_type;
  
  	if (map_type == BPF_MAP_TYPE_XSKMAP)
-@@ -4442,7 +4426,7 @@ EXPORT_SYMBOL_GPL(xdp_do_redirect);
+@@ -4442,7 +4429,7 @@ EXPORT_SYMBOL_GPL(xdp_do_redirect);
  int xdp_do_redirect_frame(struct net_device *dev, struct xdp_buff *xdp,
  			  struct xdp_frame *xdpf, struct bpf_prog *xdp_prog)
  {
@@ -7135,7 +7262,7 @@ index 2510464692af0..64a1696a52920 100644
  	enum bpf_map_type map_type = ri->map_type;
  
  	if (map_type == BPF_MAP_TYPE_XSKMAP)
-@@ -4459,7 +4443,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+@@ -4459,7 +4446,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
  				       enum bpf_map_type map_type, u32 map_id,
  				       u32 flags)
  {
@@ -7144,7 +7271,7 @@ index 2510464692af0..64a1696a52920 100644
  	struct bpf_map *map;
  	int err;
  
-@@ -4471,7 +4455,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+@@ -4471,7 +4458,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
  			map = READ_ONCE(ri->map);
  
  			/* The map pointer is cleared when the map is being torn
@@ -7153,7 +7280,7 @@ index 2510464692af0..64a1696a52920 100644
  			 */
  			if (unlikely(!map)) {
  				err = -ENOENT;
-@@ -4513,7 +4497,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+@@ -4513,7 +4500,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
  int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
  			    struct xdp_buff *xdp, struct bpf_prog *xdp_prog)
  {
@@ -7162,7 +7289,7 @@ index 2510464692af0..64a1696a52920 100644
  	enum bpf_map_type map_type = ri->map_type;
  	void *fwd = ri->tgt_value;
  	u32 map_id = ri->map_id;
-@@ -4549,7 +4533,7 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
+@@ -4549,7 +4536,7 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
  
  BPF_CALL_2(bpf_xdp_redirect, u32, ifindex, u64, flags)
  {
@@ -7171,7 +7298,7 @@ index 2510464692af0..64a1696a52920 100644
  
  	if (unlikely(flags))
  		return XDP_ABORTED;
-@@ -6450,6 +6434,7 @@ BPF_CALL_4(bpf_lwt_seg6_store_bytes, struct sk_buff *, skb, u32, offset,
+@@ -6450,6 +6437,7 @@ BPF_CALL_4(bpf_lwt_seg6_store_bytes, struct sk_buff *, skb, u32, offset,
  	void *srh_tlvs, *srh_end, *ptr;
  	int srhoff = 0;
  
@@ -7179,7 +7306,7 @@ index 2510464692af0..64a1696a52920 100644
  	if (srh == NULL)
  		return -EINVAL;
  
-@@ -6506,6 +6491,7 @@ BPF_CALL_4(bpf_lwt_seg6_action, struct sk_buff *, skb,
+@@ -6506,6 +6494,7 @@ BPF_CALL_4(bpf_lwt_seg6_action, struct sk_buff *, skb,
  	int hdroff = 0;
  	int err;
  
@@ -7187,7 +7314,7 @@ index 2510464692af0..64a1696a52920 100644
  	switch (action) {
  	case SEG6_LOCAL_ACTION_END_X:
  		if (!seg6_bpf_has_valid_srh(skb))
-@@ -6582,6 +6568,7 @@ BPF_CALL_3(bpf_lwt_seg6_adjust_srh, struct sk_buff *, skb, u32, offset,
+@@ -6582,6 +6571,7 @@ BPF_CALL_3(bpf_lwt_seg6_adjust_srh, struct sk_buff *, skb, u32, offset,
  	int srhoff = 0;
  	int ret;
  
@@ -7228,7 +7355,7 @@ index 4a0797f0a154b..afb05f58b64c5 100644
  	return ret;
  }
 diff --git a/net/core/skbuff.c b/net/core/skbuff.c
-index 466999a7515e6..b33bae4ba78b6 100644
+index 466999a7515e6..5000394a4f51a 100644
 --- a/net/core/skbuff.c
 +++ b/net/core/skbuff.c
 @@ -277,6 +277,7 @@ static void *page_frag_alloc_1k(struct page_frag_1k *nc, gfp_t gfp_mask)
@@ -7250,15 +7377,25 @@ index 466999a7515e6..b33bae4ba78b6 100644
  
  /* Double check that napi_get_frags() allocates skbs with
   * skb->head being backed by slab, not a page fragment.
-@@ -308,6 +311,7 @@ void *__napi_alloc_frag_align(unsigned int fragsz, unsigned int align_mask)
+@@ -306,11 +309,16 @@ void napi_get_frags_check(struct napi_struct *napi)
+ void *__napi_alloc_frag_align(unsigned int fragsz, unsigned int align_mask)
+ {
  	struct napi_alloc_cache *nc = this_cpu_ptr(&napi_alloc_cache);
++	void *data;
  
  	fragsz = SKB_DATA_ALIGN(fragsz);
-+	guard(local_lock_nested_bh)(&napi_alloc_cache.bh_lock);
  
- 	return __page_frag_alloc_align(&nc->page, fragsz, GFP_ATOMIC,
+-	return __page_frag_alloc_align(&nc->page, fragsz, GFP_ATOMIC,
++	local_lock_nested_bh(&napi_alloc_cache.bh_lock);
++	data = __page_frag_alloc_align(&nc->page, fragsz, GFP_ATOMIC,
  				       align_mask);
-@@ -318,19 +322,15 @@ void *__netdev_alloc_frag_align(unsigned int fragsz, unsigned int align_mask)
++	local_unlock_nested_bh(&napi_alloc_cache.bh_lock);
++	return data;
++
+ }
+ EXPORT_SYMBOL(__napi_alloc_frag_align);
+ 
+@@ -318,19 +326,15 @@ void *__netdev_alloc_frag_align(unsigned int fragsz, unsigned int align_mask)
  {
  	void *data;
  
@@ -7280,15 +7417,29 @@ index 466999a7515e6..b33bae4ba78b6 100644
  		local_bh_enable();
  	}
  	return data;
-@@ -342,6 +342,7 @@ static struct sk_buff *napi_skb_cache_get(void)
+@@ -342,16 +346,20 @@ static struct sk_buff *napi_skb_cache_get(void)
  	struct napi_alloc_cache *nc = this_cpu_ptr(&napi_alloc_cache);
  	struct sk_buff *skb;
  
-+	guard(local_lock_nested_bh)(&napi_alloc_cache.bh_lock);
++	local_lock_nested_bh(&napi_alloc_cache.bh_lock);
  	if (unlikely(!nc->skb_count)) {
  		nc->skb_count = kmem_cache_alloc_bulk(net_hotdata.skbuff_cache,
  						      GFP_ATOMIC,
-@@ -744,9 +745,13 @@ struct sk_buff *__netdev_alloc_skb(struct net_device *dev, unsigned int len,
+ 						      NAPI_SKB_CACHE_BULK,
+ 						      nc->skb_cache);
+-		if (unlikely(!nc->skb_count))
++		if (unlikely(!nc->skb_count)) {
++			local_unlock_nested_bh(&napi_alloc_cache.bh_lock);
+ 			return NULL;
++		}
+ 	}
+ 
+ 	skb = nc->skb_cache[--nc->skb_count];
++	local_unlock_nested_bh(&napi_alloc_cache.bh_lock);
+ 	kasan_mempool_unpoison_object(skb, kmem_cache_size(net_hotdata.skbuff_cache));
+ 
+ 	return skb;
+@@ -744,9 +752,13 @@ struct sk_buff *__netdev_alloc_skb(struct net_device *dev, unsigned int len,
  		pfmemalloc = nc->pfmemalloc;
  	} else {
  		local_bh_disable();
@@ -7302,7 +7453,7 @@ index 466999a7515e6..b33bae4ba78b6 100644
  		local_bh_enable();
  	}
  
-@@ -810,11 +815,11 @@ struct sk_buff *napi_alloc_skb(struct napi_struct *napi, unsigned int len)
+@@ -810,11 +822,11 @@ struct sk_buff *napi_alloc_skb(struct napi_struct *napi, unsigned int len)
  		goto skb_success;
  	}
  
@@ -7316,7 +7467,7 @@ index 466999a7515e6..b33bae4ba78b6 100644
  	if (NAPI_HAS_SMALL_PAGE_FRAG && len <= SKB_WITH_OVERHEAD(1024)) {
  		/* we are artificially inflating the allocation size, but
  		 * that is not as bad as it may look like, as:
-@@ -836,6 +841,7 @@ struct sk_buff *napi_alloc_skb(struct napi_struct *napi, unsigned int len)
+@@ -836,6 +848,7 @@ struct sk_buff *napi_alloc_skb(struct napi_struct *napi, unsigned int len)
  		data = page_frag_alloc(&nc->page, len, gfp_mask);
  		pfmemalloc = nc->page.pfmemalloc;
  	}
@@ -7324,14 +7475,22 @@ index 466999a7515e6..b33bae4ba78b6 100644
  
  	if (unlikely(!data))
  		return NULL;
-@@ -1433,6 +1439,7 @@ static void napi_skb_cache_put(struct sk_buff *skb)
+@@ -1433,6 +1446,7 @@ static void napi_skb_cache_put(struct sk_buff *skb)
  	if (!kasan_mempool_poison_object(skb))
  		return;
  
-+	guard(local_lock_nested_bh)(&napi_alloc_cache.bh_lock);
++	local_lock_nested_bh(&napi_alloc_cache.bh_lock);
  	nc->skb_cache[nc->skb_count++] = skb;
  
  	if (unlikely(nc->skb_count == NAPI_SKB_CACHE_SIZE)) {
+@@ -1444,6 +1458,7 @@ static void napi_skb_cache_put(struct sk_buff *skb)
+ 				     nc->skb_cache + NAPI_SKB_CACHE_HALF);
+ 		nc->skb_count = NAPI_SKB_CACHE_HALF;
+ 	}
++	local_unlock_nested_bh(&napi_alloc_cache.bh_lock);
+ }
+ 
+ void __napi_kfree_skb(struct sk_buff *skb, enum skb_drop_reason reason)
 diff --git a/net/dccp/minisocks.c b/net/dccp/minisocks.c
 index 251a57cf58223..deb52d7d31b48 100644
 --- a/net/dccp/minisocks.c
@@ -7665,7 +7824,7 @@ index 24e2b4b494cb0..c4828c6620f07 100644
  	return -EINVAL;
  }
 diff --git a/net/xdp/xsk.c b/net/xdp/xsk.c
-index 727aa20be4bde..8b0b557408fc2 100644
+index 7d1c0986f9bb3..ed062e0383896 100644
 --- a/net/xdp/xsk.c
 +++ b/net/xdp/xsk.c
 @@ -35,8 +35,6 @@
@@ -7677,7 +7836,7 @@ index 727aa20be4bde..8b0b557408fc2 100644
  void xsk_set_rx_need_wakeup(struct xsk_buff_pool *pool)
  {
  	if (pool->cached_need_wakeup & XDP_WAKEUP_RX)
-@@ -375,7 +373,7 @@ static int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
+@@ -372,7 +370,7 @@ static int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
  
  int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp)
  {
@@ -7686,7 +7845,7 @@ index 727aa20be4bde..8b0b557408fc2 100644
  	int err;
  
  	err = xsk_rcv(xs, xdp);
-@@ -390,7 +388,7 @@ int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp)
+@@ -387,7 +385,7 @@ int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp)
  
  void __xsk_map_flush(void)
  {
@@ -7695,7 +7854,7 @@ index 727aa20be4bde..8b0b557408fc2 100644
  	struct xdp_sock *xs, *tmp;
  
  	list_for_each_entry_safe(xs, tmp, flush_list, flush_node) {
-@@ -402,7 +400,7 @@ void __xsk_map_flush(void)
+@@ -399,7 +397,7 @@ void __xsk_map_flush(void)
  #ifdef CONFIG_DEBUG_NET
  bool xsk_map_check_flush(void)
  {
@@ -7704,7 +7863,7 @@ index 727aa20be4bde..8b0b557408fc2 100644
  		return false;
  	__xsk_map_flush();
  	return true;
-@@ -1775,7 +1773,7 @@ static struct pernet_operations xsk_net_ops = {
+@@ -1772,7 +1770,7 @@ static struct pernet_operations xsk_net_ops = {
  
  static int __init xsk_init(void)
  {
@@ -7713,7 +7872,7 @@ index 727aa20be4bde..8b0b557408fc2 100644
  
  	err = proto_register(&xsk_proto, 0 /* no slab */);
  	if (err)
-@@ -1793,8 +1791,6 @@ static int __init xsk_init(void)
+@@ -1790,8 +1788,6 @@ static int __init xsk_init(void)
  	if (err)
  		goto out_pernet;
  
