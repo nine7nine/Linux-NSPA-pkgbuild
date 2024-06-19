@@ -108,7 +108,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.10-rc4
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=10
+pkgrel=11
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -116,7 +116,7 @@ options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
   "https://git.kernel.org/torvalds/t/linux-6.10-rc4.tar.gz"
-  "0000-patch-6.10-rc3-rt5.patch"
+  "0000-patch-6.10-rc4-rt7.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -154,6 +154,7 @@ source=(
   "1116-kt-pm-suspend_patches.patch"
   "1115-pmdomain-vs-RT-suspend.patch"
   "1116-Support_s2idle-s2ram_on_PREEMPT_RT.patch"
+  "1117-sched-Move_psi_account_irqtime-out_of_update_rq_clock_task-hotpath.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -508,7 +509,7 @@ for _p in "${pkgname[@]}"; do
 done
 
 sha256sums=('3d4c52f71c47157e6c87d5e7cbff8d67c00548d21890322f5274beebe7bd3f7c'
-            '7afbe57d2e46bf9305484772c6e418256bb9d3f4d0a31ac2bcfa3122d7a64914'
+            'ea9ffeea5508792a67972b80da40577c18128c8bd858b98bad4fdc246b1a2a61'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
             '5d39331ebde909922ddc98307b7b4e7c1728708dd5ad424f2e2e77f34eec4c54'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -546,4 +547,5 @@ sha256sums=('3d4c52f71c47157e6c87d5e7cbff8d67c00548d21890322f5274beebe7bd3f7c'
             '6d5a98e630c2981fbab73b895dab34fd727b4113b3c5a6c3a6c00b8ef93a3ae1'
             '95b8d13755145350a4566aaa0c81b1d2f73d670ca977a2631ebe055b2647b45f'
             'b38c042ad4a408c2d30e53590afcc9ee195033204ed22ab86515e219c0fcc456'
+            '98c602c704e6ec19d0c2e634d0d53439a712f2db290c4f55280d6de20e452794'
             'fd6603b5748f1bf10d4a0130f3b5380ea9dfc117170f5768cb8ded30d152fff6')

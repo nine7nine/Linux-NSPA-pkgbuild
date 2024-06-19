@@ -920,14 +920,21 @@ index ce1cbee1b39dd..247e7d9448d70 100644
  #include <linux/types.h>
  #include <linux/tracepoint.h>
 diff --git a/drivers/gpu/drm/i915/i915_utils.h b/drivers/gpu/drm/i915/i915_utils.h
-index 06ec6ceb61d57..2ca54bc235925 100644
+index 06ec6ceb61d57..12cbf04990182 100644
 --- a/drivers/gpu/drm/i915/i915_utils.h
 +++ b/drivers/gpu/drm/i915/i915_utils.h
-@@ -274,7 +274,7 @@ wait_remaining_ms_from_jiffies(unsigned long timestamp_jiffies, int to_wait_ms)
+@@ -273,8 +273,13 @@ wait_remaining_ms_from_jiffies(unsigned long timestamp_jiffies, int to_wait_ms)
+ 						   (Wmax))
  #define wait_for(COND, MS)		_wait_for((COND), (MS) * 1000, 10, 1000)
  
- /* If CONFIG_PREEMPT_COUNT is disabled, in_atomic() always reports false. */
+-/* If CONFIG_PREEMPT_COUNT is disabled, in_atomic() always reports false. */
 -#if defined(CONFIG_DRM_I915_DEBUG) && defined(CONFIG_PREEMPT_COUNT)
++/*
++ * If CONFIG_PREEMPT_COUNT is disabled, in_atomic() always reports false.
++ * On PREEMPT_RT the context isn't becoming atomic because it is used in an
++ * interrupt handler or because a spinlock_t is acquired. This leads to
++ * warnings which don't occur otherwise and therefore the check is disabled.
++ */
 +#if defined(CONFIG_DRM_I915_DEBUG) && defined(CONFIG_PREEMPT_COUNT) && !defined(CONFIG_PREEMPT_RT)
  # define _WAIT_FOR_ATOMIC_CHECK(ATOMIC) WARN_ON_ONCE((ATOMIC) && !in_atomic())
  #else
@@ -1309,7 +1316,7 @@ index 8b1644f5411ec..7d0134ecd82fa 100644
  	}
  
 diff --git a/drivers/tty/serial/serial_core.c b/drivers/tty/serial/serial_core.c
-index 2c1a0254d3f4a..c08eb3f774f10 100644
+index 0c4d609766633..6cf823809c8ad 100644
 --- a/drivers/tty/serial/serial_core.c
 +++ b/drivers/tty/serial/serial_core.c
 @@ -3168,8 +3168,15 @@ static int serial_core_add_one_port(struct uart_driver *drv, struct uart_port *u
@@ -1986,10 +1993,18 @@ index 08b0d1d9d78b7..3f5a551579cc9 100644
  
  #ifdef CONFIG_PROVE_RAW_LOCK_NESTING
 diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
-index d20c6c99eb887..f0ab89caf3cc2 100644
+index d20c6c99eb887..883d55005362c 100644
 --- a/include/linux/netdevice.h
 +++ b/include/linux/netdevice.h
-@@ -3200,6 +3200,7 @@ static inline bool dev_has_header(const struct net_device *dev)
+@@ -43,6 +43,7 @@
+ 
+ #include <linux/netdev_features.h>
+ #include <linux/neighbour.h>
++#include <linux/netdevice_xmit.h>
+ #include <uapi/linux/netdevice.h>
+ #include <uapi/linux/if_bonding.h>
+ #include <uapi/linux/pkt_cls.h>
+@@ -3200,6 +3201,7 @@ static inline bool dev_has_header(const struct net_device *dev)
  struct softnet_data {
  	struct list_head	poll_list;
  	struct sk_buff_head	process_queue;
@@ -1997,36 +2012,99 @@ index d20c6c99eb887..f0ab89caf3cc2 100644
  
  	/* stats */
  	unsigned int		processed;
-@@ -3223,7 +3224,9 @@ struct softnet_data {
+@@ -3222,13 +3224,7 @@ struct softnet_data {
+ 	struct sk_buff_head	xfrm_backlog;
  #endif
  	/* written and read only by owning cpu: */
- 	struct {
-+#ifndef CONFIG_PREEMPT_RT
- 		u16 recursion;
-+#endif
- 		u8  more;
- #ifdef CONFIG_NET_EGRESS
- 		u8  skip_txqueue;
-@@ -3256,10 +3259,19 @@ struct softnet_data {
+-	struct {
+-		u16 recursion;
+-		u8  more;
+-#ifdef CONFIG_NET_EGRESS
+-		u8  skip_txqueue;
+-#endif
+-	} xmit;
++	struct netdev_xmit xmit;
+ #ifdef CONFIG_RPS
+ 	/* input_queue_head should be written by cpu owning this struct,
+ 	 * and only read by other cpus. Worth using a cache line.
+@@ -3256,10 +3252,18 @@ struct softnet_data {
  
  DECLARE_PER_CPU_ALIGNED(struct softnet_data, softnet_data);
  
-+#ifdef CONFIG_PREEMPT_RT
-+static inline int dev_recursion_level(void)
-+{
-+	return current->net_xmit_recursion;
-+}
-+
-+#else
-+
++#ifndef CONFIG_PREEMPT_RT
  static inline int dev_recursion_level(void)
  {
  	return this_cpu_read(softnet_data.xmit.recursion);
  }
++#else
++static inline int dev_recursion_level(void)
++{
++	return current->net_xmit.recursion;
++}
++
 +#endif
  
  void __netif_schedule(struct Qdisc *q);
  void netif_schedule_queue(struct netdev_queue *txq);
+@@ -4874,18 +4878,35 @@ static inline ktime_t netdev_get_tstamp(struct net_device *dev,
+ 	return hwtstamps->hwtstamp;
+ }
+ 
+-static inline netdev_tx_t __netdev_start_xmit(const struct net_device_ops *ops,
+-					      struct sk_buff *skb, struct net_device *dev,
+-					      bool more)
++#ifndef CONFIG_PREEMPT_RT
++static inline void netdev_xmit_set_more(bool more)
+ {
+ 	__this_cpu_write(softnet_data.xmit.more, more);
+-	return ops->ndo_start_xmit(skb, dev);
+ }
+ 
+ static inline bool netdev_xmit_more(void)
+ {
+ 	return __this_cpu_read(softnet_data.xmit.more);
+ }
++#else
++static inline void netdev_xmit_set_more(bool more)
++{
++	current->net_xmit.more = more;
++}
++
++static inline bool netdev_xmit_more(void)
++{
++	return current->net_xmit.more;
++}
++#endif
++
++static inline netdev_tx_t __netdev_start_xmit(const struct net_device_ops *ops,
++					      struct sk_buff *skb, struct net_device *dev,
++					      bool more)
++{
++	netdev_xmit_set_more(more);
++	return ops->ndo_start_xmit(skb, dev);
++}
+ 
+ static inline netdev_tx_t netdev_start_xmit(struct sk_buff *skb, struct net_device *dev,
+ 					    struct netdev_queue *txq, bool more)
+diff --git a/include/linux/netdevice_xmit.h b/include/linux/netdevice_xmit.h
+new file mode 100644
+index 0000000000000..38325e0702968
+--- /dev/null
++++ b/include/linux/netdevice_xmit.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef _LINUX_NETDEVICE_XMIT_H
++#define _LINUX_NETDEVICE_XMIT_H
++
++struct netdev_xmit {
++	u16 recursion;
++	u8  more;
++#ifdef CONFIG_NET_EGRESS
++	u8  skip_txqueue;
++#endif
++};
++
++#endif
 diff --git a/include/linux/perf_event.h b/include/linux/perf_event.h
 index a5304ae8c654f..27e30bf2a1c50 100644
 --- a/include/linux/perf_event.h
@@ -2129,10 +2207,18 @@ index 40afab23881a0..8a77bc6fb9bb9 100644
  
  bool this_cpu_in_panic(void);
 diff --git a/include/linux/sched.h b/include/linux/sched.h
-index 61591ac6eab6d..bd2a568b22d05 100644
+index 61591ac6eab6d..34c6169f631eb 100644
 --- a/include/linux/sched.h
 +++ b/include/linux/sched.h
-@@ -53,6 +53,7 @@ struct bio_list;
+@@ -36,6 +36,7 @@
+ #include <linux/signal_types.h>
+ #include <linux/syscall_user_dispatch_types.h>
+ #include <linux/mm_types_task.h>
++#include <linux/netdevice_xmit.h>
+ #include <linux/task_io_accounting.h>
+ #include <linux/posix-timers_types.h>
+ #include <linux/restart_block.h>
+@@ -53,6 +54,7 @@ struct bio_list;
  struct blk_plug;
  struct bpf_local_storage;
  struct bpf_run_ctx;
@@ -2140,18 +2226,18 @@ index 61591ac6eab6d..bd2a568b22d05 100644
  struct capture_control;
  struct cfs_rq;
  struct fs_struct;
-@@ -975,7 +976,9 @@ struct task_struct {
+@@ -975,7 +977,9 @@ struct task_struct {
  	/* delay due to memory thrashing */
  	unsigned                        in_thrashing:1;
  #endif
 -
 +#ifdef CONFIG_PREEMPT_RT
-+	u8				net_xmit_recursion;
++	struct netdev_xmit		net_xmit;
 +#endif
  	unsigned long			atomic_flags; /* Flags requiring atomic access. */
  
  	struct restart_block		restart_block;
-@@ -1506,6 +1509,8 @@ struct task_struct {
+@@ -1506,6 +1510,8 @@ struct task_struct {
  	/* Used for BPF run context */
  	struct bpf_run_ctx		*bpf_ctx;
  #endif
@@ -2160,7 +2246,7 @@ index 61591ac6eab6d..bd2a568b22d05 100644
  
  #ifdef CONFIG_GCC_PLUGIN_STACKLEAK
  	unsigned long			lowest_stack;
-@@ -1799,6 +1804,7 @@ static inline int dl_task_check_affinity(struct task_struct *p, const struct cpu
+@@ -1799,6 +1805,7 @@ static inline int dl_task_check_affinity(struct task_struct *p, const struct cpu
  }
  #endif
  
@@ -2168,7 +2254,7 @@ index 61591ac6eab6d..bd2a568b22d05 100644
  extern int yield_to(struct task_struct *p, bool preempt);
  extern void set_user_nice(struct task_struct *p, long nice);
  extern int task_prio(const struct task_struct *p);
-@@ -1941,17 +1947,17 @@ static inline void update_tsk_thread_flag(struct task_struct *tsk, int flag,
+@@ -1941,17 +1948,17 @@ static inline void update_tsk_thread_flag(struct task_struct *tsk, int flag,
  	update_ti_thread_flag(task_thread_info(tsk), flag, value);
  }
  
@@ -2189,7 +2275,7 @@ index 61591ac6eab6d..bd2a568b22d05 100644
  {
  	return test_ti_thread_flag(task_thread_info(tsk), flag);
  }
-@@ -1964,9 +1970,11 @@ static inline void set_tsk_need_resched(struct task_struct *tsk)
+@@ -1964,9 +1971,11 @@ static inline void set_tsk_need_resched(struct task_struct *tsk)
  static inline void clear_tsk_need_resched(struct task_struct *tsk)
  {
  	clear_tsk_thread_flag(tsk,TIF_NEED_RESCHED);
@@ -2202,7 +2288,7 @@ index 61591ac6eab6d..bd2a568b22d05 100644
  {
  	return unlikely(test_tsk_thread_flag(tsk,TIF_NEED_RESCHED));
  }
-@@ -2107,7 +2115,7 @@ static inline bool preempt_model_preemptible(void)
+@@ -2107,7 +2116,7 @@ static inline bool preempt_model_preemptible(void)
  
  static __always_inline bool need_resched(void)
  {
@@ -6696,11 +6782,11 @@ index d8b302d010830..4f58a196e14c1 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..0efe7ba1930e1
+index 0000000000000..045478966e9f1
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt5
++-rt7
 diff --git a/net/bpf/test_run.c b/net/bpf/test_run.c
 index 36ae54f57bf57..a6d7f790cdda8 100644
 --- a/net/bpf/test_run.c
@@ -6831,7 +6917,7 @@ index bf30c50b56895..3c9f6538990ea 100644
  		kfree_skb(skb);
  		return -EMSGSIZE;
 diff --git a/net/core/dev.c b/net/core/dev.c
-index 4d4de9008f6f3..85702022c5cd4 100644
+index 4d4de9008f6f3..7d59afa862630 100644
 --- a/net/core/dev.c
 +++ b/net/core/dev.c
 @@ -229,7 +229,7 @@ static inline void backlog_lock_irq_save(struct softnet_data *sd,
@@ -6881,7 +6967,35 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  EXPORT_PER_CPU_SYMBOL(softnet_data);
  
  /* Page_pool has a lockless array/stack to alloc/recycle pages.
-@@ -4029,10 +4031,13 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
+@@ -3940,6 +3942,7 @@ netdev_tx_queue_mapping(struct net_device *dev, struct sk_buff *skb)
+ 	return netdev_get_tx_queue(dev, netdev_cap_txqueue(dev, qm));
+ }
+ 
++#ifndef CONFIG_PREEMPT_RT
+ static bool netdev_xmit_txqueue_skipped(void)
+ {
+ 	return __this_cpu_read(softnet_data.xmit.skip_txqueue);
+@@ -3950,6 +3953,19 @@ void netdev_xmit_skip_txqueue(bool skip)
+ 	__this_cpu_write(softnet_data.xmit.skip_txqueue, skip);
+ }
+ EXPORT_SYMBOL_GPL(netdev_xmit_skip_txqueue);
++
++#else
++static bool netdev_xmit_txqueue_skipped(void)
++{
++	return current->net_xmit.skip_txqueue;
++}
++
++void netdev_xmit_skip_txqueue(bool skip)
++{
++	current->net_xmit.skip_txqueue = skip;
++}
++EXPORT_SYMBOL_GPL(netdev_xmit_skip_txqueue);
++#endif
+ #endif /* CONFIG_NET_EGRESS */
+ 
+ #ifdef CONFIG_NET_XGRESS
+@@ -4029,10 +4045,13 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
  {
  	struct bpf_mprog_entry *entry = rcu_dereference_bh(skb->dev->tcx_ingress);
  	enum skb_drop_reason drop_reason = SKB_DROP_REASON_TC_INGRESS;
@@ -6895,7 +7009,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  	if (*pt_prev) {
  		*ret = deliver_skb(skb, *pt_prev, orig_dev);
  		*pt_prev = NULL;
-@@ -4061,10 +4066,12 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
+@@ -4061,10 +4080,12 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
  			break;
  		}
  		*ret = NET_RX_SUCCESS;
@@ -6908,7 +7022,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  		return NULL;
  	/* used by tc_run */
  	case TC_ACT_STOLEN:
-@@ -4074,8 +4081,10 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
+@@ -4074,8 +4095,10 @@ sch_handle_ingress(struct sk_buff *skb, struct packet_type **pt_prev, int *ret,
  		fallthrough;
  	case TC_ACT_CONSUMED:
  		*ret = NET_RX_SUCCESS;
@@ -6919,7 +7033,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  
  	return skb;
  }
-@@ -4085,11 +4094,14 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
+@@ -4085,11 +4108,14 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
  {
  	struct bpf_mprog_entry *entry = rcu_dereference_bh(dev->tcx_egress);
  	enum skb_drop_reason drop_reason = SKB_DROP_REASON_TC_EGRESS;
@@ -6934,7 +7048,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  	/* qdisc_skb_cb(skb)->pkt_len & tcx_set_ingress() was
  	 * already set by the caller.
  	 */
-@@ -4105,10 +4117,12 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
+@@ -4105,10 +4131,12 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
  		/* No need to push/pop skb's mac_header here on egress! */
  		skb_do_redirect(skb);
  		*ret = NET_XMIT_SUCCESS;
@@ -6947,7 +7061,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  		return NULL;
  	/* used by tc_run */
  	case TC_ACT_STOLEN:
-@@ -4118,8 +4132,10 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
+@@ -4118,8 +4146,10 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
  		fallthrough;
  	case TC_ACT_CONSUMED:
  		*ret = NET_XMIT_SUCCESS;
@@ -6958,7 +7072,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  
  	return skb;
  }
-@@ -5935,6 +5951,7 @@ static void flush_backlog(struct work_struct *work)
+@@ -5935,6 +5965,7 @@ static void flush_backlog(struct work_struct *work)
  	}
  	backlog_unlock_irq_enable(sd);
  
@@ -6966,7 +7080,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  	skb_queue_walk_safe(&sd->process_queue, skb, tmp) {
  		if (skb->dev->reg_state == NETREG_UNREGISTERING) {
  			__skb_unlink(skb, &sd->process_queue);
-@@ -5942,6 +5959,7 @@ static void flush_backlog(struct work_struct *work)
+@@ -5942,6 +5973,7 @@ static void flush_backlog(struct work_struct *work)
  			rps_input_queue_head_incr(sd);
  		}
  	}
@@ -6974,7 +7088,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  	local_bh_enable();
  }
  
-@@ -6063,7 +6081,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6063,7 +6095,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
  	while (again) {
  		struct sk_buff *skb;
  
@@ -6984,7 +7098,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  			rcu_read_lock();
  			__netif_receive_skb(skb);
  			rcu_read_unlock();
-@@ -6072,7 +6092,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6072,7 +6106,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
  				return work;
  			}
  
@@ -6994,7 +7108,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  
  		backlog_lock_irq_disable(sd);
  		if (skb_queue_empty(&sd->input_pkt_queue)) {
-@@ -6087,8 +6109,10 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6087,8 +6123,10 @@ static int process_backlog(struct napi_struct *napi, int quota)
  			napi->state &= NAPIF_STATE_THREADED;
  			again = false;
  		} else {
@@ -7005,7 +7119,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  		}
  		backlog_unlock_irq_enable(sd);
  	}
-@@ -6349,6 +6373,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6349,6 +6387,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  {
  	unsigned long start_time = loop_end ? busy_loop_current_time() : 0;
  	int (*napi_poll)(struct napi_struct *napi, int budget);
@@ -7013,7 +7127,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  	void *have_poll_lock = NULL;
  	struct napi_struct *napi;
  
-@@ -6367,6 +6392,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6367,6 +6406,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  		int work = 0;
  
  		local_bh_disable();
@@ -7021,7 +7135,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  		if (!napi_poll) {
  			unsigned long val = READ_ONCE(napi->state);
  
-@@ -6397,6 +6423,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6397,6 +6437,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  			__NET_ADD_STATS(dev_net(napi->dev),
  					LINUX_MIB_BUSYPOLLRXPACKETS, work);
  		skb_defer_free_flush(this_cpu_ptr(&softnet_data));
@@ -7029,7 +7143,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  		local_bh_enable();
  
  		if (!loop_end || loop_end(loop_end_arg, start_time))
-@@ -6824,6 +6851,7 @@ static int napi_thread_wait(struct napi_struct *napi)
+@@ -6824,6 +6865,7 @@ static int napi_thread_wait(struct napi_struct *napi)
  
  static void napi_threaded_poll_loop(struct napi_struct *napi)
  {
@@ -7037,7 +7151,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  	struct softnet_data *sd;
  	unsigned long last_qs = jiffies;
  
-@@ -6832,6 +6860,8 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
+@@ -6832,6 +6874,8 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
  		void *have;
  
  		local_bh_disable();
@@ -7046,7 +7160,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  		sd = this_cpu_ptr(&softnet_data);
  		sd->in_napi_threaded_poll = true;
  
-@@ -6847,6 +6877,7 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
+@@ -6847,6 +6891,7 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
  			net_rps_action_and_irq_enable(sd);
  		}
  		skb_defer_free_flush(sd);
@@ -7054,7 +7168,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  		local_bh_enable();
  
  		if (!repoll)
-@@ -6872,10 +6903,12 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+@@ -6872,10 +6917,12 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
  	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
  	unsigned long time_limit = jiffies +
  		usecs_to_jiffies(READ_ONCE(net_hotdata.netdev_budget_usecs));
@@ -7067,7 +7181,7 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  start:
  	sd->in_net_rx_action = true;
  	local_irq_disable();
-@@ -6928,7 +6961,8 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+@@ -6928,7 +6975,8 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
  		sd->in_net_rx_action = false;
  
  	net_rps_action_and_irq_enable(sd);
@@ -7078,39 +7192,37 @@ index 4d4de9008f6f3..85702022c5cd4 100644
  
  struct netdev_adjacent {
 diff --git a/net/core/dev.h b/net/core/dev.h
-index b7b518bc2be55..2f96d63053ad0 100644
+index b7b518bc2be55..4984dd9b334bc 100644
 --- a/net/core/dev.h
 +++ b/net/core/dev.h
-@@ -150,6 +150,25 @@ struct napi_struct *napi_by_id(unsigned int napi_id);
+@@ -150,6 +150,8 @@ struct napi_struct *napi_by_id(unsigned int napi_id);
  void kick_defer_list_purge(struct softnet_data *sd, unsigned int cpu);
  
  #define XMIT_RECURSION_LIMIT	8
 +
-+#ifdef CONFIG_PREEMPT_RT
++#ifndef CONFIG_PREEMPT_RT
+ static inline bool dev_xmit_recursion(void)
+ {
+ 	return unlikely(__this_cpu_read(softnet_data.xmit.recursion) >
+@@ -165,5 +167,21 @@ static inline void dev_xmit_recursion_dec(void)
+ {
+ 	__this_cpu_dec(softnet_data.xmit.recursion);
+ }
++#else
 +static inline bool dev_xmit_recursion(void)
 +{
-+	return unlikely(current->net_xmit_recursion > XMIT_RECURSION_LIMIT);
++	return unlikely(current->net_xmit.recursion > XMIT_RECURSION_LIMIT);
 +}
 +
 +static inline void dev_xmit_recursion_inc(void)
 +{
-+	current->net_xmit_recursion++;
++	current->net_xmit.recursion++;
 +}
 +
 +static inline void dev_xmit_recursion_dec(void)
 +{
-+	current->net_xmit_recursion--;
++	current->net_xmit.recursion--;
 +}
-+
-+#else
-+
- static inline bool dev_xmit_recursion(void)
- {
- 	return unlikely(__this_cpu_read(softnet_data.xmit.recursion) >
-@@ -165,5 +184,6 @@ static inline void dev_xmit_recursion_dec(void)
- {
- 	__this_cpu_dec(softnet_data.xmit.recursion);
- }
 +#endif
  
  #endif
