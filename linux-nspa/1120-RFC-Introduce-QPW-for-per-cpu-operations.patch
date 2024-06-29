@@ -1,0 +1,753 @@
+From: Leonardo Bras <leobras@redhat.com>
+Subject: [RFC PATCH v1 0/4] Introduce QPW for per-cpu operations
+
+The problem:
+Some places in the kernel implement a parallel programming strategy
+consisting on local_locks() for most of the work, and some rare remote
+operations are scheduled on target cpu. This keeps cache bouncing low since
+cacheline tends to be mostly local, and avoids the cost of locks in non-RT
+kernels, even though the very few remote operations will be expensive due
+to scheduling overhead.
+
+On the other hand, for RT workloads this can represent a problem: getting
+an important workload scheduled out to deal with remote requests is
+sure to introduce unexpected deadline misses.
+
+The idea:
+Currently with PREEMPT_RT=y, local_locks() become per-cpu spinlocks.
+In this case, instead of scheduling work on a remote cpu, it should
+be safe to grab that remote cpu's per-cpu spinlock and run the required
+work locally. Tha major cost, which is un/locking in every local function,
+already happens in PREEMPT_RT.
+
+Also, there is no need to worry about extra cache bouncing:
+The cacheline invalidation already happens due to schedule_work_on().
+
+This will avoid schedule_work_on(), and thus avoid scheduling-out an 
+RT workload. 
+
+For patches 2, 3 & 4, I noticed just grabing the lock and executing
+the function locally is much faster than just scheduling it on a
+remote cpu.
+
+Proposed solution:
+A new interface called Queue PerCPU Work (QPW), which should replace
+Work Queue in the above mentioned use case. 
+
+If PREEMPT_RT=n, this interfaces just wraps the current 
+local_locks + WorkQueue behavior, so no expected change in runtime.
+
+If PREEMPT_RT=y, queue_percpu_work_on(cpu,...) will lock that cpu's
+per-cpu structure and perform work on it locally. This is possible
+because on functions that can be used for performing remote work on
+remote per-cpu structures, the local_lock (which is already
+a this_cpu spinlock()), will be replaced by a qpw_spinlock(), which
+is able to get the per_cpu spinlock() for the cpu passed as parameter.
+
+Patch 1 implements QPW interface, and patches 2, 3 & 4 replaces the
+current local_lock + WorkQueue interface by the QPW interface in
+swap, memcontrol & slub interface.
+
+Please let me know what you think on that, and please suggest
+improvements.
+
+Thanks a lot!
+Leo
+
+Leonardo Bras (4):
+  Introducing qpw_lock() and per-cpu queue & flush work
+  swap: apply new queue_percpu_work_on() interface
+  memcontrol: apply new queue_percpu_work_on() interface
+  slub: apply new queue_percpu_work_on() interface
+
+ include/linux/qpw.h | 88 +++++++++++++++++++++++++++++++++++++++++++++
+ mm/memcontrol.c     | 20 ++++++-----
+ mm/slub.c           | 26 ++++++++------
+ mm/swap.c           | 26 +++++++-------
+ 4 files changed, 127 insertions(+), 33 deletions(-)
+ create mode 100644 include/linux/qpw.h
+
+
+base-commit: 50736169ecc8387247fe6a00932852ce7b057083
+-- 
+2.45.2
+
+From: Leonardo Bras <leobras@redhat.com>
+Subject: [RFC PATCH v1 1/4] Introducing qpw_lock() and per-cpu queue & flush work
+
+Some places in the kernel implement a parallel programming strategy
+consisting on local_locks() for most of the work, and some rare remote
+operations are scheduled on target cpu. This keeps cache bouncing low since
+cacheline tends to be mostly local, and avoids the cost of locks in non-RT
+kernels, even though the very few remote operations will be expensive due
+to scheduling overhead.
+
+On the other hand, for RT workloads this can represent a problem: getting
+an important workload scheduled out to deal with some unrelated task is
+sure to introduce unexpected deadline misses.
+
+It's interesting, though, that local_lock()s in RT kernels become
+spinlock(). We can make use of those to avoid scheduling work on a remote
+cpu by directly updating another cpu's per_cpu structure, while holding
+it's spinlock().
+
+In order to do that, it's necessary to introduce a new set of functions to
+make it possible to get another cpu's per-cpu "local" lock (qpw_{un,}lock*)
+and also the corresponding queue_percpu_work_on() and flush_percpu_work()
+helpers to run the remote work.
+
+On non-RT kernels, no changes are expected, as every one of the introduced
+helpers work the exactly same as the current implementation:
+qpw_{un,}lock*()        ->  local_{un,}lock*() (ignores cpu parameter)
+queue_percpu_work_on()  ->  queue_work_on()
+flush_percpu_work()     ->  flush_work()
+
+For RT kernels, though, qpw_{un,}lock*() will use the extra cpu parameter
+to select the correct per-cpu structure to work on, and acquire the
+spinlock for that cpu.
+
+queue_percpu_work_on() will just call the requested function in the current
+cpu, which will operate in another cpu's per-cpu object. Since the
+local_locks() become spinlock()s in PREEMPT_RT, we are safe doing that.
+
+flush_percpu_work() then becomes a no-op since no work is actually
+scheduled on a remote cpu.
+
+Some minimal code rework is needed in order to make this mechanism work:
+The calls for local_{un,}lock*() on the functions that are currently
+scheduled on remote cpus need to be replaced by qpw_{un,}lock_n*(), so in
+RT kernels they can reference a different cpu. It's also necessary to use a
+qpw_struct instead of a work_struct, but it just contains a work struct
+and, in PREEMPT_RT, the target cpu.
+
+This should have almost no impact on non-RT kernels: few this_cpu_ptr()
+will become per_cpu_ptr(,smp_processor_id()).
+
+On RT kernels, this should improve performance and reduce latency by
+removing scheduling noise.
+
+Signed-off-by: Leonardo Bras <leobras@redhat.com>
+---
+ include/linux/qpw.h | 88 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 88 insertions(+)
+ create mode 100644 include/linux/qpw.h
+
+diff --git a/include/linux/qpw.h b/include/linux/qpw.h
+new file mode 100644
+index 000000000000..ea2686a01e5e
+--- /dev/null
++++ b/include/linux/qpw.h
+@@ -0,0 +1,88 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_QPW_H
++#define _LINUX_QPW_H
++
++#include "linux/local_lock.h"
++#include "linux/workqueue.h"
++
++#ifndef CONFIG_PREEMPT_RT
++
++struct qpw_struct {
++	struct work_struct work;
++};
++
++#define qpw_lock(lock, cpu)					\
++	local_lock(lock)
++
++#define qpw_unlock(lock, cpu)					\
++	local_unlock(lock)
++
++#define qpw_lock_irqsave(lock, flags, cpu)			\
++	local_lock_irqsave(lock, flags)
++
++#define qpw_unlock_irqrestore(lock, flags, cpu)			\
++	local_unlock_irqrestore(lock, flags)
++
++#define queue_percpu_work_on(c, wq, qpw)			\
++	queue_work_on(c, wq, &(qpw)->work)
++
++#define flush_percpu_work(qpw)					\
++	flush_work(&(qpw)->work)
++
++#define qpw_get_cpu(qpw)					\
++	smp_processor_id()
++
++#define INIT_QPW(qpw, func, c)					\
++	INIT_WORK(&(qpw)->work, (func))
++
++#else /* !CONFIG_PREEMPT_RT */
++
++struct qpw_struct {
++	struct work_struct work;
++	int cpu;
++};
++
++#define qpw_lock(__lock, cpu)					\
++	do {							\
++		migrate_disable();				\
++		spin_lock(per_cpu_ptr((__lock), cpu));		\
++	} while (0)
++
++#define qpw_unlock(__lock, cpu)					\
++	do {							\
++		spin_unlock(per_cpu_ptr((__lock), cpu));	\
++		migrate_enable();				\
++	} while (0)
++
++#define qpw_lock_irqsave(lock, flags, cpu)			\
++	do {							\
++		typecheck(unsigned long, flags);		\
++		flags = 0;					\
++		qpw_lock(lock, cpu);				\
++	} while (0)
++
++#define qpw_unlock_irqrestore(lock, flags, cpu)			\
++	qpw_unlock(lock, cpu)
++
++#define queue_percpu_work_on(c, wq, qpw)			\
++	do {							\
++		struct qpw_struct *__qpw = (qpw);		\
++		WARN_ON((c) != __qpw->cpu);			\
++		__qpw->work.func(&__qpw->work);			\
++	} while (0)
++
++#define flush_percpu_work(qpw)					\
++	do {} while (0)
++
++#define qpw_get_cpu(w)						\
++	container_of((w), struct qpw_struct, work)->cpu
++
++#define INIT_QPW(qpw, func, c)					\
++	do {							\
++		struct qpw_struct *__qpw = (qpw);		\
++		INIT_WORK(&__qpw->work, (func));		\
++		__qpw->cpu = (c);				\
++	} while (0)
++
++#endif /* CONFIG_PREEMPT_RT */
++#endif /* LINUX_QPW_H */
+-- 
+2.45.2
+
+
+From: Leonardo Bras <leobras@redhat.com>
+Subject: [RFC PATCH v1 2/4] swap: apply new queue_percpu_work_on() interface
+
+Make use of the new qpw_{un,}lock*() and queue_percpu_work_on()
+interface to improve performance & latency on PREEMTP_RT kernels.
+
+For functions that may be scheduled in a different cpu, replace
+local_{un,}lock*() by qpw_{un,}lock*(), and replace schedule_work_on() by
+queue_percpu_work_on(). The same happens for flush_work() and
+flush_percpu_work().
+
+The change requires allocation of qpw_structs instead of a work_structs,
+and changing parameters of a few functions to include the cpu parameter.
+
+This should bring no relevant performance impact on non-RT kernels:
+For functions that may be scheduled in a different cpu, the local_*lock's
+this_cpu_ptr() becomes a per_cpu_ptr(smp_processor_id()).
+
+Signed-off-by: Leonardo Bras <leobras@redhat.com>
+---
+ mm/swap.c | 26 +++++++++++++-------------
+ 1 file changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/mm/swap.c b/mm/swap.c
+index 67786cb77130..c1a61b7cd71a 100644
+--- a/mm/swap.c
++++ b/mm/swap.c
+@@ -28,21 +28,21 @@
+ #include <linux/memremap.h>
+ #include <linux/percpu.h>
+ #include <linux/cpu.h>
+ #include <linux/notifier.h>
+ #include <linux/backing-dev.h>
+ #include <linux/memcontrol.h>
+ #include <linux/gfp.h>
+ #include <linux/uio.h>
+ #include <linux/hugetlb.h>
+ #include <linux/page_idle.h>
+-#include <linux/local_lock.h>
++#include <linux/qpw.h>
+ #include <linux/buffer_head.h>
+ 
+ #include "internal.h"
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/pagemap.h>
+ 
+ /* How many pages do we try to swap or page in/out together? As a power of 2 */
+ int page_cluster;
+ const int page_cluster_max = 31;
+@@ -758,45 +758,45 @@ void lru_add_drain(void)
+ 	local_unlock(&cpu_fbatches.lock);
+ 	mlock_drain_local();
+ }
+ 
+ /*
+  * It's called from per-cpu workqueue context in SMP case so
+  * lru_add_drain_cpu and invalidate_bh_lrus_cpu should run on
+  * the same cpu. It shouldn't be a problem in !SMP case since
+  * the core is only one and the locks will disable preemption.
+  */
+-static void lru_add_and_bh_lrus_drain(void)
++static void lru_add_and_bh_lrus_drain(int cpu)
+ {
+-	local_lock(&cpu_fbatches.lock);
+-	lru_add_drain_cpu(smp_processor_id());
+-	local_unlock(&cpu_fbatches.lock);
++	qpw_lock(&cpu_fbatches.lock, cpu);
++	lru_add_drain_cpu(cpu);
++	qpw_unlock(&cpu_fbatches.lock, cpu);
+ 	invalidate_bh_lrus_cpu();
+ 	mlock_drain_local();
+ }
+ 
+ void lru_add_drain_cpu_zone(struct zone *zone)
+ {
+ 	local_lock(&cpu_fbatches.lock);
+ 	lru_add_drain_cpu(smp_processor_id());
+ 	drain_local_pages(zone);
+ 	local_unlock(&cpu_fbatches.lock);
+ 	mlock_drain_local();
+ }
+ 
+ #ifdef CONFIG_SMP
+ 
+-static DEFINE_PER_CPU(struct work_struct, lru_add_drain_work);
++static DEFINE_PER_CPU(struct qpw_struct, lru_add_drain_qpw);
+ 
+-static void lru_add_drain_per_cpu(struct work_struct *dummy)
++static void lru_add_drain_per_cpu(struct work_struct *w)
+ {
+-	lru_add_and_bh_lrus_drain();
++	lru_add_and_bh_lrus_drain(qpw_get_cpu(w));
+ }
+ 
+ static bool cpu_needs_drain(unsigned int cpu)
+ {
+ 	struct cpu_fbatches *fbatches = &per_cpu(cpu_fbatches, cpu);
+ 
+ 	/* Check these in order of likelihood that they're not zero */
+ 	return folio_batch_count(&fbatches->lru_add) ||
+ 		data_race(folio_batch_count(&per_cpu(lru_rotate.fbatch, cpu))) ||
+ 		folio_batch_count(&fbatches->lru_deactivate_file) ||
+@@ -882,31 +882,31 @@ static inline void __lru_add_drain_all(bool force_all_cpus)
+ 	 *
+ 	 * If the paired barrier is done at any later step, e.g. after the
+ 	 * loop, CPU #x will just exit at (C) and miss flushing out all of its
+ 	 * added pages.
+ 	 */
+ 	WRITE_ONCE(lru_drain_gen, lru_drain_gen + 1);
+ 	smp_mb();
+ 
+ 	cpumask_clear(&has_work);
+ 	for_each_online_cpu(cpu) {
+-		struct work_struct *work = &per_cpu(lru_add_drain_work, cpu);
++		struct qpw_struct *qpw = &per_cpu(lru_add_drain_qpw, cpu);
+ 
+ 		if (cpu_needs_drain(cpu)) {
+-			INIT_WORK(work, lru_add_drain_per_cpu);
+-			queue_work_on(cpu, mm_percpu_wq, work);
++			INIT_QPW(qpw, lru_add_drain_per_cpu, cpu);
++			queue_percpu_work_on(cpu, mm_percpu_wq, qpw);
+ 			__cpumask_set_cpu(cpu, &has_work);
+ 		}
+ 	}
+ 
+ 	for_each_cpu(cpu, &has_work)
+-		flush_work(&per_cpu(lru_add_drain_work, cpu));
++		flush_percpu_work(&per_cpu(lru_add_drain_qpw, cpu));
+ 
+ done:
+ 	mutex_unlock(&lock);
+ }
+ 
+ void lru_add_drain_all(void)
+ {
+ 	__lru_add_drain_all(false);
+ }
+ #else
+@@ -939,21 +939,21 @@ void lru_cache_disable(void)
+ 	 *
+ 	 * Since v5.1 kernel, synchronize_rcu() is guaranteed to wait on
+ 	 * preempt_disable() regions of code. So any CPU which sees
+ 	 * lru_disable_count = 0 will have exited the critical
+ 	 * section when synchronize_rcu() returns.
+ 	 */
+ 	synchronize_rcu_expedited();
+ #ifdef CONFIG_SMP
+ 	__lru_add_drain_all(true);
+ #else
+-	lru_add_and_bh_lrus_drain();
++	lru_add_and_bh_lrus_drain(smp_processor_id());
+ #endif
+ }
+ 
+ /**
+  * folios_put_refs - Reduce the reference count on a batch of folios.
+  * @folios: The folios.
+  * @refs: The number of refs to subtract from each folio.
+  *
+  * Like folio_put(), but for a batch of folios.  This is more efficient
+  * than writing the loop yourself as it will optimise the locks which need
+-- 
+2.45.2
+
+
+From: Leonardo Bras <leobras@redhat.com>
+Subject: [RFC PATCH v1 3/4] memcontrol: apply new queue_percpu_work_on() interface
+
+Make use of the new qpw_{un,}lock*() and queue_percpu_work_on()
+interface to improve performance & latency on PREEMTP_RT kernels.
+
+For functions that may be scheduled in a different cpu, replace
+local_{un,}lock*() by qpw_{un,}lock*(), and replace schedule_work_on() by
+queue_percpu_work_on().
+
+This change requires allocation of qpw_structs instead of a work_structs.
+
+This should bring no relevant performance impact on non-RT kernels:
+For functions that may be scheduled in a different cpu, the local_*lock's
+this_cpu_ptr() becomes a per_cpu_ptr(smp_processor_id()).
+
+Signed-off-by: Leonardo Bras <leobras@redhat.com>
+---
+ mm/memcontrol.c | 20 +++++++++++---------
+ 1 file changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/mm/memcontrol.c b/mm/memcontrol.c
+index 71fe2a95b8bd..18a987f8c998 100644
+--- a/mm/memcontrol.c
++++ b/mm/memcontrol.c
+@@ -59,20 +59,21 @@
+ #include <linux/swap_cgroup.h>
+ #include <linux/cpu.h>
+ #include <linux/oom.h>
+ #include <linux/lockdep.h>
+ #include <linux/file.h>
+ #include <linux/resume_user_mode.h>
+ #include <linux/psi.h>
+ #include <linux/seq_buf.h>
+ #include <linux/sched/isolation.h>
+ #include <linux/kmemleak.h>
++#include <linux/qpw.h>
+ #include "internal.h"
+ #include <net/sock.h>
+ #include <net/ip.h>
+ #include "slab.h"
+ #include "swap.h"
+ 
+ #include <linux/uaccess.h>
+ 
+ #include <trace/events/vmscan.h>
+ 
+@@ -2415,21 +2416,21 @@ struct memcg_stock_pcp {
+ 	unsigned int nr_pages;
+ 
+ #ifdef CONFIG_MEMCG_KMEM
+ 	struct obj_cgroup *cached_objcg;
+ 	struct pglist_data *cached_pgdat;
+ 	unsigned int nr_bytes;
+ 	int nr_slab_reclaimable_b;
+ 	int nr_slab_unreclaimable_b;
+ #endif
+ 
+-	struct work_struct work;
++	struct qpw_struct qpw;
+ 	unsigned long flags;
+ #define FLUSHING_CACHED_CHARGE	0
+ };
+ static DEFINE_PER_CPU(struct memcg_stock_pcp, memcg_stock) = {
+ 	.stock_lock = INIT_LOCAL_LOCK(stock_lock),
+ };
+ static DEFINE_MUTEX(percpu_charge_mutex);
+ 
+ #ifdef CONFIG_MEMCG_KMEM
+ static struct obj_cgroup *drain_obj_stock(struct memcg_stock_pcp *stock);
+@@ -2503,39 +2504,40 @@ static void drain_stock(struct memcg_stock_pcp *stock)
+ 		if (do_memsw_account())
+ 			page_counter_uncharge(&old->memsw, stock_pages);
+ 
+ 		WRITE_ONCE(stock->nr_pages, 0);
+ 	}
+ 
+ 	css_put(&old->css);
+ 	WRITE_ONCE(stock->cached, NULL);
+ }
+ 
+-static void drain_local_stock(struct work_struct *dummy)
++static void drain_local_stock(struct work_struct *w)
+ {
+ 	struct memcg_stock_pcp *stock;
+ 	struct obj_cgroup *old = NULL;
+ 	unsigned long flags;
++	int cpu = qpw_get_cpu(w);
+ 
+ 	/*
+ 	 * The only protection from cpu hotplug (memcg_hotplug_cpu_dead) vs.
+ 	 * drain_stock races is that we always operate on local CPU stock
+ 	 * here with IRQ disabled
+ 	 */
+-	local_lock_irqsave(&memcg_stock.stock_lock, flags);
++	qpw_lock_irqsave(&memcg_stock.stock_lock, flags, cpu);
+ 
+-	stock = this_cpu_ptr(&memcg_stock);
++	stock = per_cpu_ptr(&memcg_stock, cpu);
+ 	old = drain_obj_stock(stock);
+ 	drain_stock(stock);
+ 	clear_bit(FLUSHING_CACHED_CHARGE, &stock->flags);
+ 
+-	local_unlock_irqrestore(&memcg_stock.stock_lock, flags);
++	qpw_unlock_irqrestore(&memcg_stock.stock_lock, flags, cpu);
+ 	obj_cgroup_put(old);
+ }
+ 
+ /*
+  * Cache charges(val) to local per_cpu area.
+  * This will be consumed by consume_stock() function, later.
+  */
+ static void __refill_stock(struct mem_cgroup *memcg, unsigned int nr_pages)
+ {
+ 	struct memcg_stock_pcp *stock;
+@@ -2592,23 +2594,23 @@ static void drain_all_stock(struct mem_cgroup *root_memcg)
+ 		if (memcg && READ_ONCE(stock->nr_pages) &&
+ 		    mem_cgroup_is_descendant(memcg, root_memcg))
+ 			flush = true;
+ 		else if (obj_stock_flush_required(stock, root_memcg))
+ 			flush = true;
+ 		rcu_read_unlock();
+ 
+ 		if (flush &&
+ 		    !test_and_set_bit(FLUSHING_CACHED_CHARGE, &stock->flags)) {
+ 			if (cpu == curcpu)
+-				drain_local_stock(&stock->work);
++				drain_local_stock(&stock->qpw.work);
+ 			else if (!cpu_is_isolated(cpu))
+-				schedule_work_on(cpu, &stock->work);
++				queue_percpu_work_on(cpu, system_wq, &stock->qpw);
+ 		}
+ 	}
+ 	migrate_enable();
+ 	mutex_unlock(&percpu_charge_mutex);
+ }
+ 
+ static int memcg_hotplug_cpu_dead(unsigned int cpu)
+ {
+ 	struct memcg_stock_pcp *stock;
+ 
+@@ -7956,22 +7958,22 @@ static int __init mem_cgroup_init(void)
+ 	 * used for per-memcg-per-cpu caching of per-node statistics. In order
+ 	 * to work fine, we should make sure that the overfill threshold can't
+ 	 * exceed S32_MAX / PAGE_SIZE.
+ 	 */
+ 	BUILD_BUG_ON(MEMCG_CHARGE_BATCH > S32_MAX / PAGE_SIZE);
+ 
+ 	cpuhp_setup_state_nocalls(CPUHP_MM_MEMCQ_DEAD, "mm/memctrl:dead", NULL,
+ 				  memcg_hotplug_cpu_dead);
+ 
+ 	for_each_possible_cpu(cpu)
+-		INIT_WORK(&per_cpu_ptr(&memcg_stock, cpu)->work,
+-			  drain_local_stock);
++		INIT_QPW(&per_cpu_ptr(&memcg_stock, cpu)->qpw,
++			 drain_local_stock, cpu);
+ 
+ 	for_each_node(node) {
+ 		struct mem_cgroup_tree_per_node *rtpn;
+ 
+ 		rtpn = kzalloc_node(sizeof(*rtpn), GFP_KERNEL, node);
+ 
+ 		rtpn->rb_root = RB_ROOT;
+ 		rtpn->rb_rightmost = NULL;
+ 		spin_lock_init(&rtpn->lock);
+ 		soft_limit_tree.rb_tree_per_node[node] = rtpn;
+-- 
+2.45.2
+
+
+From: Leonardo Bras <leobras@redhat.com>
+Subject: [RFC PATCH v1 4/4] slub: apply new queue_percpu_work_on() interface
+
+Make use of the new qpw_{un,}lock*() and queue_percpu_work_on()
+interface to improve performance & latency on PREEMTP_RT kernels.
+
+For functions that may be scheduled in a different cpu, replace
+local_{un,}lock*() by qpw_{un,}lock*(), and replace schedule_work_on() by
+queue_percpu_work_on(). The same happens for flush_work() and
+flush_percpu_work().
+
+This change requires allocation of qpw_structs instead of a work_structs,
+and changing parameters of a few functions to include the cpu parameter.
+
+This should bring no relevant performance impact on non-RT kernels:
+For functions that may be scheduled in a different cpu, the local_*lock's
+this_cpu_ptr() becomes a per_cpu_ptr(smp_processor_id()).
+
+Signed-off-by: Leonardo Bras <leobras@redhat.com>
+---
+ mm/slub.c | 26 +++++++++++++++-----------
+ 1 file changed, 15 insertions(+), 11 deletions(-)
+
+diff --git a/mm/slub.c b/mm/slub.c
+index 1373ac365a46..5cd91541906e 100644
+--- a/mm/slub.c
++++ b/mm/slub.c
+@@ -35,20 +35,21 @@
+ #include <linux/math64.h>
+ #include <linux/fault-inject.h>
+ #include <linux/kmemleak.h>
+ #include <linux/stacktrace.h>
+ #include <linux/prefetch.h>
+ #include <linux/memcontrol.h>
+ #include <linux/random.h>
+ #include <kunit/test.h>
+ #include <kunit/test-bug.h>
+ #include <linux/sort.h>
++#include <linux/qpw.h>
+ 
+ #include <linux/debugfs.h>
+ #include <trace/events/kmem.h>
+ 
+ #include "internal.h"
+ 
+ /*
+  * Lock order:
+  *   1. slab_mutex (Global Mutex)
+  *   2. node->list_lock (Spinlock)
+@@ -3073,36 +3074,37 @@ static void put_cpu_partial(struct kmem_cache *s, struct slab *slab, int drain)
+ }
+ 
+ #else	/* CONFIG_SLUB_CPU_PARTIAL */
+ 
+ static inline void put_partials(struct kmem_cache *s) { }
+ static inline void put_partials_cpu(struct kmem_cache *s,
+ 				    struct kmem_cache_cpu *c) { }
+ 
+ #endif	/* CONFIG_SLUB_CPU_PARTIAL */
+ 
+-static inline void flush_slab(struct kmem_cache *s, struct kmem_cache_cpu *c)
++static inline void flush_slab(struct kmem_cache *s, struct kmem_cache_cpu *c,
++			      int cpu)
+ {
+ 	unsigned long flags;
+ 	struct slab *slab;
+ 	void *freelist;
+ 
+-	local_lock_irqsave(&s->cpu_slab->lock, flags);
++	qpw_lock_irqsave(&s->cpu_slab->lock, flags, cpu);
+ 
+ 	slab = c->slab;
+ 	freelist = c->freelist;
+ 
+ 	c->slab = NULL;
+ 	c->freelist = NULL;
+ 	c->tid = next_tid(c->tid);
+ 
+-	local_unlock_irqrestore(&s->cpu_slab->lock, flags);
++	qpw_unlock_irqrestore(&s->cpu_slab->lock, flags, cpu);
+ 
+ 	if (slab) {
+ 		deactivate_slab(s, slab, freelist);
+ 		stat(s, CPUSLAB_FLUSH);
+ 	}
+ }
+ 
+ static inline void __flush_cpu_slab(struct kmem_cache *s, int cpu)
+ {
+ 	struct kmem_cache_cpu *c = per_cpu_ptr(s->cpu_slab, cpu);
+@@ -3115,82 +3117,84 @@ static inline void __flush_cpu_slab(struct kmem_cache *s, int cpu)
+ 
+ 	if (slab) {
+ 		deactivate_slab(s, slab, freelist);
+ 		stat(s, CPUSLAB_FLUSH);
+ 	}
+ 
+ 	put_partials_cpu(s, c);
+ }
+ 
+ struct slub_flush_work {
+-	struct work_struct work;
++	struct qpw_struct qpw;
+ 	struct kmem_cache *s;
+ 	bool skip;
+ };
+ 
++static DEFINE_PER_CPU(struct slub_flush_work, slub_flush);
++
+ /*
+  * Flush cpu slab.
+  *
+  * Called from CPU work handler with migration disabled.
+  */
+ static void flush_cpu_slab(struct work_struct *w)
+ {
+ 	struct kmem_cache *s;
+ 	struct kmem_cache_cpu *c;
+ 	struct slub_flush_work *sfw;
++	int cpu = qpw_get_cpu(w);
+ 
+-	sfw = container_of(w, struct slub_flush_work, work);
++	sfw = &per_cpu(slub_flush, cpu);
+ 
+ 	s = sfw->s;
+-	c = this_cpu_ptr(s->cpu_slab);
++	c = per_cpu_ptr(s->cpu_slab, cpu);
+ 
+ 	if (c->slab)
+-		flush_slab(s, c);
++		flush_slab(s, c, cpu);
+ 
+ 	put_partials(s);
+ }
+ 
+ static bool has_cpu_slab(int cpu, struct kmem_cache *s)
+ {
+ 	struct kmem_cache_cpu *c = per_cpu_ptr(s->cpu_slab, cpu);
+ 
+ 	return c->slab || slub_percpu_partial(c);
+ }
+ 
+ static DEFINE_MUTEX(flush_lock);
+-static DEFINE_PER_CPU(struct slub_flush_work, slub_flush);
+ 
+ static void flush_all_cpus_locked(struct kmem_cache *s)
+ {
+ 	struct slub_flush_work *sfw;
+ 	unsigned int cpu;
+ 
+ 	lockdep_assert_cpus_held();
+ 	mutex_lock(&flush_lock);
+ 
+ 	for_each_online_cpu(cpu) {
+ 		sfw = &per_cpu(slub_flush, cpu);
+ 		if (!has_cpu_slab(cpu, s)) {
+ 			sfw->skip = true;
+ 			continue;
+ 		}
+-		INIT_WORK(&sfw->work, flush_cpu_slab);
++		INIT_QPW(&sfw->qpw, flush_cpu_slab, cpu);
+ 		sfw->skip = false;
+ 		sfw->s = s;
+-		queue_work_on(cpu, flushwq, &sfw->work);
++		queue_percpu_work_on(cpu, flushwq, &sfw->qpw);
+ 	}
+ 
+ 	for_each_online_cpu(cpu) {
+ 		sfw = &per_cpu(slub_flush, cpu);
+ 		if (sfw->skip)
+ 			continue;
+-		flush_work(&sfw->work);
++		flush_percpu_work(&sfw->qpw);
+ 	}
+ 
+ 	mutex_unlock(&flush_lock);
+ }
+ 
+ static void flush_all(struct kmem_cache *s)
+ {
+ 	cpus_read_lock();
+ 	flush_all_cpus_locked(s);
+ 	cpus_read_unlock();
+-- 
+2.45.2

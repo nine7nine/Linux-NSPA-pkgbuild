@@ -79,7 +79,7 @@ _tickrate=full
 # using trusted VMs - I'm not overly worried about this vulnerability.
 #
 # !!! WARNING: Do NOT enable this: may have your system !!!
-_vmx_hack=n
+_vmx_hack=
 
 # Disable RT Throttling (!!! DANGER ZONE !!!)
 # Don't enable unless you know what you are doing.
@@ -108,7 +108,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.10-rc5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=13
+pkgrel=15
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -138,6 +138,7 @@ source=(
   "0120-Softirq-Fix_lock_imbalance_in_local_bh.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
+  "0999-cpu-Force-Enable-VMX-hack.patch"
   "1000-sched-core-devel.patch"
   "1001-sched-eevdf-devel.patch"
   "0101-sched-Fair-DL-server_V7.patch"
@@ -151,9 +152,9 @@ source=(
   "1110-add-acs-overrides_iommu.patch"
   "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
   "1113-mm-lru-misc_optimizations.patch"
-  "1116-kt-pm-suspend_patches.patch"
-  "1115-pmdomain-vs-RT-suspend.patch"
   "1116-Support_s2idle-s2ram_on_PREEMPT_RT.patch"
+  "1116-kt-pm-suspend_patches.patch"
+  "1120-RFC-Introduce-QPW-for-per-cpu-operations.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -173,7 +174,7 @@ prepare() {
     src="${src%%::*}"
     src="${src##*/}"
 
-    if [[ $src == "0099-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack == "y" ]]; then
+    if [[ $src == "0999-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack == "y" ]]; then
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
     elif [[ $src == "201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch" && $_no_RT_throttle == "y" ]]; then
@@ -510,7 +511,7 @@ done
 sha256sums=('5635c69b72ed1d9cd68a6f974f4d6cb311f0ffdee4adaeffa5d49922a7f21eaf'
             'c535240ac6e257655aa97039759fdc2da1b502a3e5dd471cc09dd2037e854c21'
             '15517a8f9a761515d7507aae0cd089a49d4bfc64946de5305205cf07cf2791f5'
-            '5d39331ebde909922ddc98307b7b4e7c1728708dd5ad424f2e2e77f34eec4c54'
+            'f7c7ef3ad0407b2886d3ab7075d5e7fe87775cb0f52eaffe32486d681700348b'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -530,7 +531,8 @@ sha256sums=('5635c69b72ed1d9cd68a6f974f4d6cb311f0ffdee4adaeffa5d49922a7f21eaf'
             '57fb1f13bc4cedf471523e0b043962971caa4db107d6e83a527056103ebaf9dc'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
-            '27c51dc8327193ecf5732a1cb88715b8b573ab8cce86c3a1aa23557a0ed96833'
+            '88620fb4c05734f0da4e2ea7098d40ff8bdafe2485ab449085da769550ae18b6'
+            '35de81b5581ac4ad38980cf578f6aa4d036e6d60c4f9195f1b7570be33fda583'
             'a2756bd85de0f09fc0e805ce4c7015790c01a0a81be14899b7fa4b69536d594c'
             '5a8ef40c3e9855991d37c3e7fdbc74a769288241150c028a9eca39fa77a62536'
             '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
@@ -543,7 +545,7 @@ sha256sums=('5635c69b72ed1d9cd68a6f974f4d6cb311f0ffdee4adaeffa5d49922a7f21eaf'
             'f3e6c8c98ea5172f424971bc20f128c7f1f6416af6944f58dad1048ba4dff168'
             'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
             'c6c2b07ba61d624a3e2b351dc5d3d914183bdecb61fa975486f64b046f88a55e'
+            '75a79812c1b7c700fba495cb23b7abf8a043a940eaede0560e5b3efc9060704a'
             '6d5a98e630c2981fbab73b895dab34fd727b4113b3c5a6c3a6c00b8ef93a3ae1'
-            '95b8d13755145350a4566aaa0c81b1d2f73d670ca977a2631ebe055b2647b45f'
-            'b38c042ad4a408c2d30e53590afcc9ee195033204ed22ab86515e219c0fcc456'
+            '97a4cd25dcc07cd260d9f410e80d869a376d019affa288fa1b37f15963fe0bd9'
             'fd6603b5748f1bf10d4a0130f3b5380ea9dfc117170f5768cb8ded30d152fff6')
