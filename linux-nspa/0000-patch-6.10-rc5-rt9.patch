@@ -978,24 +978,6 @@ index 1f8a4f8adc929..9cc367a795341 100644
  
  	/* The deadlock will be caught by WW mutex, don't warn about it */
  	lock_release(&bo2->base.resv->lock.base.dep_map, 1);
-diff --git a/drivers/pinctrl/renesas/pinctrl-rzg2l.c b/drivers/pinctrl/renesas/pinctrl-rzg2l.c
-index c3256bfde5023..60be78da9f529 100644
---- a/drivers/pinctrl/renesas/pinctrl-rzg2l.c
-+++ b/drivers/pinctrl/renesas/pinctrl-rzg2l.c
-@@ -2071,11 +2071,11 @@ static void rzg2l_gpio_irq_restore(struct rzg2l_pinctrl *pctrl)
- 		 * This has to be atomically executed to protect against a concurrent
- 		 * interrupt.
- 		 */
--		raw_spin_lock_irqsave(&pctrl->lock.rlock, flags);
-+		spin_lock_irqsave(&pctrl->lock, flags);
- 		ret = rzg2l_gpio_irq_set_type(data, irqd_get_trigger_type(data));
- 		if (!ret && !irqd_irq_disabled(data))
- 			rzg2l_gpio_irq_enable(data);
--		raw_spin_unlock_irqrestore(&pctrl->lock.rlock, flags);
-+		spin_unlock_irqrestore(&pctrl->lock, flags);
- 
- 		if (ret)
- 			dev_crit(pctrl->dev, "Failed to set IRQ type for virq=%u\n", virq);
 diff --git a/drivers/tty/serial/8250/8250_core.c b/drivers/tty/serial/8250/8250_core.c
 index ff15022369e45..214a1cdbc1bfe 100644
 --- a/drivers/tty/serial/8250/8250_core.c
