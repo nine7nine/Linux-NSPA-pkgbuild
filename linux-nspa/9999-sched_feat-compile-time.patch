@@ -214,7 +214,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
 +++ b/kernel/sched/core.c	2024-04-05 16:34:58.938773823 -0500
 @@ -761,9 +761,11 @@ static void update_rq_clock_task(struct
  	rq->clock_task += delta;
-
+ 
  #ifdef CONFIG_HAVE_SCHED_AVG_IRQ
 -	if ((irq_delta + steal) && sched_feat(NONTASK_CAPACITY))
 +#if SCHED_FEAT_NONTASK_CAPACITY
@@ -224,19 +224,30 @@ index d82501c1350da..c3fd3ad4a5d85 100644
 +#endif
  	update_rq_clock_pelt(rq, delta);
  }
-
-@@ -1092,8 +1094,8 @@ void resched_curr(struct rq *rq)
-
+ 
+@@ -777,8 +779,9 @@ void update_rq_clock(struct rq *rq)
+ 		return;
+ 
+ #ifdef CONFIG_SCHED_DEBUG
+-	if (sched_feat(WARN_DOUBLE_CLOCK))
++#if SCHED_FEAT_WARN_DOUBLE_CLOCK
+ 		SCHED_WARN_ON(rq->clock_update_flags & RQCF_UPDATED);
++#endif
+ 	rq->clock_update_flags |= RQCF_UPDATED;
+ #endif
+ 
+@@ -1092,8 +1095,8 @@ void resched_curr(struct rq *rq)
+ 
  void resched_curr_lazy(struct rq *rq)
  {
 -	int lazy = IS_ENABLED(CONFIG_PREEMPT_BUILD_AUTO) && !sched_feat(FORCE_NEED_RESCHED) ?
 -		TIF_NEED_RESCHED_LAZY_OFFSET : 0;
 +	/* SCHED_FEAT_FORCE_NEED_RESCHED 0 */
 +	int lazy = IS_ENABLED(CONFIG_PREEMPT_BUILD_AUTO) ? TIF_NEED_RESCHED_LAZY_OFFSET : 0;
-
+ 
  	if (lazy && unlikely(test_tsk_thread_flag(rq->curr, TIF_NEED_RESCHED)))
  		return;
-@@ -1308,10 +1310,12 @@ bool sched_can_stop_tick(struct rq *rq)
+@@ -1308,10 +1311,12 @@ bool sched_can_stop_tick(struct rq *rq)
  	 * dequeued by migrating while the constrained task continues to run.
  	 * E.g. going from 2->1 without going through pick_next_task().
  	 */
@@ -247,26 +258,26 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  			return false;
  	}
 +#endif
-
+ 
  	return true;
  }
-@@ -3923,6 +3927,7 @@ static int ttwu_runnable(struct task_str
+@@ -3733,6 +3738,7 @@ static int ttwu_runnable(struct task_str
  }
-
+ 
  #ifdef CONFIG_SMP
 +#if SCHED_FEAT_TTWU_QUEUE
  void sched_ttwu_pending(void *arg)
  {
  	struct llist_node *llist = arg;
-@@ -3959,6 +3964,7 @@ void sched_ttwu_pending(void *arg)
+@@ -3769,6 +3775,7 @@ void sched_ttwu_pending(void *arg)
  	WRITE_ONCE(rq->ttwu_pending, 0);
  	rq_unlock_irqrestore(rq, &rf);
  }
 +#endif
-
+ 
  /*
   * Prepare the scene for sending an IPI for a remote smp_call
-@@ -3982,6 +3988,7 @@ bool call_function_single_prep_ipi(int c
+@@ -3792,6 +3799,7 @@ bool call_function_single_prep_ipi(int c
   * via sched_ttwu_wakeup() for activation so the wakee incurs the cost
   * of the wakeup instead of the waker.
   */
@@ -274,24 +285,24 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  static void __ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
  {
  	struct rq *rq = cpu_rq(cpu);
-@@ -3991,6 +3998,7 @@ static void __ttwu_queue_wakelist(struct
+@@ -3801,6 +3809,7 @@ static void __ttwu_queue_wakelist(struct
  	WRITE_ONCE(rq->ttwu_pending, 1);
  	__smp_call_single_queue(cpu, &p->wake_entry.llist);
  }
 +#endif
-
+ 
  void wake_up_if_idle(int cpu)
  {
-@@ -4035,6 +4043,7 @@ bool cpus_share_resources(int this_cpu,
+@@ -3845,6 +3854,7 @@ bool cpus_share_resources(int this_cpu,
  	return per_cpu(sd_share_id, this_cpu) == per_cpu(sd_share_id, that_cpu);
  }
-
+ 
 +#if SCHED_FEAT_TTWU_QUEUE
  static inline bool ttwu_queue_cond(struct task_struct *p, int cpu)
  {
  	/*
-@@ -4077,7 +4086,7 @@ static inline bool ttwu_queue_cond(struc
-
+@@ -3887,7 +3897,7 @@ static inline bool ttwu_queue_cond(struc
+ 
  static bool ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
  {
 -	if (sched_feat(TTWU_QUEUE) && ttwu_queue_cond(p, cpu)) {
@@ -299,43 +310,59 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		sched_clock_cpu(cpu); /* Sync clocks across CPUs */
  		__ttwu_queue_wakelist(p, cpu, wake_flags);
  		return true;
-@@ -4085,6 +4094,7 @@ static bool ttwu_queue_wakelist(struct t
-
+@@ -3895,6 +3905,7 @@ static bool ttwu_queue_wakelist(struct t
+ 
  	return false;
  }
 +#endif
-
+ 
  #else /* !CONFIG_SMP */
-
-@@ -4100,8 +4110,10 @@ static void ttwu_queue(struct task_struc
+ 
+@@ -3910,8 +3921,10 @@ static void ttwu_queue(struct task_struc
  	struct rq *rq = cpu_rq(cpu);
  	struct rq_flags rf;
-
+ 
 +#if SCHED_FEAT_TTWU_QUEUE
  	if (ttwu_queue_wakelist(p, cpu, wake_flags))
  		return;
 +#endif
-
+ 
  	rq_lock(rq, &rf);
  	update_rq_clock(rq);
-@@ -4382,6 +4394,7 @@ int try_to_wake_up(struct task_struct *p
+@@ -4196,6 +4209,7 @@ int try_to_wake_up(struct task_struct *p
  		 */
  		WRITE_ONCE(p->__state, TASK_WAKING);
-
+ 
 +#if SCHED_FEAT_TTWU_QUEUE
  		/*
  		 * If the owning (remote) CPU is still in the middle of schedule() with
  		 * this task as prev, considering queueing p on the remote CPUs wake_list
-@@ -4404,6 +4417,7 @@ int try_to_wake_up(struct task_struct *p
+@@ -4218,6 +4232,7 @@ int try_to_wake_up(struct task_struct *p
  		if (smp_load_acquire(&p->on_cpu) &&
  		    ttwu_queue_wakelist(p, task_cpu(p), wake_flags))
  			break;
 +#endif
-
+ 
  		/*
  		 * If the owning (remote) CPU is still in the middle of schedule() with
-@@ -5730,7 +5744,9 @@ void sched_tick(void)
- 	struct task_struct *curr = rq->curr;
+@@ -5514,6 +5529,7 @@ unsigned long long task_sched_dvfs_runti
+ }
+ 
+ #ifdef CONFIG_SCHED_DEBUG
++#if SCHED_FEAT_LATENCY_WARN
+ static u64 cpu_resched_latency(struct rq *rq)
+ {
+ 	int latency_warn_ms = READ_ONCE(sysctl_resched_latency_warn_ms);
+@@ -5560,6 +5576,7 @@ static int __init setup_resched_latency_
+ __setup("resched_latency_warn_ms=", setup_resched_latency_warn_ms);
+ #else
+ static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
++#endif
+ #endif /* CONFIG_SCHED_DEBUG */
+ 
+ /*
+@@ -5573,7 +5590,9 @@ void sched_tick(void)
+ 	struct task_struct *curr;
  	struct rq_flags rf;
  	unsigned long hw_pressure;
 +#if SCHED_FEAT_WARN_DOUBLE_CLOCK
@@ -344,9 +371,9 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (housekeeping_cpu(cpu, HK_TYPE_TICK))
  		arch_scale_freq_tick();
-@@ -5739,16 +5755,23 @@ void sched_tick(void)
- 	thermal_pressure = arch_scale_thermal_pressure(cpu_of(rq));
- 	update_thermal_load_avg(rq_clock_thermal(rq), rq, thermal_pressure);
+@@ -5589,16 +5608,23 @@ void sched_tick(void)
+ 	hw_pressure = arch_scale_hw_pressure(cpu_of(rq));
+ 	update_hw_load_avg(rq_clock_task(rq), rq, hw_pressure);
  	curr->sched_class->task_tick(rq, curr, 0);
 -	if (sched_feat(LATENCY_WARN))
 -		resched_latency = cpu_resched_latency(rq);
@@ -358,9 +385,9 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	calc_global_load_tick(rq);
  	sched_core_tick(rq);
  	task_tick_mm_cid(rq, curr);
-
+ 
  	rq_unlock(rq, &rf);
-
+ 
 -	if (sched_feat(LATENCY_WARN) && resched_latency)
 +#if SCHED_FEAT_WARN_DOUBLE_CLOCK
 +#if SCHED_FEAT_LATENCY_WARN
@@ -368,36 +395,21 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		resched_latency_warn(cpu, resched_latency);
 +#endif
 +#endif
-
+ 
  	perf_event_task_tick();
-
-@@ -6692,8 +6715,9 @@ static void __sched notrace __schedule(u
-
+ 
+@@ -6542,8 +6568,9 @@ static void __sched notrace __schedule(u
+ 
  	schedule_debug(prev, !!sched_mode);
-
+ 
 -	if (sched_feat(HRTICK) || sched_feat(HRTICK_DL))
 -		hrtick_clear(rq);
 +#if SCHED_FEAT_HRTICK || SCHED_FEAT_HRTICK_DL
 +	hrtick_clear(rq);
 +#endif
-
+ 
  	local_irq_disable();
  	rcu_note_context_switch(!!sched_mode);
---- a/kernel/sched/rt.c	2024-04-27 19:34:42.130291710 -0500
-+++ b/kernel/sched/rt.c	2024-04-27 19:34:27.282475794 -0500
-@@ -2316,10 +2316,8 @@ static void pull_rt_task(struct rq *this
- 		return;
-
- #ifdef HAVE_RT_PUSH_IPI
--	if (sched_feat(RT_PUSH_IPI)) {
--		tell_cpu_to_push(this_rq);
--		return;
--	}
-+	tell_cpu_to_push(this_rq);
-+	return;
- #endif
-
- 	for_each_cpu(cpu, this_rq->rd->rto_mask) {
 --- a/kernel/sched/debug.c	2024-04-05 13:15:08.833514613 -0500
 +++ b/kernel/sched/debug.c	2024-04-05 14:07:37.951074336 -0500
 @@ -44,128 +44,6 @@ static unsigned long nsec_low(unsigned l
@@ -529,6 +541,15 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  #ifdef CONFIG_SMP
 
  static ssize_t sched_scaling_write(struct file *filp, const char __user *ubuf,
+@@ -393,7 +393,7 @@ static __init int sched_init_debug(void)
+ 
+ 	debugfs_sched = debugfs_create_dir("sched", NULL);
+ 
+-	debugfs_create_file("features", 0644, debugfs_sched, NULL, &sched_feat_fops);
++	// debugfs_create_file("features", 0644, debugfs_sched, NULL, &sched_feat_fops);
+ 	debugfs_create_file_unsafe("verbose", 0644, debugfs_sched, &sched_debug_verbose, &sched_verbose_fops);
+ #ifdef CONFIG_PREEMPT_DYNAMIC
+ 	debugfs_create_file("preempt", 0644, debugfs_sched, NULL, &sched_dynamic_fops);
 --- a/kernel/sched/fair.c	2024-04-05 18:01:34.588902528 -0500
 +++ b/kernel/sched/fair.c	2024-04-05 18:00:40.747682546 -0500
 @@ -54,6 +54,7 @@
@@ -998,7 +1019,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
 
 --- a/kernel/sched/rt.c	2024-05-19 22:03:21.296924567 -0500
 +++ b/kernel/sched/rt.c	2024-05-19 22:02:45.528746704 -0500
-@@ -776,14 +776,15 @@ static void __enable_runtime(struct rq *
+@@ -775,14 +775,15 @@ static void __enable_runtime(struct rq *
  
  static void balance_runtime(struct rt_rq *rt_rq)
  {
@@ -1017,7 +1038,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  }
  #else /* !CONFIG_SMP */
  static inline void balance_runtime(struct rt_rq *rt_rq) {}
-@@ -820,7 +821,8 @@ static int do_sched_rt_period_timer(stru
+@@ -819,7 +820,8 @@ static int do_sched_rt_period_timer(stru
  		 * can be time-consuming. Try to avoid it when possible.
  		 */
  		raw_spin_lock(&rt_rq->rt_runtime_lock);
@@ -1027,3 +1048,17 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  			rt_rq->rt_runtime = rt_b->rt_runtime;
  		skip = !rt_rq->rt_time && !rt_rq->rt_nr_running;
  		raw_spin_unlock(&rt_rq->rt_runtime_lock);
+@@ -2324,10 +2317,9 @@ static void pull_rt_task(struct rq *this
+ 		return;
+ 
+ #ifdef HAVE_RT_PUSH_IPI
+-	if (sched_feat(RT_PUSH_IPI)) {
+-		tell_cpu_to_push(this_rq);
+-		return;
+-	}
++	 /* SCHED_FEAT_RT_PUSH_IPI = 1 */
++	tell_cpu_to_push(this_rq);
++	return;
+ #endif
+ 
+ 	for_each_cpu(cpu, this_rq->rd->rto_mask) {
