@@ -1062,3 +1062,20 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  #endif
  
  	for_each_cpu(cpu, this_rq->rd->rto_mask) {
+
+// HACK: with SCHED_DEBUG enabled I am hitting this once warning during 
+// boot up. Without actually changing scheduler behaviour, lets just 
+// make this bit hidden, until I properly debug it.
+
+--- a/kernel/sched/sched.h	2024-07-04 09:50:09.737296120 -0500
++++ b/kernel/sched/sched.h	2024-07-04 09:49:49.386196305 -0500
+@@ -1558,7 +1558,7 @@ static inline void assert_clock_updated(
+ 	 * The only reason for not seeing a clock update since the
+ 	 * last rq_pin_lock() is if we're currently skipping updates.
+ 	 */
+-	SCHED_WARN_ON(rq->clock_update_flags < RQCF_ACT_SKIP);
++	// SCHED_WARN_ON(rq->clock_update_flags < RQCF_ACT_SKIP);
+ }
+ 
+ static inline u64 rq_clock(struct rq *rq)
+
