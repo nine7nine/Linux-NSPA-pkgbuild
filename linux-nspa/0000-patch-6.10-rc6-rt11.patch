@@ -1,8 +1,8 @@
 diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
-index 11e57ba2985cc..ab32efee930a5 100644
+index 27ec49af1bf27..8006bf5a3d993 100644
 --- a/Documentation/admin-guide/kernel-parameters.txt
 +++ b/Documentation/admin-guide/kernel-parameters.txt
-@@ -6615,6 +6615,18 @@
+@@ -6596,6 +6596,18 @@
  			Force threading of all interrupt handlers except those
  			marked explicitly IRQF_NO_THREAD.
  
@@ -978,11 +978,70 @@ index 1f8a4f8adc929..9cc367a795341 100644
  
  	/* The deadlock will be caught by WW mutex, don't warn about it */
  	lock_release(&bo2->base.resv->lock.base.dep_map, 1);
+diff --git a/drivers/net/tun.c b/drivers/net/tun.c
+index 9254bca2813dc..9b24861464bc6 100644
+--- a/drivers/net/tun.c
++++ b/drivers/net/tun.c
+@@ -1661,6 +1661,7 @@ static struct sk_buff *tun_build_skb(struct tun_struct *tun,
+ 				     int len, int *skb_xdp)
+ {
+ 	struct page_frag *alloc_frag = &current->task_frag;
++	struct bpf_net_context __bpf_net_ctx, *bpf_net_ctx;
+ 	struct bpf_prog *xdp_prog;
+ 	int buflen = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+ 	char *buf;
+@@ -1700,6 +1701,7 @@ static struct sk_buff *tun_build_skb(struct tun_struct *tun,
+ 
+ 	local_bh_disable();
+ 	rcu_read_lock();
++	bpf_net_ctx = bpf_net_ctx_set(&__bpf_net_ctx);
+ 	xdp_prog = rcu_dereference(tun->xdp_prog);
+ 	if (xdp_prog) {
+ 		struct xdp_buff xdp;
+@@ -1728,12 +1730,14 @@ static struct sk_buff *tun_build_skb(struct tun_struct *tun,
+ 		pad = xdp.data - xdp.data_hard_start;
+ 		len = xdp.data_end - xdp.data;
+ 	}
++	bpf_net_ctx_clear(bpf_net_ctx);
+ 	rcu_read_unlock();
+ 	local_bh_enable();
+ 
+ 	return __tun_build_skb(tfile, alloc_frag, buf, buflen, len, pad);
+ 
+ out:
++	bpf_net_ctx_clear(bpf_net_ctx);
+ 	rcu_read_unlock();
+ 	local_bh_enable();
+ 	return NULL;
+@@ -2566,6 +2570,7 @@ static int tun_sendmsg(struct socket *sock, struct msghdr *m, size_t total_len)
+ 
+ 	if (m->msg_controllen == sizeof(struct tun_msg_ctl) &&
+ 	    ctl && ctl->type == TUN_MSG_PTR) {
++		struct bpf_net_context __bpf_net_ctx, *bpf_net_ctx;
+ 		struct tun_page tpage;
+ 		int n = ctl->num;
+ 		int flush = 0, queued = 0;
+@@ -2574,6 +2579,7 @@ static int tun_sendmsg(struct socket *sock, struct msghdr *m, size_t total_len)
+ 
+ 		local_bh_disable();
+ 		rcu_read_lock();
++		bpf_net_ctx = bpf_net_ctx_set(&__bpf_net_ctx);
+ 
+ 		for (i = 0; i < n; i++) {
+ 			xdp = &((struct xdp_buff *)ctl->ptr)[i];
+@@ -2588,6 +2594,7 @@ static int tun_sendmsg(struct socket *sock, struct msghdr *m, size_t total_len)
+ 		if (tfile->napi_enabled && queued > 0)
+ 			napi_schedule(&tfile->napi);
+ 
++		bpf_net_ctx_clear(bpf_net_ctx);
+ 		rcu_read_unlock();
+ 		local_bh_enable();
+ 
 diff --git a/drivers/tty/serial/8250/8250_core.c b/drivers/tty/serial/8250/8250_core.c
-index ff15022369e45..214a1cdbc1bfe 100644
+index b0adafc44747d..fd462494f7b33 100644
 --- a/drivers/tty/serial/8250/8250_core.c
 +++ b/drivers/tty/serial/8250/8250_core.c
-@@ -594,6 +594,7 @@ serial8250_register_ports(struct uart_driver *drv, struct device *dev)
+@@ -589,6 +589,7 @@ serial8250_register_ports(struct uart_driver *drv, struct device *dev)
  
  #ifdef CONFIG_SERIAL_8250_CONSOLE
  
@@ -990,7 +1049,7 @@ index ff15022369e45..214a1cdbc1bfe 100644
  static void univ8250_console_write(struct console *co, const char *s,
  				   unsigned int count)
  {
-@@ -601,6 +602,37 @@ static void univ8250_console_write(struct console *co, const char *s,
+@@ -596,6 +597,37 @@ static void univ8250_console_write(struct console *co, const char *s,
  
  	serial8250_console_write(up, s, count);
  }
@@ -1028,7 +1087,7 @@ index ff15022369e45..214a1cdbc1bfe 100644
  
  static int univ8250_console_setup(struct console *co, char *options)
  {
-@@ -629,11 +661,11 @@ static int univ8250_console_setup(struct console *co, char *options)
+@@ -624,11 +656,11 @@ static int univ8250_console_setup(struct console *co, char *options)
  
  	port = &serial8250_ports[co->index].port;
  	/* link port to console */
@@ -1042,7 +1101,7 @@ index ff15022369e45..214a1cdbc1bfe 100644
  	return retval;
  }
  
-@@ -691,7 +723,7 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
+@@ -686,7 +718,7 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
  			continue;
  
  		co->index = i;
@@ -1051,7 +1110,7 @@ index ff15022369e45..214a1cdbc1bfe 100644
  		return serial8250_console_setup(port, options, true);
  	}
  
-@@ -700,12 +732,20 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
+@@ -695,12 +727,20 @@ static int univ8250_console_match(struct console *co, char *name, int idx,
  
  static struct console univ8250_console = {
  	.name		= "ttyS",
@@ -1311,7 +1370,7 @@ index 8b1644f5411ec..7d0134ecd82fa 100644
  	}
  
 diff --git a/drivers/tty/serial/serial_core.c b/drivers/tty/serial/serial_core.c
-index 0c4d609766633..6cf823809c8ad 100644
+index 2a8006e3d6878..950d598d60764 100644
 --- a/drivers/tty/serial/serial_core.c
 +++ b/drivers/tty/serial/serial_core.c
 @@ -3168,8 +3168,15 @@ static int serial_core_add_one_port(struct uart_driver *drv, struct uart_port *u
@@ -1447,6 +1506,55 @@ index fc53e0ad56d90..448bbef474564 100644
  #endif
  
  #endif /* _LINUX_BH_H */
+diff --git a/include/linux/bpf.h b/include/linux/bpf.h
+index 5e694a308081a..ff261349b5ed3 100644
+--- a/include/linux/bpf.h
++++ b/include/linux/bpf.h
+@@ -2492,7 +2492,7 @@ struct sk_buff;
+ struct bpf_dtab_netdev;
+ struct bpf_cpu_map_entry;
+ 
+-void __dev_flush(void);
++void __dev_flush(struct list_head *flush_list);
+ int dev_xdp_enqueue(struct net_device *dev, struct xdp_frame *xdpf,
+ 		    struct net_device *dev_rx);
+ int dev_map_enqueue(struct bpf_dtab_netdev *dst, struct xdp_frame *xdpf,
+@@ -2505,7 +2505,7 @@ int dev_map_redirect_multi(struct net_device *dev, struct sk_buff *skb,
+ 			   struct bpf_prog *xdp_prog, struct bpf_map *map,
+ 			   bool exclude_ingress);
+ 
+-void __cpu_map_flush(void);
++void __cpu_map_flush(struct list_head *flush_list);
+ int cpu_map_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf,
+ 		    struct net_device *dev_rx);
+ int cpu_map_generic_redirect(struct bpf_cpu_map_entry *rcpu,
+@@ -2642,8 +2642,6 @@ void bpf_dynptr_init(struct bpf_dynptr_kern *ptr, void *data,
+ void bpf_dynptr_set_null(struct bpf_dynptr_kern *ptr);
+ void bpf_dynptr_set_rdonly(struct bpf_dynptr_kern *ptr);
+ 
+-bool dev_check_flush(void);
+-bool cpu_map_check_flush(void);
+ #else /* !CONFIG_BPF_SYSCALL */
+ static inline struct bpf_prog *bpf_prog_get(u32 ufd)
+ {
+@@ -2731,7 +2729,7 @@ static inline struct bpf_token *bpf_token_get_from_fd(u32 ufd)
+ 	return ERR_PTR(-EOPNOTSUPP);
+ }
+ 
+-static inline void __dev_flush(void)
++static inline void __dev_flush(struct list_head *flush_list)
+ {
+ }
+ 
+@@ -2777,7 +2775,7 @@ int dev_map_redirect_multi(struct net_device *dev, struct sk_buff *skb,
+ 	return 0;
+ }
+ 
+-static inline void __cpu_map_flush(void)
++static inline void __cpu_map_flush(struct list_head *flush_list)
+ {
+ }
+ 
 diff --git a/include/linux/console.h b/include/linux/console.h
 index 31a8f5b85f5d7..96c0923d023b8 100644
 --- a/include/linux/console.h
@@ -1695,10 +1803,10 @@ index 6813171afccb2..674a622c91be2 100644
  struct kvm_vcpu;
  
 diff --git a/include/linux/filter.h b/include/linux/filter.h
-index 0f12cf01070e3..62662ab99d1f4 100644
+index 5669da513cd7c..2b8503fecd026 100644
 --- a/include/linux/filter.h
 +++ b/include/linux/filter.h
-@@ -733,21 +733,101 @@ struct bpf_nh_params {
+@@ -733,21 +733,152 @@ struct bpf_nh_params {
  	};
  };
  
@@ -1708,6 +1816,7 @@ index 0f12cf01070e3..62662ab99d1f4 100644
 +#define BPF_RI_F_CPU_MAP_INIT	BIT(2)
 +#define BPF_RI_F_DEV_MAP_INIT	BIT(3)
 +#define BPF_RI_F_XSK_MAP_INIT	BIT(4)
++#define BPF_RI_F_SEG6_STATE	BIT(5)
 +
  struct bpf_redirect_info {
  	u64 tgt_index;
@@ -1801,10 +1910,60 @@ index 0f12cf01070e3..62662ab99d1f4 100644
 +
 +	return &bpf_net_ctx->xskmap_map_flush_list;
 +}
++
++static inline void bpf_net_ctx_get_all_used_flush_lists(struct list_head **lh_map,
++							struct list_head **lh_dev,
++							struct list_head **lh_xsk)
++{
++	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
++	u32 kern_flags = bpf_net_ctx->ri.kern_flags;
++	struct list_head *lh;
++
++	*lh_map = *lh_dev = *lh_xsk = NULL;
++
++	if (!IS_ENABLED(CONFIG_BPF_SYSCALL))
++		return;
++
++	lh = &bpf_net_ctx->dev_map_flush_list;
++	if (kern_flags & BPF_RI_F_DEV_MAP_INIT && !list_empty(lh))
++		*lh_dev = lh;
++
++	lh = &bpf_net_ctx->cpu_map_flush_list;
++	if (kern_flags & BPF_RI_F_CPU_MAP_INIT && !list_empty(lh))
++		*lh_map = lh;
++
++	lh = &bpf_net_ctx->xskmap_map_flush_list;
++	if (IS_ENABLED(CONFIG_XDP_SOCKETS) &&
++	    kern_flags & BPF_RI_F_XSK_MAP_INIT && !list_empty(lh))
++		*lh_xsk = lh;
++}
++
++static inline bool bpf_net_ctx_seg6_state_avail(void)
++{
++	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
++
++	if (!bpf_net_ctx)
++		return false;
++	return bpf_net_ctx->ri.kern_flags & BPF_RI_F_SEG6_STATE;
++}
++
++static inline void bpf_net_ctx_seg6_state_set(void)
++{
++	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
++
++	bpf_net_ctx->ri.kern_flags |= BPF_RI_F_SEG6_STATE;
++}
++
++static inline void bpf_net_ctx_seg6_state_clr(void)
++{
++	struct bpf_net_context *bpf_net_ctx = bpf_net_ctx_get();
++
++	bpf_net_ctx->ri.kern_flags &= ~BPF_RI_F_SEG6_STATE;
++}
  
  /* Compute the linear packet data range [data, data_end) which
   * will be accessed by various program types (cls_bpf, act_bpf,
-@@ -1018,25 +1098,23 @@ struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
+@@ -1018,25 +1149,23 @@ struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
  				       const struct bpf_insn *patch, u32 len);
  int bpf_remove_insns(struct bpf_prog *prog, u32 off, u32 cnt);
  
@@ -1833,7 +1992,7 @@ index 0f12cf01070e3..62662ab99d1f4 100644
  
  	ri->kern_flags &= ~BPF_RI_F_RF_NO_DIRECT;
  }
-@@ -1592,7 +1670,7 @@ static __always_inline long __bpf_xdp_redirect_map(struct bpf_map *map, u64 inde
+@@ -1592,7 +1721,7 @@ static __always_inline long __bpf_xdp_redirect_map(struct bpf_map *map, u64 inde
  						   u64 flags, const u64 flag_mask,
  						   void *lookup_elem(struct bpf_map *map, u32 key))
  {
@@ -2141,7 +2300,7 @@ index a5304ae8c654f..65ece0d5b4b6d 100644
  	struct perf_event_pmu_context	epc;
  	struct perf_event_pmu_context	*task_epc;
 diff --git a/include/linux/printk.h b/include/linux/printk.h
-index 40afab23881a0..8a77bc6fb9bb9 100644
+index 65c5184470f18..1da78bc3c3262 100644
 --- a/include/linux/printk.h
 +++ b/include/linux/printk.h
 @@ -9,6 +9,8 @@
@@ -2153,7 +2312,7 @@ index 40afab23881a0..8a77bc6fb9bb9 100644
  extern const char linux_banner[];
  extern const char linux_proc_banner[];
  
-@@ -160,15 +162,16 @@ int _printk(const char *fmt, ...);
+@@ -157,15 +159,16 @@ int _printk(const char *fmt, ...);
   */
  __printf(1, 2) __cold int _printk_deferred(const char *fmt, ...);
  
@@ -2174,7 +2333,7 @@ index 40afab23881a0..8a77bc6fb9bb9 100644
  
  /*
   * Please don't use printk_ratelimit(), because it shares ratelimiting state
-@@ -195,7 +198,11 @@ void show_regs_print_info(const char *log_lvl);
+@@ -192,7 +195,11 @@ void show_regs_print_info(const char *log_lvl);
  extern asmlinkage void dump_stack_lvl(const char *log_lvl) __cold;
  extern asmlinkage void dump_stack(void) __cold;
  void printk_trigger_flush(void);
@@ -2187,7 +2346,7 @@ index 40afab23881a0..8a77bc6fb9bb9 100644
  #else
  static inline __printf(1, 0)
  int vprintk(const char *s, va_list args)
-@@ -275,9 +282,28 @@ static inline void dump_stack(void)
+@@ -272,9 +279,28 @@ static inline void dump_stack(void)
  static inline void printk_trigger_flush(void)
  {
  }
@@ -2390,7 +2549,7 @@ index fd59ed2cca53e..b74eae9c632be 100644
  int serial8250_console_exit(struct uart_port *port);
  
 diff --git a/include/linux/serial_core.h b/include/linux/serial_core.h
-index 8cb65f50e830c..3c122d8bf6bf1 100644
+index aea25eef9a1a7..4ab65874a850b 100644
 --- a/include/linux/serial_core.h
 +++ b/include/linux/serial_core.h
 @@ -11,6 +11,8 @@
@@ -2581,10 +2740,18 @@ index 8cb65f50e830c..3c122d8bf6bf1 100644
  }
  
 diff --git a/include/linux/task_work.h b/include/linux/task_work.h
-index 795ef5a684294..26b8a47f41fca 100644
+index 795ef5a684294..cf5e7e891a776 100644
 --- a/include/linux/task_work.h
 +++ b/include/linux/task_work.h
-@@ -30,7 +30,8 @@ int task_work_add(struct task_struct *task, struct callback_head *twork,
+@@ -18,6 +18,7 @@ enum task_work_notify_mode {
+ 	TWA_RESUME,
+ 	TWA_SIGNAL,
+ 	TWA_SIGNAL_NO_IPI,
++	TWA_NMI_CURRENT,
+ };
+ 
+ static inline bool task_work_pending(struct task_struct *task)
+@@ -30,7 +31,8 @@ int task_work_add(struct task_struct *task, struct callback_head *twork,
  
  struct callback_head *task_work_cancel_match(struct task_struct *task,
  	bool (*match)(struct callback_head *, void *data), void *data);
@@ -2726,6 +2893,43 @@ index 953c8dc4e259e..7d6784ebb26f5 100644
  enum sk_pacing {
  	SK_PACING_NONE		= 0,
  	SK_PACING_NEEDED	= 1,
+diff --git a/include/net/xdp_sock.h b/include/net/xdp_sock.h
+index 3d54de168a6d9..bfe625b55d55d 100644
+--- a/include/net/xdp_sock.h
++++ b/include/net/xdp_sock.h
+@@ -121,7 +121,7 @@ struct xsk_tx_metadata_ops {
+ 
+ int xsk_generic_rcv(struct xdp_sock *xs, struct xdp_buff *xdp);
+ int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp);
+-void __xsk_map_flush(void);
++void __xsk_map_flush(struct list_head *flush_list);
+ 
+ /**
+  *  xsk_tx_metadata_to_compl - Save enough relevant metadata information
+@@ -206,7 +206,7 @@ static inline int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp)
+ 	return -EOPNOTSUPP;
+ }
+ 
+-static inline void __xsk_map_flush(void)
++static inline void __xsk_map_flush(struct list_head *flush_list)
+ {
+ }
+ 
+@@ -228,14 +228,4 @@ static inline void xsk_tx_metadata_complete(struct xsk_tx_metadata_compl *compl,
+ }
+ 
+ #endif /* CONFIG_XDP_SOCKETS */
+-
+-#if defined(CONFIG_XDP_SOCKETS) && defined(CONFIG_DEBUG_NET)
+-bool xsk_map_check_flush(void);
+-#else
+-static inline bool xsk_map_check_flush(void)
+-{
+-	return false;
+-}
+-#endif
+-
+ #endif /* _LINUX_XDP_SOCK_H */
 diff --git a/kernel/Kconfig.preempt b/kernel/Kconfig.preempt
 index c2f1fd95a8214..0f3d4c2a41cb7 100644
 --- a/kernel/Kconfig.preempt
@@ -2772,7 +2976,7 @@ index c2f1fd95a8214..0f3d4c2a41cb7 100644
  	select PREEMPT_BUILD
  	default y if HAVE_PREEMPT_DYNAMIC_CALL
 diff --git a/kernel/bpf/cpumap.c b/kernel/bpf/cpumap.c
-index a8e34416e960f..068e994ed781a 100644
+index a8e34416e960f..fbdf5a1aabfe4 100644
 --- a/kernel/bpf/cpumap.c
 +++ b/kernel/bpf/cpumap.c
 @@ -79,8 +79,6 @@ struct bpf_cpu_map {
@@ -2807,35 +3011,52 @@ index a8e34416e960f..068e994ed781a 100644
  	rcu_read_unlock_bh(); /* resched point, may call do_softirq() */
  
  	return nframes;
-@@ -706,7 +707,7 @@ static void bq_flush_to_queue(struct xdp_bulk_queue *bq)
+@@ -706,7 +707,6 @@ static void bq_flush_to_queue(struct xdp_bulk_queue *bq)
   */
  static void bq_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf)
  {
 -	struct list_head *flush_list = this_cpu_ptr(&cpu_map_flush_list);
-+	struct list_head *flush_list = bpf_net_ctx_get_cpu_map_flush_list();
  	struct xdp_bulk_queue *bq = this_cpu_ptr(rcpu->bulkq);
  
  	if (unlikely(bq->count == CPU_MAP_BULK_SIZE))
-@@ -758,7 +759,7 @@ int cpu_map_generic_redirect(struct bpf_cpu_map_entry *rcpu,
+@@ -723,8 +723,11 @@ static void bq_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf)
+ 	 */
+ 	bq->q[bq->count++] = xdpf;
  
- void __cpu_map_flush(void)
+-	if (!bq->flush_node.prev)
++	if (!bq->flush_node.prev) {
++		struct list_head *flush_list = bpf_net_ctx_get_cpu_map_flush_list();
++
+ 		list_add(&bq->flush_node, flush_list);
++	}
+ }
+ 
+ int cpu_map_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf,
+@@ -756,9 +759,8 @@ int cpu_map_generic_redirect(struct bpf_cpu_map_entry *rcpu,
+ 	return ret;
+ }
+ 
+-void __cpu_map_flush(void)
++void __cpu_map_flush(struct list_head *flush_list)
  {
 -	struct list_head *flush_list = this_cpu_ptr(&cpu_map_flush_list);
-+	struct list_head *flush_list = bpf_net_ctx_get_cpu_map_flush_list();
  	struct xdp_bulk_queue *bq, *tmp;
  
  	list_for_each_entry_safe(bq, tmp, flush_list, flush_node) {
-@@ -772,20 +773,9 @@ void __cpu_map_flush(void)
- #ifdef CONFIG_DEBUG_NET
- bool cpu_map_check_flush(void)
- {
--	if (list_empty(this_cpu_ptr(&cpu_map_flush_list)))
-+	if (list_empty(bpf_net_ctx_get_cpu_map_flush_list()))
- 		return false;
- 	__cpu_map_flush();
- 	return true;
+@@ -768,24 +770,3 @@ void __cpu_map_flush(void)
+ 		wake_up_process(bq->obj->kthread);
+ 	}
  }
- #endif
+-
+-#ifdef CONFIG_DEBUG_NET
+-bool cpu_map_check_flush(void)
+-{
+-	if (list_empty(this_cpu_ptr(&cpu_map_flush_list)))
+-		return false;
+-	__cpu_map_flush();
+-	return true;
+-}
+-#endif
 -
 -static int __init cpu_map_init(void)
 -{
@@ -2848,7 +3069,7 @@ index a8e34416e960f..068e994ed781a 100644
 -
 -subsys_initcall(cpu_map_init);
 diff --git a/kernel/bpf/devmap.c b/kernel/bpf/devmap.c
-index 7f3b34452243c..317ac2d66ebd1 100644
+index 7f3b34452243c..b18d4a14a0a70 100644
 --- a/kernel/bpf/devmap.c
 +++ b/kernel/bpf/devmap.c
 @@ -83,7 +83,6 @@ struct bpf_dtab {
@@ -2875,34 +3096,52 @@ index 7f3b34452243c..317ac2d66ebd1 100644
  	synchronize_rcu();
  
  	/* Make sure prior __dev_map_entry_free() have completed. */
-@@ -408,7 +414,7 @@ static void bq_xmit_all(struct xdp_dev_bulk_queue *bq, u32 flags)
+@@ -406,9 +412,8 @@ static void bq_xmit_all(struct xdp_dev_bulk_queue *bq, u32 flags)
+  * driver before returning from its napi->poll() routine. See the comment above
+  * xdp_do_flush() in filter.c.
   */
- void __dev_flush(void)
+-void __dev_flush(void)
++void __dev_flush(struct list_head *flush_list)
  {
 -	struct list_head *flush_list = this_cpu_ptr(&dev_flush_list);
-+	struct list_head *flush_list = bpf_net_ctx_get_dev_flush_list();
  	struct xdp_dev_bulk_queue *bq, *tmp;
  
  	list_for_each_entry_safe(bq, tmp, flush_list, flush_node) {
-@@ -422,7 +428,7 @@ void __dev_flush(void)
- #ifdef CONFIG_DEBUG_NET
- bool dev_check_flush(void)
- {
+@@ -419,16 +424,6 @@ void __dev_flush(void)
+ 	}
+ }
+ 
+-#ifdef CONFIG_DEBUG_NET
+-bool dev_check_flush(void)
+-{
 -	if (list_empty(this_cpu_ptr(&dev_flush_list)))
-+	if (list_empty(bpf_net_ctx_get_dev_flush_list()))
- 		return false;
- 	__dev_flush();
- 	return true;
-@@ -453,7 +459,7 @@ static void *__dev_map_lookup_elem(struct bpf_map *map, u32 key)
+-		return false;
+-	__dev_flush();
+-	return true;
+-}
+-#endif
+-
+ /* Elements are kept alive by RCU; either by rcu_read_lock() (from syscall) or
+  * by local_bh_disable() (from XDP calls inside NAPI). The
+  * rcu_read_lock_bh_held() below makes lockdep accept both.
+@@ -453,7 +448,6 @@ static void *__dev_map_lookup_elem(struct bpf_map *map, u32 key)
  static void bq_enqueue(struct net_device *dev, struct xdp_frame *xdpf,
  		       struct net_device *dev_rx, struct bpf_prog *xdp_prog)
  {
 -	struct list_head *flush_list = this_cpu_ptr(&dev_flush_list);
-+	struct list_head *flush_list = bpf_net_ctx_get_dev_flush_list();
  	struct xdp_dev_bulk_queue *bq = this_cpu_ptr(dev->xdp_bulkq);
  
  	if (unlikely(bq->count == DEV_MAP_BULK_SIZE))
-@@ -1153,15 +1159,11 @@ static struct notifier_block dev_map_notifier = {
+@@ -467,6 +461,8 @@ static void bq_enqueue(struct net_device *dev, struct xdp_frame *xdpf,
+ 	 * are only ever modified together.
+ 	 */
+ 	if (!bq->dev_rx) {
++		struct list_head *flush_list = bpf_net_ctx_get_dev_flush_list();
++
+ 		bq->dev_rx = dev_rx;
+ 		bq->xdp_prog = xdp_prog;
+ 		list_add(&bq->flush_node, flush_list);
+@@ -1153,15 +1149,11 @@ static struct notifier_block dev_map_notifier = {
  
  static int __init dev_map_init(void)
  {
@@ -2967,7 +3206,7 @@ index 1273be84392cf..ad57944b6c40e 100644
  static DEFINE_MUTEX(callchain_mutex);
  static struct callchain_cpus_entries *callchain_cpus_entries;
 diff --git a/kernel/events/core.c b/kernel/events/core.c
-index 8f908f0779354..8bba63ea9c686 100644
+index 8f908f0779354..0acf6ee4df528 100644
 --- a/kernel/events/core.c
 +++ b/kernel/events/core.c
 @@ -2283,21 +2283,6 @@ event_sched_out(struct perf_event *event, struct perf_event_context *ctx)
@@ -3138,29 +3377,27 @@ index 8f908f0779354..8bba63ea9c686 100644
  }
  
  #ifdef CONFIG_GUEST_PERF_EVENTS
-@@ -9709,13 +9732,28 @@ static int __perf_event_overflow(struct perf_event *event,
+@@ -9706,16 +9729,26 @@ static int __perf_event_overflow(struct perf_event *event,
+ 		 */
+ 		bool valid_sample = sample_is_allowed(event, regs);
+ 		unsigned int pending_id = 1;
++		enum task_work_notify_mode notify_mode;
  
  		if (regs)
  			pending_id = hash32_ptr((void *)instruction_pointer(regs)) ?: 1;
 -		if (!event->pending_sigtrap) {
 -			event->pending_sigtrap = pending_id;
 +
++		notify_mode = in_nmi() ? TWA_NMI_CURRENT : TWA_RESUME;
++
 +		if (!event->pending_work &&
-+		    !task_work_add(current, &event->pending_task, TWA_RESUME)) {
++		    !task_work_add(current, &event->pending_task, notify_mode)) {
 +			event->pending_work = pending_id;
  			local_inc(&event->ctx->nr_pending);
 +
 +			event->pending_addr = 0;
 +			if (valid_sample && (data->sample_flags & PERF_SAMPLE_ADDR))
 +				event->pending_addr = data->addr;
-+			/*
-+			 * The NMI path returns directly to userland. The
-+			 * irq_work is raised as a dummy interrupt to ensure
-+			 * regular return path to user is taken and task_work
-+			 * is processed.
-+			 */
-+			if (in_nmi())
-+				irq_work_queue(&event->pending_disable_irq);
 +
  		} else if (event->attr.exclude_kernel && valid_sample) {
  			/*
@@ -3170,7 +3407,7 @@ index 8f908f0779354..8bba63ea9c686 100644
  			 *
  			 *  1. Where !exclude_kernel, events can overflow again
  			 *     in the kernel without returning to user space.
-@@ -9725,13 +9763,8 @@ static int __perf_event_overflow(struct perf_event *event,
+@@ -9725,13 +9758,8 @@ static int __perf_event_overflow(struct perf_event *event,
  			 *     To approximate progress (with false negatives),
  			 *     check 32-bit hash of the current IP.
  			 */
@@ -3185,7 +3422,7 @@ index 8f908f0779354..8bba63ea9c686 100644
  	}
  
  	READ_ONCE(event->overflow_handler)(event, data, regs);
-@@ -9759,11 +9792,7 @@ struct swevent_htable {
+@@ -9759,11 +9787,7 @@ struct swevent_htable {
  	struct swevent_hlist		*swevent_hlist;
  	struct mutex			hlist_mutex;
  	int				hlist_refcount;
@@ -3197,7 +3434,7 @@ index 8f908f0779354..8bba63ea9c686 100644
  static DEFINE_PER_CPU(struct swevent_htable, swevent_htable);
  
  /*
-@@ -9961,17 +9990,13 @@ DEFINE_PER_CPU(struct pt_regs, __perf_regs[4]);
+@@ -9961,17 +9985,13 @@ DEFINE_PER_CPU(struct pt_regs, __perf_regs[4]);
  
  int perf_swevent_get_recursion_context(void)
  {
@@ -3217,7 +3454,7 @@ index 8f908f0779354..8bba63ea9c686 100644
  }
  
  void ___perf_sw_event(u32 event_id, u64 nr, struct pt_regs *regs, u64 addr)
-@@ -11961,7 +11986,9 @@ perf_event_alloc(struct perf_event_attr *attr, int cpu,
+@@ -11961,7 +11981,9 @@ perf_event_alloc(struct perf_event_attr *attr, int cpu,
  
  	init_waitqueue_head(&event->waitq);
  	init_irq_work(&event->pending_irq, perf_pending_irq);
@@ -3227,7 +3464,7 @@ index 8f908f0779354..8bba63ea9c686 100644
  
  	mutex_init(&event->mmap_mutex);
  	raw_spin_lock_init(&event->addr_filters.lock);
-@@ -13637,6 +13664,7 @@ int perf_event_init_task(struct task_struct *child, u64 clone_flags)
+@@ -13637,6 +13659,7 @@ int perf_event_init_task(struct task_struct *child, u64 clone_flags)
  {
  	int ret;
  
@@ -3257,18 +3494,6 @@ index 5150d5f84c033..f0daaa6f2a33b 100644
  {
  	barrier();
  	recursion[rctx]--;
-diff --git a/kernel/fork.c b/kernel/fork.c
-index 99076dbe27d83..f314bdd7e6108 100644
---- a/kernel/fork.c
-+++ b/kernel/fork.c
-@@ -2355,6 +2355,7 @@ __latent_entropy struct task_struct *copy_process(
- 	RCU_INIT_POINTER(p->bpf_storage, NULL);
- 	p->bpf_ctx = NULL;
- #endif
-+	p->bpf_net_context =  NULL;
- 
- 	/* Perform scheduler related setup. Assign this task to a CPU. */
- 	retval = sched_fork(clone_flags, p);
 diff --git a/kernel/irq/manage.c b/kernel/irq/manage.c
 index 71b0fc2d0aeaa..dd53298ef1a5c 100644
 --- a/kernel/irq/manage.c
@@ -5022,7 +5247,7 @@ index c8093bcc01fe6..0813ce88a49c5 100644
 +}
 +device_initcall(printk_init_ops);
 diff --git a/kernel/printk/printk.c b/kernel/printk/printk.c
-index 420fd310129d4..f2ac7aaab2342 100644
+index dddb15f48d595..5e9778f692067 100644
 --- a/kernel/printk/printk.c
 +++ b/kernel/printk/printk.c
 @@ -195,6 +195,17 @@ static int __init control_devkmsg(char *str)
@@ -5059,7 +5284,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  {
  	srcu_read_unlock_nmisafe(&console_srcu, cookie);
  }
-@@ -458,8 +471,33 @@ static int console_msg_format = MSG_FORMAT_DEFAULT;
+@@ -461,8 +474,33 @@ static int console_msg_format = MSG_FORMAT_DEFAULT;
  /* syslog_lock protects syslog_* variables and write access to clear_seq. */
  static DEFINE_MUTEX(syslog_lock);
  
@@ -5093,7 +5318,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  /* All 3 protected by @syslog_lock. */
  /* the next printk record to read by syslog(READ) or /proc/kmsg */
  static u64 syslog_seq;
-@@ -1847,7 +1885,7 @@ static bool console_waiter;
+@@ -1850,7 +1888,7 @@ static bool console_waiter;
   * there may be a waiter spinning (like a spinlock). Also it must be
   * ready to hand over the lock at the end of the section.
   */
@@ -5102,7 +5327,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  {
  	/*
  	 * Do not use spinning in panic(). The panic CPU wants to keep the lock.
-@@ -1886,7 +1924,7 @@ static void console_lock_spinning_enable(void)
+@@ -1889,7 +1927,7 @@ static void console_lock_spinning_enable(void)
   *
   * Return: 1 if the lock rights were passed, 0 otherwise.
   */
@@ -5111,7 +5336,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  {
  	int waiter;
  
-@@ -2297,12 +2335,30 @@ int vprintk_store(int facility, int level,
+@@ -2300,12 +2338,30 @@ int vprintk_store(int facility, int level,
  	return ret;
  }
  
@@ -5143,7 +5368,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  	/* Suppress unimportant messages after panic happens */
  	if (unlikely(suppress_printk))
-@@ -2318,38 +2374,85 @@ asmlinkage int vprintk_emit(int facility, int level,
+@@ -2321,38 +2377,85 @@ asmlinkage int vprintk_emit(int facility, int level,
  
  	if (level == LOGLEVEL_SCHED) {
  		level = LOGLEVEL_DEFAULT;
@@ -5237,7 +5462,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  	return printed_len;
  }
-@@ -2377,6 +2480,14 @@ EXPORT_SYMBOL(_printk);
+@@ -2380,6 +2483,14 @@ EXPORT_SYMBOL(_printk);
  static bool pr_flush(int timeout_ms, bool reset_on_progress);
  static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progress);
  
@@ -5252,7 +5477,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  #else /* CONFIG_PRINTK */
  
  #define printk_time		false
-@@ -2390,6 +2501,8 @@ static u64 syslog_seq;
+@@ -2393,6 +2504,8 @@ static u64 syslog_seq;
  static bool pr_flush(int timeout_ms, bool reset_on_progress) { return true; }
  static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progress) { return true; }
  
@@ -5261,7 +5486,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  #endif /* CONFIG_PRINTK */
  
  #ifdef CONFIG_EARLY_PRINTK
-@@ -2623,6 +2736,8 @@ void suspend_console(void)
+@@ -2608,6 +2721,8 @@ void suspend_console(void)
  void resume_console(void)
  {
  	struct console *con;
@@ -5270,7 +5495,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  	if (!console_suspend_enabled)
  		return;
-@@ -2639,6 +2754,20 @@ void resume_console(void)
+@@ -2624,6 +2739,20 @@ void resume_console(void)
  	 */
  	synchronize_srcu(&console_srcu);
  
@@ -5291,7 +5516,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	pr_flush(1000, true);
  }
  
-@@ -2653,7 +2782,9 @@ void resume_console(void)
+@@ -2638,7 +2767,9 @@ void resume_console(void)
   */
  static int console_cpu_notify(unsigned int cpu)
  {
@@ -5302,7 +5527,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  		/* If trylock fails, someone else is doing the printing */
  		if (console_trylock())
  			console_unlock();
-@@ -2710,36 +2841,6 @@ int is_console_locked(void)
+@@ -2695,36 +2826,6 @@ int is_console_locked(void)
  }
  EXPORT_SYMBOL(is_console_locked);
  
@@ -5339,7 +5564,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  static void __console_unlock(void)
  {
  	console_locked = 0;
-@@ -2749,30 +2850,25 @@ static void __console_unlock(void)
+@@ -2734,30 +2835,25 @@ static void __console_unlock(void)
  #ifdef CONFIG_PRINTK
  
  /*
@@ -5376,7 +5601,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  	/*
  	 * Make sure outbuf is sufficiently large before prepending.
-@@ -2794,6 +2890,46 @@ void console_prepend_dropped(struct printk_message *pmsg, unsigned long dropped)
+@@ -2779,6 +2875,46 @@ void console_prepend_dropped(struct printk_message *pmsg, unsigned long dropped)
  	pmsg->outbuf_len += len;
  }
  
@@ -5423,7 +5648,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  /*
   * Read and format the specified record (or a later record if the specified
   * record is not available).
-@@ -2859,6 +2995,33 @@ bool printk_get_next_message(struct printk_message *pmsg, u64 seq,
+@@ -2844,6 +2980,33 @@ bool printk_get_next_message(struct printk_message *pmsg, u64 seq,
  	return true;
  }
  
@@ -5457,7 +5682,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  /*
   * Used as the printk buffers for non-panic, serialized console printing.
   * This is for legacy (!CON_NBCON) as well as all boot (CON_BOOT) consoles.
-@@ -2908,31 +3071,45 @@ static bool console_emit_next_record(struct console *con, bool *handover, int co
+@@ -2893,31 +3056,45 @@ static bool console_emit_next_record(struct console *con, bool *handover, int co
  		con->dropped = 0;
  	}
  
@@ -5524,7 +5749,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  skip:
  	return true;
  }
-@@ -2985,13 +3162,29 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
+@@ -2970,13 +3147,29 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
  
  		cookie = console_srcu_read_lock();
  		for_each_console_srcu(con) {
@@ -5556,7 +5781,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  			/*
  			 * If a handover has occurred, the SRCU read lock
-@@ -3001,8 +3194,8 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
+@@ -2986,8 +3179,8 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
  				return false;
  
  			/* Track the next of the highest seq flushed. */
@@ -5567,7 +5792,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  			if (!progress)
  				continue;
-@@ -3025,19 +3218,7 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
+@@ -3010,19 +3203,7 @@ static bool console_flush_all(bool do_cond_resched, u64 *next_seq, bool *handove
  	return false;
  }
  
@@ -5588,7 +5813,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  {
  	bool do_cond_resched;
  	bool handover;
-@@ -3081,6 +3262,32 @@ void console_unlock(void)
+@@ -3066,6 +3247,32 @@ void console_unlock(void)
  		 */
  	} while (prb_read_valid(prb, next_seq, NULL) && console_trylock());
  }
@@ -5621,7 +5846,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  EXPORT_SYMBOL(console_unlock);
  
  /**
-@@ -3226,7 +3433,10 @@ void console_flush_on_panic(enum con_flush_mode mode)
+@@ -3211,7 +3418,10 @@ void console_flush_on_panic(enum con_flush_mode mode)
  	if (mode == CONSOLE_REPLAY_ALL)
  		__console_rewind_all();
  
@@ -5633,7 +5858,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  }
  
  /*
-@@ -3283,13 +3493,125 @@ EXPORT_SYMBOL(console_stop);
+@@ -3268,13 +3478,125 @@ EXPORT_SYMBOL(console_stop);
  
  void console_start(struct console *console)
  {
@@ -5759,7 +5984,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  static int __read_mostly keep_bootcon;
  
  static int __init keep_bootcon_setup(char *str)
-@@ -3388,19 +3710,21 @@ static void try_enable_default_console(struct console *newcon)
+@@ -3373,19 +3695,21 @@ static void try_enable_default_console(struct console *newcon)
  		newcon->flags |= CON_CONSDEV;
  }
  
@@ -5784,7 +6009,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  		/*
  		 * If any enabled boot consoles are due to be unregistered
-@@ -3421,7 +3745,7 @@ static void console_init_seq(struct console *newcon, bool bootcon_registered)
+@@ -3406,7 +3730,7 @@ static void console_init_seq(struct console *newcon, bool bootcon_registered)
  			 * Flush all consoles and set the console to start at
  			 * the next unprinted sequence number.
  			 */
@@ -5793,7 +6018,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  				/*
  				 * Flushing failed. Just choose the lowest
  				 * sequence of the enabled boot consoles.
-@@ -3434,19 +3758,30 @@ static void console_init_seq(struct console *newcon, bool bootcon_registered)
+@@ -3419,19 +3743,30 @@ static void console_init_seq(struct console *newcon, bool bootcon_registered)
  				if (handover)
  					console_lock();
  
@@ -5829,7 +6054,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  }
  
  #define console_first()				\
-@@ -3475,9 +3810,12 @@ static int unregister_console_locked(struct console *console);
+@@ -3460,9 +3795,12 @@ static int unregister_console_locked(struct console *console);
   */
  void register_console(struct console *newcon)
  {
@@ -5843,7 +6068,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	int err;
  
  	console_list_lock();
-@@ -3555,10 +3893,32 @@ void register_console(struct console *newcon)
+@@ -3540,10 +3878,32 @@ void register_console(struct console *newcon)
  	}
  
  	newcon->dropped = 0;
@@ -5879,7 +6104,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  	/*
  	 * Put this console in the list - keep the
-@@ -3584,6 +3944,10 @@ void register_console(struct console *newcon)
+@@ -3569,6 +3929,10 @@ void register_console(struct console *newcon)
  	 * register_console() completes.
  	 */
  
@@ -5890,7 +6115,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	console_sysfs_notify();
  
  	/*
-@@ -3612,6 +3976,13 @@ EXPORT_SYMBOL(register_console);
+@@ -3597,6 +3961,13 @@ EXPORT_SYMBOL(register_console);
  /* Must be called under console_list_lock(). */
  static int unregister_console_locked(struct console *console)
  {
@@ -5904,7 +6129,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	int res;
  
  	lockdep_assert_console_list_lock_held();
-@@ -3630,8 +4001,18 @@ static int unregister_console_locked(struct console *console)
+@@ -3615,8 +3986,18 @@ static int unregister_console_locked(struct console *console)
  	if (!console_is_registered_locked(console))
  		return -ENODEV;
  
@@ -5923,7 +6148,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	/*
  	 * <HISTORICAL>
  	 * If this isn't the last console and it has CON_CONSDEV set, we
-@@ -3659,6 +4040,42 @@ static int unregister_console_locked(struct console *console)
+@@ -3644,6 +4025,42 @@ static int unregister_console_locked(struct console *console)
  	if (console->exit)
  		res = console->exit(console);
  
@@ -5966,7 +6191,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	return res;
  }
  
-@@ -3817,23 +4234,39 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
+@@ -3802,23 +4219,39 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
  
  	seq = prb_next_reserve_seq(prb);
  
@@ -6016,7 +6241,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  		cookie = console_srcu_read_lock();
  		for_each_console_srcu(c) {
-@@ -3847,12 +4280,15 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
+@@ -3832,12 +4265,15 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
  			 * that they make forward progress, so only increment
  			 * @diff for usable consoles.
  			 */
@@ -6033,7 +6258,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  				printk_seq = c->seq;
  			}
  
-@@ -3864,7 +4300,8 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
+@@ -3849,7 +4285,8 @@ static bool __pr_flush(struct console *con, int timeout_ms, bool reset_on_progre
  		if (diff != last_diff && reset_on_progress)
  			remaining_jiffies = timeout_jiffies;
  
@@ -6043,7 +6268,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  
  		/* Note: @diff is 0 if there are no usable consoles. */
  		if (diff == 0 || remaining_jiffies == 0)
-@@ -3916,9 +4353,16 @@ static void wake_up_klogd_work_func(struct irq_work *irq_work)
+@@ -3901,9 +4338,16 @@ static void wake_up_klogd_work_func(struct irq_work *irq_work)
  	int pending = this_cpu_xchg(printk_pending, 0);
  
  	if (pending & PRINTK_PENDING_OUTPUT) {
@@ -6063,7 +6288,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	}
  
  	if (pending & PRINTK_PENDING_WAKEUP)
-@@ -3934,6 +4378,7 @@ static void __wake_up_klogd(int val)
+@@ -3919,6 +4363,7 @@ static void __wake_up_klogd(int val)
  		return;
  
  	preempt_disable();
@@ -6071,7 +6296,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	/*
  	 * Guarantee any new records can be seen by tasks preparing to wait
  	 * before this context checks if the wait queue is empty.
-@@ -3945,11 +4390,22 @@ static void __wake_up_klogd(int val)
+@@ -3930,11 +4375,22 @@ static void __wake_up_klogd(int val)
  	 *
  	 * This pairs with devkmsg_read:A and syslog_print:A.
  	 */
@@ -6096,7 +6321,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	preempt_enable();
  }
  
-@@ -3991,6 +4447,7 @@ void defer_console_output(void)
+@@ -3976,6 +4432,7 @@ void defer_console_output(void)
  
  void printk_trigger_flush(void)
  {
@@ -6104,7 +6329,7 @@ index 420fd310129d4..f2ac7aaab2342 100644
  	defer_console_output();
  }
  
-@@ -4314,18 +4771,19 @@ void kmsg_dump_rewind(struct kmsg_dump_iter *iter)
+@@ -4299,18 +4756,19 @@ void kmsg_dump_rewind(struct kmsg_dump_iter *iter)
  EXPORT_SYMBOL_GPL(kmsg_dump_rewind);
  
  /**
@@ -6811,10 +7036,74 @@ index 02582017759a2..00e32e279fa95 100644
  }
  early_initcall(spawn_ksoftirqd);
 diff --git a/kernel/task_work.c b/kernel/task_work.c
-index 95a7e1b7f1dab..2134ac8057a94 100644
+index 95a7e1b7f1dab..05fb41fe09f5d 100644
 --- a/kernel/task_work.c
 +++ b/kernel/task_work.c
-@@ -120,9 +120,9 @@ static bool task_work_func_match(struct callback_head *cb, void *data)
+@@ -1,10 +1,19 @@
+ // SPDX-License-Identifier: GPL-2.0
++#include <linux/irq_work.h>
+ #include <linux/spinlock.h>
+ #include <linux/task_work.h>
+ #include <linux/resume_user_mode.h>
++#include <trace/events/ipi.h>
+ 
+ static struct callback_head work_exited; /* all we need is ->next == NULL */
+ 
++static void task_work_set_notify_irq(struct irq_work *entry)
++{
++	test_and_set_tsk_thread_flag(current, TIF_NOTIFY_RESUME);
++}
++static DEFINE_PER_CPU(struct irq_work, irq_work_NMI_resume) =
++	IRQ_WORK_INIT_HARD(task_work_set_notify_irq);
++
+ /**
+  * task_work_add - ask the @task to execute @work->func()
+  * @task: the task which should run the callback
+@@ -12,7 +21,7 @@ static struct callback_head work_exited; /* all we need is ->next == NULL */
+  * @notify: how to notify the targeted task
+  *
+  * Queue @work for task_work_run() below and notify the @task if @notify
+- * is @TWA_RESUME, @TWA_SIGNAL, or @TWA_SIGNAL_NO_IPI.
++ * is @TWA_RESUME, @TWA_SIGNAL, @TWA_SIGNAL_NO_IPI or @TWA_NMI_CURRENT.
+  *
+  * @TWA_SIGNAL works like signals, in that the it will interrupt the targeted
+  * task and run the task_work, regardless of whether the task is currently
+@@ -24,6 +33,8 @@ static struct callback_head work_exited; /* all we need is ->next == NULL */
+  * kernel anyway.
+  * @TWA_RESUME work is run only when the task exits the kernel and returns to
+  * user mode, or before entering guest mode.
++ * @TWA_NMI_CURRENT works like @TWA_RESUME, except it can only be used for the
++ * current @task and if the current context is NMI.
+  *
+  * Fails if the @task is exiting/exited and thus it can't process this @work.
+  * Otherwise @work->func() will be called when the @task goes through one of
+@@ -44,8 +55,13 @@ int task_work_add(struct task_struct *task, struct callback_head *work,
+ {
+ 	struct callback_head *head;
+ 
+-	/* record the work call stack in order to print it in KASAN reports */
+-	kasan_record_aux_stack(work);
++	if (notify == TWA_NMI_CURRENT) {
++		if (WARN_ON_ONCE(task != current))
++			return -EINVAL;
++	} else {
++		/* record the work call stack in order to print it in KASAN reports */
++		kasan_record_aux_stack(work);
++	}
+ 
+ 	head = READ_ONCE(task->task_works);
+ 	do {
+@@ -66,6 +82,9 @@ int task_work_add(struct task_struct *task, struct callback_head *work,
+ 	case TWA_SIGNAL_NO_IPI:
+ 		__set_notify_signal(task);
+ 		break;
++	case TWA_NMI_CURRENT:
++		irq_work_queue(this_cpu_ptr(&irq_work_NMI_resume));
++		break;
+ 	default:
+ 		WARN_ON_ONCE(1);
+ 		break;
+@@ -120,9 +139,9 @@ static bool task_work_func_match(struct callback_head *cb, void *data)
  }
  
  /**
@@ -6827,7 +7116,7 @@ index 95a7e1b7f1dab..2134ac8057a94 100644
   *
   * Find the last queued pending work with ->func == @func and remove
   * it from queue.
-@@ -131,11 +131,35 @@ static bool task_work_func_match(struct callback_head *cb, void *data)
+@@ -131,11 +150,35 @@ static bool task_work_func_match(struct callback_head *cb, void *data)
   * The found work or NULL if not found.
   */
  struct callback_head *
@@ -6864,7 +7153,7 @@ index 95a7e1b7f1dab..2134ac8057a94 100644
  /**
   * task_work_run - execute the works added by task_work_add()
   *
-@@ -168,7 +192,7 @@ void task_work_run(void)
+@@ -168,7 +211,7 @@ void task_work_run(void)
  		if (!work)
  			break;
  		/*
@@ -6874,10 +7163,10 @@ index 95a7e1b7f1dab..2134ac8057a94 100644
  		 * But it can remove another entry from the ->next list.
  		 */
 diff --git a/kernel/time/hrtimer.c b/kernel/time/hrtimer.c
-index 492c14aac642b..102c9a180917f 100644
+index b8ee320208d41..fd78166a2ebe6 100644
 --- a/kernel/time/hrtimer.c
 +++ b/kernel/time/hrtimer.c
-@@ -1807,7 +1807,7 @@ void hrtimer_interrupt(struct clock_event_device *dev)
+@@ -1809,7 +1809,7 @@ void hrtimer_interrupt(struct clock_event_device *dev)
  	if (!ktime_before(now, cpu_base->softirq_expires_next)) {
  		cpu_base->softirq_expires_next = KTIME_MAX;
  		cpu_base->softirq_activated = 1;
@@ -6886,7 +7175,7 @@ index 492c14aac642b..102c9a180917f 100644
  	}
  
  	__hrtimer_run_queues(cpu_base, now, flags, HRTIMER_ACTIVE_HARD);
-@@ -1902,7 +1902,7 @@ void hrtimer_run_queues(void)
+@@ -1904,7 +1904,7 @@ void hrtimer_run_queues(void)
  	if (!ktime_before(now, cpu_base->softirq_expires_next)) {
  		cpu_base->softirq_expires_next = KTIME_MAX;
  		cpu_base->softirq_activated = 1;
@@ -6990,11 +7279,11 @@ index d8b302d010830..4f58a196e14c1 100644
  		break;
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..22746d6390a42
+index 0000000000000..05c35cb580779
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt9
++-rt11
 diff --git a/net/bpf/test_run.c b/net/bpf/test_run.c
 index 36ae54f57bf57..a6d7f790cdda8 100644
 --- a/net/bpf/test_run.c
@@ -7125,7 +7414,7 @@ index bf30c50b56895..3c9f6538990ea 100644
  		kfree_skb(skb);
  		return -EMSGSIZE;
 diff --git a/net/core/dev.c b/net/core/dev.c
-index 4d4de9008f6f3..bd3cead02b530 100644
+index 2b4819b610b8a..78184fe9e3882 100644
 --- a/net/core/dev.c
 +++ b/net/core/dev.c
 @@ -229,7 +229,7 @@ static inline void backlog_lock_irq_save(struct softnet_data *sd,
@@ -7280,7 +7569,36 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  
  	return skb;
  }
-@@ -5935,6 +5965,7 @@ static void flush_backlog(struct work_struct *work)
+@@ -5096,11 +5126,14 @@ static DEFINE_STATIC_KEY_FALSE(generic_xdp_needed_key);
+ 
+ int do_xdp_generic(struct bpf_prog *xdp_prog, struct sk_buff **pskb)
+ {
++	struct bpf_net_context __bpf_net_ctx, *bpf_net_ctx;
++
+ 	if (xdp_prog) {
+ 		struct xdp_buff xdp;
+ 		u32 act;
+ 		int err;
+ 
++		bpf_net_ctx = bpf_net_ctx_set(&__bpf_net_ctx);
+ 		act = netif_receive_generic_xdp(pskb, &xdp, xdp_prog);
+ 		if (act != XDP_PASS) {
+ 			switch (act) {
+@@ -5114,11 +5147,13 @@ int do_xdp_generic(struct bpf_prog *xdp_prog, struct sk_buff **pskb)
+ 				generic_xdp_tx(*pskb, xdp_prog);
+ 				break;
+ 			}
++			bpf_net_ctx_clear(bpf_net_ctx);
+ 			return XDP_DROP;
+ 		}
+ 	}
+ 	return XDP_PASS;
+ out_redir:
++	bpf_net_ctx_clear(bpf_net_ctx);
+ 	kfree_skb_reason(*pskb, SKB_DROP_REASON_XDP);
+ 	return XDP_DROP;
+ }
+@@ -5935,6 +5970,7 @@ static void flush_backlog(struct work_struct *work)
  	}
  	backlog_unlock_irq_enable(sd);
  
@@ -7288,7 +7606,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  	skb_queue_walk_safe(&sd->process_queue, skb, tmp) {
  		if (skb->dev->reg_state == NETREG_UNREGISTERING) {
  			__skb_unlink(skb, &sd->process_queue);
-@@ -5942,6 +5973,7 @@ static void flush_backlog(struct work_struct *work)
+@@ -5942,6 +5978,7 @@ static void flush_backlog(struct work_struct *work)
  			rps_input_queue_head_incr(sd);
  		}
  	}
@@ -7296,7 +7614,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  	local_bh_enable();
  }
  
-@@ -6063,7 +6095,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6063,7 +6100,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
  	while (again) {
  		struct sk_buff *skb;
  
@@ -7306,7 +7624,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  			rcu_read_lock();
  			__netif_receive_skb(skb);
  			rcu_read_unlock();
-@@ -6072,7 +6106,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6072,7 +6111,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
  				return work;
  			}
  
@@ -7316,7 +7634,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  
  		backlog_lock_irq_disable(sd);
  		if (skb_queue_empty(&sd->input_pkt_queue)) {
-@@ -6087,8 +6123,10 @@ static int process_backlog(struct napi_struct *napi, int quota)
+@@ -6087,8 +6128,10 @@ static int process_backlog(struct napi_struct *napi, int quota)
  			napi->state &= NAPIF_STATE_THREADED;
  			again = false;
  		} else {
@@ -7327,7 +7645,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  		}
  		backlog_unlock_irq_enable(sd);
  	}
-@@ -6301,6 +6339,7 @@ enum {
+@@ -6301,6 +6344,7 @@ enum {
  static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock,
  			   unsigned flags, u16 budget)
  {
@@ -7335,7 +7653,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  	bool skip_schedule = false;
  	unsigned long timeout;
  	int rc;
-@@ -6318,6 +6357,7 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock,
+@@ -6318,6 +6362,7 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock,
  	clear_bit(NAPI_STATE_IN_BUSY_POLL, &napi->state);
  
  	local_bh_disable();
@@ -7343,7 +7661,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  
  	if (flags & NAPI_F_PREFER_BUSY_POLL) {
  		napi->defer_hard_irqs_count = READ_ONCE(napi->dev->napi_defer_hard_irqs);
-@@ -6340,6 +6380,7 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock,
+@@ -6340,6 +6385,7 @@ static void busy_poll_stop(struct napi_struct *napi, void *have_poll_lock,
  	netpoll_poll_unlock(have_poll_lock);
  	if (rc == budget)
  		__busy_poll_stop(napi, skip_schedule);
@@ -7351,7 +7669,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  	local_bh_enable();
  }
  
-@@ -6349,6 +6390,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6349,6 +6395,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  {
  	unsigned long start_time = loop_end ? busy_loop_current_time() : 0;
  	int (*napi_poll)(struct napi_struct *napi, int budget);
@@ -7359,7 +7677,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  	void *have_poll_lock = NULL;
  	struct napi_struct *napi;
  
-@@ -6367,6 +6409,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6367,6 +6414,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  		int work = 0;
  
  		local_bh_disable();
@@ -7367,7 +7685,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  		if (!napi_poll) {
  			unsigned long val = READ_ONCE(napi->state);
  
-@@ -6397,6 +6440,7 @@ static void __napi_busy_loop(unsigned int napi_id,
+@@ -6397,6 +6445,7 @@ static void __napi_busy_loop(unsigned int napi_id,
  			__NET_ADD_STATS(dev_net(napi->dev),
  					LINUX_MIB_BUSYPOLLRXPACKETS, work);
  		skb_defer_free_flush(this_cpu_ptr(&softnet_data));
@@ -7375,7 +7693,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  		local_bh_enable();
  
  		if (!loop_end || loop_end(loop_end_arg, start_time))
-@@ -6824,6 +6868,7 @@ static int napi_thread_wait(struct napi_struct *napi)
+@@ -6824,6 +6873,7 @@ static int napi_thread_wait(struct napi_struct *napi)
  
  static void napi_threaded_poll_loop(struct napi_struct *napi)
  {
@@ -7383,7 +7701,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  	struct softnet_data *sd;
  	unsigned long last_qs = jiffies;
  
-@@ -6832,6 +6877,8 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
+@@ -6832,6 +6882,8 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
  		void *have;
  
  		local_bh_disable();
@@ -7392,7 +7710,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  		sd = this_cpu_ptr(&softnet_data);
  		sd->in_napi_threaded_poll = true;
  
-@@ -6847,6 +6894,7 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
+@@ -6847,6 +6899,7 @@ static void napi_threaded_poll_loop(struct napi_struct *napi)
  			net_rps_action_and_irq_enable(sd);
  		}
  		skb_defer_free_flush(sd);
@@ -7400,7 +7718,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  		local_bh_enable();
  
  		if (!repoll)
-@@ -6872,10 +6920,12 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+@@ -6872,10 +6925,12 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
  	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
  	unsigned long time_limit = jiffies +
  		usecs_to_jiffies(READ_ONCE(net_hotdata.netdev_budget_usecs));
@@ -7413,7 +7731,7 @@ index 4d4de9008f6f3..bd3cead02b530 100644
  start:
  	sd->in_net_rx_action = true;
  	local_irq_disable();
-@@ -6928,7 +6978,8 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
+@@ -6928,7 +6983,8 @@ static __latent_entropy void net_rx_action(struct softirq_action *h)
  		sd->in_net_rx_action = false;
  
  	net_rps_action_and_irq_enable(sd);
@@ -7459,7 +7777,7 @@ index b7b518bc2be55..4984dd9b334bc 100644
  
  #endif
 diff --git a/net/core/filter.c b/net/core/filter.c
-index 9933851c685e7..a8dd866edec9e 100644
+index 9933851c685e7..9556453a8b564 100644
 --- a/net/core/filter.c
 +++ b/net/core/filter.c
 @@ -1658,9 +1658,12 @@ struct bpf_scratchpad {
@@ -7547,7 +7865,52 @@ index 9933851c685e7..a8dd866edec9e 100644
  
  	if (unlikely((plen && plen < sizeof(*params)) || flags))
  		return TC_ACT_SHOT;
-@@ -4293,30 +4297,13 @@ void xdp_do_check_flushed(struct napi_struct *napi)
+@@ -4273,50 +4277,50 @@ static const struct bpf_func_proto bpf_xdp_adjust_meta_proto = {
+  */
+ void xdp_do_flush(void)
+ {
+-	__dev_flush();
+-	__cpu_map_flush();
+-	__xsk_map_flush();
++	struct list_head *lh_map, *lh_dev, *lh_xsk;
++
++	bpf_net_ctx_get_all_used_flush_lists(&lh_map, &lh_dev, &lh_xsk);
++	if (lh_dev)
++		__dev_flush(lh_dev);
++	if (lh_map)
++		__cpu_map_flush(lh_map);
++	if (lh_xsk)
++		__xsk_map_flush(lh_xsk);
+ }
+ EXPORT_SYMBOL_GPL(xdp_do_flush);
+ 
+ #if defined(CONFIG_DEBUG_NET) && defined(CONFIG_BPF_SYSCALL)
+ void xdp_do_check_flushed(struct napi_struct *napi)
+ {
+-	bool ret;
++	struct list_head *lh_map, *lh_dev, *lh_xsk;
++	bool missed = false;
+ 
+-	ret = dev_check_flush();
+-	ret |= cpu_map_check_flush();
+-	ret |= xsk_map_check_flush();
++	bpf_net_ctx_get_all_used_flush_lists(&lh_map, &lh_dev, &lh_xsk);
++	if (lh_dev) {
++		__dev_flush(lh_dev);
++		missed = true;
++	}
++	if (lh_map) {
++		__cpu_map_flush(lh_map);
++		missed = true;
++	}
++	if (lh_xsk) {
++		__xsk_map_flush(lh_xsk);
++		missed = true;
++	}
+ 
+-	WARN_ONCE(ret, "Missing xdp_do_flush() invocation after NAPI by %ps\n",
++	WARN_ONCE(missed, "Missing xdp_do_flush() invocation after NAPI by %ps\n",
+ 		  napi->poll);
  }
  #endif
  
@@ -7579,7 +7942,7 @@ index 9933851c685e7..a8dd866edec9e 100644
  
  	master = netdev_master_upper_dev_get_rcu(xdp->rxq->dev);
  	slave = master->netdev_ops->ndo_xdp_get_xmit_slave(master, xdp);
-@@ -4388,7 +4375,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
+@@ -4388,7 +4392,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
  			map = READ_ONCE(ri->map);
  
  			/* The map pointer is cleared when the map is being torn
@@ -7588,7 +7951,7 @@ index 9933851c685e7..a8dd866edec9e 100644
  			 */
  			if (unlikely(!map)) {
  				err = -ENOENT;
-@@ -4433,7 +4420,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
+@@ -4433,7 +4437,7 @@ static __always_inline int __xdp_do_redirect_frame(struct bpf_redirect_info *ri,
  int xdp_do_redirect(struct net_device *dev, struct xdp_buff *xdp,
  		    struct bpf_prog *xdp_prog)
  {
@@ -7597,7 +7960,7 @@ index 9933851c685e7..a8dd866edec9e 100644
  	enum bpf_map_type map_type = ri->map_type;
  
  	if (map_type == BPF_MAP_TYPE_XSKMAP)
-@@ -4447,7 +4434,7 @@ EXPORT_SYMBOL_GPL(xdp_do_redirect);
+@@ -4447,7 +4451,7 @@ EXPORT_SYMBOL_GPL(xdp_do_redirect);
  int xdp_do_redirect_frame(struct net_device *dev, struct xdp_buff *xdp,
  			  struct xdp_frame *xdpf, struct bpf_prog *xdp_prog)
  {
@@ -7606,7 +7969,7 @@ index 9933851c685e7..a8dd866edec9e 100644
  	enum bpf_map_type map_type = ri->map_type;
  
  	if (map_type == BPF_MAP_TYPE_XSKMAP)
-@@ -4464,7 +4451,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+@@ -4464,7 +4468,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
  				       enum bpf_map_type map_type, u32 map_id,
  				       u32 flags)
  {
@@ -7615,7 +7978,7 @@ index 9933851c685e7..a8dd866edec9e 100644
  	struct bpf_map *map;
  	int err;
  
-@@ -4476,7 +4463,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+@@ -4476,7 +4480,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
  			map = READ_ONCE(ri->map);
  
  			/* The map pointer is cleared when the map is being torn
@@ -7624,7 +7987,7 @@ index 9933851c685e7..a8dd866edec9e 100644
  			 */
  			if (unlikely(!map)) {
  				err = -ENOENT;
-@@ -4518,7 +4505,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+@@ -4518,7 +4522,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
  int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
  			    struct xdp_buff *xdp, struct bpf_prog *xdp_prog)
  {
@@ -7633,7 +7996,7 @@ index 9933851c685e7..a8dd866edec9e 100644
  	enum bpf_map_type map_type = ri->map_type;
  	void *fwd = ri->tgt_value;
  	u32 map_id = ri->map_id;
-@@ -4554,7 +4541,7 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
+@@ -4554,7 +4558,7 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
  
  BPF_CALL_2(bpf_xdp_redirect, u32, ifindex, u64, flags)
  {
@@ -7642,26 +8005,32 @@ index 9933851c685e7..a8dd866edec9e 100644
  
  	if (unlikely(flags))
  		return XDP_ABORTED;
-@@ -6455,6 +6442,7 @@ BPF_CALL_4(bpf_lwt_seg6_store_bytes, struct sk_buff *, skb, u32, offset,
+@@ -6455,6 +6459,9 @@ BPF_CALL_4(bpf_lwt_seg6_store_bytes, struct sk_buff *, skb, u32, offset,
  	void *srh_tlvs, *srh_end, *ptr;
  	int srhoff = 0;
  
++	if (!bpf_net_ctx_seg6_state_avail())
++		return -EINVAL;
 +	lockdep_assert_held(&srh_state->bh_lock);
  	if (srh == NULL)
  		return -EINVAL;
  
-@@ -6511,6 +6499,7 @@ BPF_CALL_4(bpf_lwt_seg6_action, struct sk_buff *, skb,
+@@ -6511,6 +6518,9 @@ BPF_CALL_4(bpf_lwt_seg6_action, struct sk_buff *, skb,
  	int hdroff = 0;
  	int err;
  
++	if (!bpf_net_ctx_seg6_state_avail())
++		return -EINVAL;
 +	lockdep_assert_held(&srh_state->bh_lock);
  	switch (action) {
  	case SEG6_LOCAL_ACTION_END_X:
  		if (!seg6_bpf_has_valid_srh(skb))
-@@ -6587,6 +6576,7 @@ BPF_CALL_3(bpf_lwt_seg6_adjust_srh, struct sk_buff *, skb, u32, offset,
+@@ -6587,6 +6597,9 @@ BPF_CALL_3(bpf_lwt_seg6_adjust_srh, struct sk_buff *, skb, u32, offset,
  	int srhoff = 0;
  	int ret;
  
++	if (!bpf_net_ctx_seg6_state_avail())
++		return -EINVAL;
 +	lockdep_assert_held(&srh_state->bh_lock);
  	if (unlikely(srh == NULL))
  		return -EINVAL;
@@ -8099,7 +8468,7 @@ index 8512cb09ebc09..d8a4f192873a2 100644
  	ahash_request_free(c->req);
  	crypto_free_ahash(hash);
 diff --git a/net/ipv6/seg6_local.c b/net/ipv6/seg6_local.c
-index c434940131b1d..c74705ead9849 100644
+index c434940131b1d..3e3a48b7266b5 100644
 --- a/net/ipv6/seg6_local.c
 +++ b/net/ipv6/seg6_local.c
 @@ -1380,7 +1380,9 @@ static int input_action_end_b6_encap(struct sk_buff *skb,
@@ -8131,7 +8500,7 @@ index c434940131b1d..c74705ead9849 100644
  	struct ipv6_sr_hdr *srh;
  	int ret;
  
-@@ -1420,10 +1422,14 @@ static int input_action_end_bpf(struct sk_buff *skb,
+@@ -1420,10 +1422,15 @@ static int input_action_end_bpf(struct sk_buff *skb,
  	}
  	advance_nextseg(srh, &ipv6_hdr(skb)->daddr);
  
@@ -8145,14 +8514,16 @@ index c434940131b1d..c74705ead9849 100644
  	 */
 -	preempt_disable();
 +	local_lock_nested_bh(&seg6_bpf_srh_states.bh_lock);
++	bpf_net_ctx_seg6_state_set();
 +	srh_state = this_cpu_ptr(&seg6_bpf_srh_states);
  	srh_state->srh = srh;
  	srh_state->hdrlen = srh->hdrlen << 3;
  	srh_state->valid = true;
-@@ -1446,15 +1452,15 @@ static int input_action_end_bpf(struct sk_buff *skb,
+@@ -1446,15 +1453,17 @@ static int input_action_end_bpf(struct sk_buff *skb,
  
  	if (srh_state->srh && !seg6_bpf_has_valid_srh(skb))
  		goto drop;
++	bpf_net_ctx_seg6_state_clr();
 +	local_unlock_nested_bh(&seg6_bpf_srh_states.bh_lock);
  
 -	preempt_enable();
@@ -8163,12 +8534,13 @@ index c434940131b1d..c74705ead9849 100644
  
  drop:
 -	preempt_enable();
++	bpf_net_ctx_seg6_state_clr();
 +	local_unlock_nested_bh(&seg6_bpf_srh_states.bh_lock);
  	kfree_skb(skb);
  	return -EINVAL;
  }
 diff --git a/net/xdp/xsk.c b/net/xdp/xsk.c
-index 7d1c0986f9bb3..ed062e0383896 100644
+index 7d1c0986f9bb3..7e16336044b2d 100644
 --- a/net/xdp/xsk.c
 +++ b/net/xdp/xsk.c
 @@ -35,8 +35,6 @@
@@ -8180,34 +8552,52 @@ index 7d1c0986f9bb3..ed062e0383896 100644
  void xsk_set_rx_need_wakeup(struct xsk_buff_pool *pool)
  {
  	if (pool->cached_need_wakeup & XDP_WAKEUP_RX)
-@@ -372,7 +370,7 @@ static int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
+@@ -372,22 +370,23 @@ static int xsk_rcv(struct xdp_sock *xs, struct xdp_buff *xdp)
  
  int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp)
  {
 -	struct list_head *flush_list = this_cpu_ptr(&xskmap_flush_list);
-+	struct list_head *flush_list = bpf_net_ctx_get_xskmap_flush_list();
  	int err;
  
  	err = xsk_rcv(xs, xdp);
-@@ -387,7 +385,7 @@ int __xsk_map_redirect(struct xdp_sock *xs, struct xdp_buff *xdp)
+ 	if (err)
+ 		return err;
  
- void __xsk_map_flush(void)
+-	if (!xs->flush_node.prev)
++	if (!xs->flush_node.prev) {
++		struct list_head *flush_list = bpf_net_ctx_get_xskmap_flush_list();
++
+ 		list_add(&xs->flush_node, flush_list);
++	}
+ 
+ 	return 0;
+ }
+ 
+-void __xsk_map_flush(void)
++void __xsk_map_flush(struct list_head *flush_list)
  {
 -	struct list_head *flush_list = this_cpu_ptr(&xskmap_flush_list);
-+	struct list_head *flush_list = bpf_net_ctx_get_xskmap_flush_list();
  	struct xdp_sock *xs, *tmp;
  
  	list_for_each_entry_safe(xs, tmp, flush_list, flush_node) {
-@@ -399,7 +397,7 @@ void __xsk_map_flush(void)
- #ifdef CONFIG_DEBUG_NET
- bool xsk_map_check_flush(void)
- {
+@@ -396,16 +395,6 @@ void __xsk_map_flush(void)
+ 	}
+ }
+ 
+-#ifdef CONFIG_DEBUG_NET
+-bool xsk_map_check_flush(void)
+-{
 -	if (list_empty(this_cpu_ptr(&xskmap_flush_list)))
-+	if (list_empty(bpf_net_ctx_get_xskmap_flush_list()))
- 		return false;
- 	__xsk_map_flush();
- 	return true;
-@@ -1772,7 +1770,7 @@ static struct pernet_operations xsk_net_ops = {
+-		return false;
+-	__xsk_map_flush();
+-	return true;
+-}
+-#endif
+-
+ void xsk_tx_completed(struct xsk_buff_pool *pool, u32 nb_entries)
+ {
+ 	xskq_prod_submit_n(pool->cq, nb_entries);
+@@ -1772,7 +1761,7 @@ static struct pernet_operations xsk_net_ops = {
  
  static int __init xsk_init(void)
  {
@@ -8216,7 +8606,7 @@ index 7d1c0986f9bb3..ed062e0383896 100644
  
  	err = proto_register(&xsk_proto, 0 /* no slab */);
  	if (err)
-@@ -1790,8 +1788,6 @@ static int __init xsk_init(void)
+@@ -1790,8 +1779,6 @@ static int __init xsk_init(void)
  	if (err)
  		goto out_pernet;
  
