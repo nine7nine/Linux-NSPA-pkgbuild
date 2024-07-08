@@ -6774,5 +6774,241 @@ index 38f3698f5e5b31..b02dfc32295100 100644
 -- 
 cgit 1.2.3-korg
 
+From 0ec208ce9834929769ace0e2a506106192d08069 Mon Sep 17 00:00:00 2001
+From: Tvrtko Ursulin <tursulin@ursulin.net>
+Date: Tue, 25 Jun 2024 14:50:00 +0100
+Subject: sched/psi: Optimise psi_group_change a bit
+
+The current code loops over the psi_states only to call a helper which
+then resolves back to the action needed for each state using a switch
+statement. That is effectively creating a double indirection of a kind
+which, given how all the states need to be explicitly listed and handled
+anyway, we can simply remove. Both the for loop and the switch statement
+that is.
+
+The benefit is both in the code size and CPU time spent in this function.
+YMMV but on my Steam Deck, while in a game, the patch makes the CPU usage
+go from ~2.4% down to ~1.2%. Text size at the same time went from 0x323 to
+0x2c1.
+
+Signed-off-by: Tvrtko Ursulin <tursulin@ursulin.net>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Reviewed-by: Chengming Zhou <chengming.zhou@linux.dev>
+Acked-by: Johannes Weiner <hannes@cmpxchg.org>
+Link: https://lkml.kernel.org/r/20240625135000.38652-1-tursulin@igalia.com
+---
+ kernel/sched/psi.c | 54 +++++++++++++++++++++++++++---------------------------
+ 1 file changed, 27 insertions(+), 27 deletions(-)
+
+diff --git a/kernel/sched/psi.c b/kernel/sched/psi.c
+index 146baa91d104f7..368139c64f3d7f 100644
+--- a/kernel/sched/psi.c
++++ b/kernel/sched/psi.c
+@@ -218,28 +218,32 @@ void __init psi_init(void)
+ 	group_init(&psi_system);
+ }
+ 
+-static bool test_state(unsigned int *tasks, enum psi_states state, bool oncpu)
++static u32 test_states(unsigned int *tasks, u32 state_mask)
+ {
+-	switch (state) {
+-	case PSI_IO_SOME:
+-		return unlikely(tasks[NR_IOWAIT]);
+-	case PSI_IO_FULL:
+-		return unlikely(tasks[NR_IOWAIT] && !tasks[NR_RUNNING]);
+-	case PSI_MEM_SOME:
+-		return unlikely(tasks[NR_MEMSTALL]);
+-	case PSI_MEM_FULL:
+-		return unlikely(tasks[NR_MEMSTALL] &&
+-			tasks[NR_RUNNING] == tasks[NR_MEMSTALL_RUNNING]);
+-	case PSI_CPU_SOME:
+-		return unlikely(tasks[NR_RUNNING] > oncpu);
+-	case PSI_CPU_FULL:
+-		return unlikely(tasks[NR_RUNNING] && !oncpu);
+-	case PSI_NONIDLE:
+-		return tasks[NR_IOWAIT] || tasks[NR_MEMSTALL] ||
+-			tasks[NR_RUNNING];
+-	default:
+-		return false;
++	const bool oncpu = state_mask & PSI_ONCPU;
++
++	if (tasks[NR_IOWAIT]) {
++		state_mask |= BIT(PSI_IO_SOME);
++		if (!tasks[NR_RUNNING])
++			state_mask |= BIT(PSI_IO_FULL);
++	}
++
++	if (tasks[NR_MEMSTALL]) {
++		state_mask |= BIT(PSI_MEM_SOME);
++		if (tasks[NR_RUNNING] == tasks[NR_MEMSTALL_RUNNING])
++			state_mask |= BIT(PSI_MEM_FULL);
+ 	}
++
++	if (tasks[NR_RUNNING] > oncpu)
++		state_mask |= BIT(PSI_CPU_SOME);
++
++	if (tasks[NR_RUNNING] && !oncpu)
++		state_mask |= BIT(PSI_CPU_FULL);
++
++	if (tasks[NR_IOWAIT] || tasks[NR_MEMSTALL] || tasks[NR_RUNNING])
++		state_mask |= BIT(PSI_NONIDLE);
++
++	return state_mask;
+ }
+ 
+ static void get_recent_times(struct psi_group *group, int cpu,
+@@ -770,7 +774,6 @@ static void psi_group_change(struct psi_group *group, int cpu,
+ {
+ 	struct psi_group_cpu *groupc;
+ 	unsigned int t, m;
+-	enum psi_states s;
+ 	u32 state_mask;
+ 
+ 	groupc = per_cpu_ptr(group->pcpu, cpu);
+@@ -841,10 +844,7 @@ static void psi_group_change(struct psi_group *group, int cpu,
+ 		return;
+ 	}
+ 
+-	for (s = 0; s < NR_PSI_STATES; s++) {
+-		if (test_state(groupc->tasks, s, state_mask & PSI_ONCPU))
+-			state_mask |= (1 << s);
+-	}
++	state_mask = test_states(groupc->tasks, state_mask);
+ 
+ 	/*
+ 	 * Since we care about lost potential, a memstall is FULL
+@@ -1194,7 +1194,7 @@ void psi_cgroup_restart(struct psi_group *group)
+ 	/*
+ 	 * After we disable psi_group->enabled, we don't actually
+ 	 * stop percpu tasks accounting in each psi_group_cpu,
+-	 * instead only stop test_state() loop, record_times()
++	 * instead only stop test_states() loop, record_times()
+ 	 * and averaging worker, see psi_group_change() for details.
+ 	 *
+ 	 * When disable cgroup PSI, this function has nothing to sync
+@@ -1202,7 +1202,7 @@ void psi_cgroup_restart(struct psi_group *group)
+ 	 * would see !psi_group->enabled and only do task accounting.
+ 	 *
+ 	 * When re-enable cgroup PSI, this function use psi_group_change()
+-	 * to get correct state mask from test_state() loop on tasks[],
++	 * to get correct state mask from test_states() loop on tasks[],
+ 	 * and restart groupc->state_start from now, use .clear = .set = 0
+ 	 * here since no task status really changed.
+ 	 */
+-- 
+cgit 1.2.3-korg
+
+From d329605287020c3d1c3b0dadc63d8208e7251382 Mon Sep 17 00:00:00 2001
+From: Tejun Heo <tj@kernel.org>
+Date: Tue, 25 Jun 2024 15:29:58 -1000
+Subject: sched/fair: set_load_weight() must also call reweight_task() for
+ SCHED_IDLE tasks
+
+When a task's weight is being changed, set_load_weight() is called with
+@update_load set. As weight changes aren't trivial for the fair class,
+set_load_weight() calls fair.c::reweight_task() for fair class tasks.
+
+However, set_load_weight() first tests task_has_idle_policy() on entry and
+skips calling reweight_task() for SCHED_IDLE tasks. This is buggy as
+SCHED_IDLE tasks are just fair tasks with a very low weight and they would
+incorrectly skip load, vlag and position updates.
+
+Fix it by updating reweight_task() to take struct load_weight as idle weight
+can't be expressed with prio and making set_load_weight() call
+reweight_task() for SCHED_IDLE tasks too when @update_load is set.
+
+Fixes: 9059393e4ec1 ("sched/fair: Use reweight_entity() for set_user_nice()")
+Suggested-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Signed-off-by: Tejun Heo <tj@kernel.org>
+Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+Cc: stable@vger.kernel.org # v4.15+
+Link: http://lkml.kernel.org/r/20240624102331.GI31592@noisy.programming.kicks-ass.net
+---
+ kernel/sched/core.c  | 23 ++++++++++-------------
+ kernel/sched/fair.c  |  7 +++----
+ kernel/sched/sched.h |  2 +-
+ 3 files changed, 14 insertions(+), 18 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 0935f9d4bb7be0..747683487be7e0 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1328,27 +1328,24 @@ int tg_nop(struct task_group *tg, void *data)
+ void set_load_weight(struct task_struct *p, bool update_load)
+ {
+ 	int prio = p->static_prio - MAX_RT_PRIO;
+-	struct load_weight *load = &p->se.load;
++	struct load_weight lw;
+ 
+-	/*
+-	 * SCHED_IDLE tasks get minimal weight:
+-	 */
+ 	if (task_has_idle_policy(p)) {
+-		load->weight = scale_load(WEIGHT_IDLEPRIO);
+-		load->inv_weight = WMULT_IDLEPRIO;
+-		return;
++		lw.weight = scale_load(WEIGHT_IDLEPRIO);
++		lw.inv_weight = WMULT_IDLEPRIO;
++	} else {
++		lw.weight = scale_load(sched_prio_to_weight[prio]);
++		lw.inv_weight = sched_prio_to_wmult[prio];
+ 	}
+ 
+ 	/*
+ 	 * SCHED_OTHER tasks have to update their load when changing their
+ 	 * weight
+ 	 */
+-	if (update_load && p->sched_class == &fair_sched_class) {
+-		reweight_task(p, prio);
+-	} else {
+-		load->weight = scale_load(sched_prio_to_weight[prio]);
+-		load->inv_weight = sched_prio_to_wmult[prio];
+-	}
++	if (update_load && p->sched_class == &fair_sched_class)
++		reweight_task(p, &lw);
++	else
++		p->se.load = lw;
+ }
+ 
+ #ifdef CONFIG_UCLAMP_TASK
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 41b58387023d5a..f205e2482690da 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -3835,15 +3835,14 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
+ 	}
+ }
+ 
+-void reweight_task(struct task_struct *p, int prio)
++void reweight_task(struct task_struct *p, const struct load_weight *lw)
+ {
+ 	struct sched_entity *se = &p->se;
+ 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+ 	struct load_weight *load = &se->load;
+-	unsigned long weight = scale_load(sched_prio_to_weight[prio]);
+ 
+-	reweight_entity(cfs_rq, se, weight);
+-	load->inv_weight = sched_prio_to_wmult[prio];
++	reweight_entity(cfs_rq, se, lw->weight);
++	load->inv_weight = lw->inv_weight;
+ }
+ 
+ static inline int throttled_hierarchy(struct cfs_rq *cfs_rq);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 62fd8bc6fd08ad..9ab53435debd58 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2509,7 +2509,7 @@ extern void init_sched_dl_class(void);
+ extern void init_sched_rt_class(void);
+ extern void init_sched_fair_class(void);
+ 
+-extern void reweight_task(struct task_struct *p, int prio);
++extern void reweight_task(struct task_struct *p, const struct load_weight *lw);
+ 
+ extern void resched_curr(struct rq *rq);
+ extern void resched_cpu(int cpu);
+-- 
+cgit 1.2.3-korg
+
 
 
