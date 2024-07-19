@@ -96,7 +96,7 @@ _no_RT_throttle=
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.10
+_major=6.10.0
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -105,18 +105,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.10-rc7
+_srcname=linux-6.10
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=20
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.10-rc7.tar.gz"
-  "0000-patch-6.10-rc6-rt11.patch"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.10.tar.gz"
+  "0000-patch-6.10-rt11.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -509,7 +509,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('33b32ea6a84f016b2fe077c31f8ce1811048f8ec5d93f46b5e09e5b575fbc60d'
+sha256sums=('604f6b618a2ac526b225d30b39ea67ca5b1d28b499bd4266591427a2c6cc29a1'
             '28e28081f4349f9f383d8c5d099dc5063399c67d5ff7ecb77dbebf3a723d626f'
             '25621655394cadbbac7d47078ae452a92559fbbccf32be8462a53f55c5cbdecf'
             '9124374c14025929d9c232f038cda51a41e9bea21dcd4d0b181cfea18996dd88'
@@ -533,7 +533,7 @@ sha256sums=('33b32ea6a84f016b2fe077c31f8ce1811048f8ec5d93f46b5e09e5b575fbc60d'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
             '88620fb4c05734f0da4e2ea7098d40ff8bdafe2485ab449085da769550ae18b6'
-            'a724944717f4f7edc4ef2aae05c7c55dddb515e62f2789c0d76373fa0d980011'
+            'e1b25f819a2b8c841d92d8902b6fd90d2e16e76cc29822b4fc3c5f8a2c3be7d5'
             'a2756bd85de0f09fc0e805ce4c7015790c01a0a81be14899b7fa4b69536d594c'
             '5a8ef40c3e9855991d37c3e7fdbc74a769288241150c028a9eca39fa77a62536'
             '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
