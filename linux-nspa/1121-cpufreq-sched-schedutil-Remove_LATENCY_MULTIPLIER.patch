@@ -1,0 +1,123 @@
+From: Qais Yousef <qyousef@layalina.io>
+To: "Rafael J. Wysocki" <rafael@kernel.org>,
+	Viresh Kumar <viresh.kumar@linaro.org>
+Cc: Ingo Molnar <mingo@kernel.org>,
+	Peter Zijlstra <peterz@infradead.org>,
+	Vincent Guittot <vincent.guittot@linaro.org>,
+	linux-pm@vger.kernel.org, linux-kernel@vger.kernel.org,
+	Qais Yousef <qyousef@layalina.io>
+Subject: [PATCH] cpufreq: sched/schedutil: Remove LATENCY_MULTIPLIER
+Date: Sun, 28 Jul 2024 20:26:59 +0100	[thread overview]
+Message-ID: <20240728192659.58115-1-qyousef@layalina.io> (raw)
+
+The current LATENCY_MULTIPLIER which has been around for nearly 20 years
+causes rate_limit_us to be always in ms range.
+
+On M1 mac mini I get 50 and 56us transition latency, but due to the 1000
+multiplier we end up setting rate_limit_us to 50 and 56ms, which gets
+capped into 2ms and was 10ms before e13aa799c2a6 ("cpufreq: Change
+default transition delay to 2ms")
+
+On Intel I5 system transition latency is 20us but due to the multiplier
+we end up with 20ms that again is capped to 2ms.
+
+Given how good modern hardware and how modern workloads require systems
+to be more responsive to cater for sudden changes in workload (tasks
+sleeping/wakeup/migrating, uclamp causing a sudden boost or cap) and
+that 2ms is quarter of the time of 120Hz refresh rate system, drop the
+old logic in favour of providing 50% headroom.
+
+	rate_limit_us = 1.5 * latency.
+
+I considered not adding any headroom which could mean that we can end up
+with infinite back-to-back requests.
+
+I also considered providing a constant headroom (e.g: 100us) assuming
+that any h/w or f/w dealing with the request shouldn't require a large
+headroom when transition_latency is actually high.
+
+But for both cases I wasn't sure if h/w or f/w can end up being
+overwhelmed dealing with the freq requests in a potentially busy system.
+So I opted for providing 50% breathing room.
+
+This is expected to impact schedutil only as the other user,
+dbs_governor, takes the max(2*tick, transition_delay_us) and the former
+was at least 2ms on 1ms TICK, which is equivalent to the max_delay_us
+before applying this patch. For systems with TICK of 4ms, this value
+would have almost always ended up with 8ms sampling rate.
+
+For systems that report 0 transition latency, we still default to
+returning 1ms as transition delay.
+
+This helps in eliminating a source of latency for applying requests as
+mentioned in [1]. For example if we have a 1ms tick, most systems will
+miss sending an update at tick when updating the util_avg for a task/CPU
+(rate_limit_us will be 2ms for most systems).
+
+[1] https://lore.kernel.org/lkml/20240724212255.mfr2ybiv2j2uqek7@airbuntu/
+
+Signed-off-by: Qais Yousef <qyousef@layalina.io>
+---
+ drivers/cpufreq/cpufreq.c | 27 ++++-----------------------
+ include/linux/cpufreq.h   |  6 ------
+ 2 files changed, 4 insertions(+), 29 deletions(-)
+
+diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+index 04fc786dd2c0..f98c9438760c 100644
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -575,30 +575,11 @@ unsigned int cpufreq_policy_transition_delay_us(struct cpufreq_policy *policy)
+ 		return policy->transition_delay_us;
+ 
+ 	latency = policy->cpuinfo.transition_latency / NSEC_PER_USEC;
+-	if (latency) {
+-		unsigned int max_delay_us = 2 * MSEC_PER_SEC;
++	if (latency)
++		/* Give a 50% breathing room between updates */
++		return latency + (latency >> 1);
+ 
+-		/*
+-		 * If the platform already has high transition_latency, use it
+-		 * as-is.
+-		 */
+-		if (latency > max_delay_us)
+-			return latency;
+-
+-		/*
+-		 * For platforms that can change the frequency very fast (< 2
+-		 * us), the above formula gives a decent transition delay. But
+-		 * for platforms where transition_latency is in milliseconds, it
+-		 * ends up giving unrealistic values.
+-		 *
+-		 * Cap the default transition delay to 2 ms, which seems to be
+-		 * a reasonable amount of time after which we should reevaluate
+-		 * the frequency.
+-		 */
+-		return min(latency * LATENCY_MULTIPLIER, max_delay_us);
+-	}
+-
+-	return LATENCY_MULTIPLIER;
++	return USEC_PER_MSEC;
+ }
+ EXPORT_SYMBOL_GPL(cpufreq_policy_transition_delay_us);
+ 
+diff --git a/include/linux/cpufreq.h b/include/linux/cpufreq.h
+index d4d2f4d1d7cb..e0e19d9c1323 100644
+--- a/include/linux/cpufreq.h
++++ b/include/linux/cpufreq.h
+@@ -577,12 +577,6 @@ static inline unsigned long cpufreq_scale(unsigned long old, u_int div,
+ #define CPUFREQ_POLICY_POWERSAVE	(1)
+ #define CPUFREQ_POLICY_PERFORMANCE	(2)
+ 
+-/*
+- * The polling frequency depends on the capability of the processor. Default
+- * polling frequency is 1000 times the transition latency of the processor.
+- */
+-#define LATENCY_MULTIPLIER		(1000)
+-
+ struct cpufreq_governor {
+ 	char	name[CPUFREQ_NAME_LEN];
+ 	int	(*init)(struct cpufreq_policy *policy);
+-- 
+2.34.1
+

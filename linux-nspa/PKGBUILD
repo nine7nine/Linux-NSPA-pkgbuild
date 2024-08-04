@@ -96,7 +96,7 @@ _no_RT_throttle=
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.10.0
+_major=6.10.2
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -105,7 +105,7 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.10
+_srcname=linux-6.10.2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
 pkgrel=1
@@ -115,8 +115,8 @@ license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.10.tar.gz"
-  "0000-patch-6.10-rt11.patch"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.10.2.tar.xz"
+  "0000-patch-6.10.2-rt13.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -156,6 +156,7 @@ source=(
   "1116-kt-pm-suspend_patches.patch"
   "1119-mm-compaction-Skip_all_non-migratable_pages_during_scan.patch"
   "1120-RFC-Introduce-QPW-for-per-cpu-operations.patch"
+  "1121-cpufreq-sched-schedutil-Remove_LATENCY_MULTIPLIER.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -509,8 +510,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('604f6b618a2ac526b225d30b39ea67ca5b1d28b499bd4266591427a2c6cc29a1'
-            '28e28081f4349f9f383d8c5d099dc5063399c67d5ff7ecb77dbebf3a723d626f'
+sha256sums=('73d8520dd9cba5acfc5e7208e76b35d9740b8aae38210a9224e32ec4c0d29b70'
+            '6b00c418a5aa65ea6c64c3a2e4a007bd031de36b7dcdcf50109f75203e211830'
             '25621655394cadbbac7d47078ae452a92559fbbccf32be8462a53f55c5cbdecf'
             '9124374c14025929d9c232f038cda51a41e9bea21dcd4d0b181cfea18996dd88'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -550,4 +551,5 @@ sha256sums=('604f6b618a2ac526b225d30b39ea67ca5b1d28b499bd4266591427a2c6cc29a1'
             '6d5a98e630c2981fbab73b895dab34fd727b4113b3c5a6c3a6c00b8ef93a3ae1'
             'cbcbd40d54e47b97bf44c305b2903f655c7afbf914a0d6c55fcf57ecf1c63713'
             '97a4cd25dcc07cd260d9f410e80d869a376d019affa288fa1b37f15963fe0bd9'
+            '734358708b4089abf4176d1bce1d22b97f370eb9006ee8f16865e155ccbd449a'
             'bdbee49b960f40f24e359f231e3d6ebc86fd0c1050d631f355e7618f78faf141')
