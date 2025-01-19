@@ -1,3 +1,29 @@
+From 001a2bccf7a4e1687da8c24f224909a69f38e3fb Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sat, 24 Oct 2020 22:17:49 -0700
+Subject: [PATCH] mm: Disable proactive compaction by default
+
+On-demand compaction works fine assuming that you don't have a need to
+spam the page allocator nonstop for large order page allocations.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ mm/compaction.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mm/compaction.c b/mm/compaction.c
+index a2b16b08cbbf..8ddb4344bc19 100644
+--- a/mm/compaction.c
++++ b/mm/compaction.c
+@@ -1920,7 +1920,7 @@ static int sysctl_compact_unevictable_allowed __read_mostly = CONFIG_COMPACT_UNE
+  * aggressively the kernel should compact memory in the
+  * background. It takes values in the range [0, 100].
+  */
+-static unsigned int __read_mostly sysctl_compaction_proactiveness = 20;
++static unsigned int __read_mostly sysctl_compaction_proactiveness;
+ static int sysctl_extfrag_threshold = 500;
+ static int __read_mostly sysctl_compact_memory;
+ 
 From b5310e15518783a5bbb5c956f1186765b04d1141 Mon Sep 17 00:00:00 2001
 From: Sultan Alsawaf <sultan@kerneltoast.com>
 Date: Sat, 28 Mar 2020 13:06:28 -0700
@@ -128,4 +154,293 @@ index acd7cbb82e160..6ef0eda47487a 100644
  	}
  
  	/* slab allocation failed, try the memory pool */
+
+From e1940650f84dd4dcbe1a63366bf26563fff21b96 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Sun, 19 Apr 2020 19:59:18 -0700
+Subject: [PATCH] mm: Stop kswapd early when nothing's waiting for it to free
+ pages
+
+Keeping kswapd running when all the failed allocations that invoked it
+are satisfied incurs a high overhead due to unnecessary page eviction
+and writeback, as well as spurious VM pressure events to various
+registered shrinkers. When kswapd doesn't need to work to make an
+allocation succeed anymore, stop it prematurely to save resources.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ include/linux/mmzone.h |  1 +
+ mm/mm_init.c           |  1 +
+ mm/page_alloc.c        | 16 +++++++++++++---
+ mm/vmscan.c            |  2 +-
+ 4 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
+index 80bc5640bb60..3283f0e5c2cc 100644
+--- a/include/linux/mmzone.h
++++ b/include/linux/mmzone.h
+@@ -1337,6 +1337,7 @@ typedef struct pglist_data {
+ 	unsigned long node_spanned_pages; /* total size of physical page
+ 					     range, including holes */
+ 	int node_id;
++	atomic_t kswapd_waiters;
+ 	wait_queue_head_t kswapd_wait;
+ 	wait_queue_head_t pfmemalloc_wait;
+ 
+diff --git a/mm/mm_init.c b/mm/mm_init.c
+index 4ba5607aaf19..f35c69f6c586 100644
+--- a/mm/mm_init.c
++++ b/mm/mm_init.c
+@@ -1378,6 +1378,7 @@ static void __meminit pgdat_init_internals(struct pglist_data *pgdat)
+ 
+ 	pgdat_page_ext_init(pgdat);
+ 	lruvec_init(&pgdat->__lruvec);
++	pgdat->kswapd_waiters = (atomic_t)ATOMIC_INIT(0);
+ }
+ 
+ static void __meminit zone_init_internals(struct zone *zone, enum zone_type idx, int nid,
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index ec285430fe3f..2f7a93eb82ad 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -4220,6 +4220,8 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+ 	unsigned int cpuset_mems_cookie;
+ 	unsigned int zonelist_iter_cookie;
+ 	int reserve_flags;
++	pg_data_t *pgdat = ac->preferred_zoneref->zone->zone_pgdat;
++	bool woke_kswapd = false;
+ 
+ 	if (unlikely(nofail)) {
+ 		/*
+@@ -4278,8 +4280,13 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+ 			goto nopage;
+ 	}
+ 
+-	if (alloc_flags & ALLOC_KSWAPD)
++	if (alloc_flags & ALLOC_KSWAPD) {
++		if (!woke_kswapd) {
++			atomic_inc(&pgdat->kswapd_waiters);
++			woke_kswapd = true;
++		}
+ 		wake_all_kswapds(order, gfp_mask, ac);
++	}
+ 
+ 	/*
+ 	 * The adjusted alloc_flags might result in immediate success, so try
+@@ -4481,9 +4488,12 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+ 		goto retry;
+ 	}
+ fail:
+-	warn_alloc(gfp_mask, ac->nodemask,
+-			"page allocation failure: order:%u", order);
+ got_pg:
++	if (woke_kswapd)
++		atomic_dec(&pgdat->kswapd_waiters);
++	if (!page)
++		warn_alloc(gfp_mask, ac->nodemask,
++				"page allocation failure: order:%u", order);
+ 	return page;
+ }
+ 
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 67a680e4b484..d1a453d4b999 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -6983,7 +6983,7 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int highest_zoneidx)
+ 		__fs_reclaim_release(_THIS_IP_);
+ 		ret = kthread_freezable_should_stop(&was_frozen);
+ 		__fs_reclaim_acquire(_THIS_IP_);
+-		if (was_frozen || ret)
++		if (was_frozen || ret || !atomic_read(&pgdat->kswapd_waiters))
+ 			break;
+ 
+ 		/*
+
+From 27bb162f7bb6d0c6a9b68ac3de76eaf5bb5a7585 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Wed, 20 May 2020 09:55:17 -0700
+Subject: [PATCH] mm: Don't stop kswapd on a per-node basis when there are no
+ waiters
+
+The page allocator wakes all kswapds in an allocation context's allowed
+nodemask in the slow path, so it doesn't make sense to have the kswapd-
+waiter count per each NUMA node. Instead, it should be a global counter
+to stop all kswapds when there are no failed allocation requests.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ include/linux/mmzone.h | 1 -
+ mm/internal.h          | 1 +
+ mm/mm_init.c           | 1 -
+ mm/page_alloc.c        | 7 ++++---
+ mm/vmscan.c            | 2 +-
+ 5 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
+index 3283f0e5c2cc..80bc5640bb60 100644
+--- a/include/linux/mmzone.h
++++ b/include/linux/mmzone.h
+@@ -1337,7 +1337,6 @@ typedef struct pglist_data {
+ 	unsigned long node_spanned_pages; /* total size of physical page
+ 					     range, including holes */
+ 	int node_id;
+-	atomic_t kswapd_waiters;
+ 	wait_queue_head_t kswapd_wait;
+ 	wait_queue_head_t pfmemalloc_wait;
+ 
+diff --git a/mm/internal.h b/mm/internal.h
+index 9bb098e78f15..2a57865efdf7 100644
+--- a/mm/internal.h
++++ b/mm/internal.h
+@@ -739,6 +739,7 @@ extern void post_alloc_hook(struct page *page, unsigned int order,
+ extern bool free_pages_prepare(struct page *page, unsigned int order);
+ 
+ extern int user_min_free_kbytes;
++extern atomic_long_t kswapd_waiters;
+ 
+ void free_unref_page(struct page *page, unsigned int order);
+ void free_unref_folios(struct folio_batch *fbatch);
+diff --git a/mm/mm_init.c b/mm/mm_init.c
+index f35c69f6c586..4ba5607aaf19 100644
+--- a/mm/mm_init.c
++++ b/mm/mm_init.c
+@@ -1378,7 +1378,6 @@ static void __meminit pgdat_init_internals(struct pglist_data *pgdat)
+ 
+ 	pgdat_page_ext_init(pgdat);
+ 	lruvec_init(&pgdat->__lruvec);
+-	pgdat->kswapd_waiters = (atomic_t)ATOMIC_INIT(0);
+ }
+ 
+ static void __meminit zone_init_internals(struct zone *zone, enum zone_type idx, int nid,
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 2f7a93eb82ad..84ac5233d5bf 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -207,6 +207,8 @@ EXPORT_SYMBOL(node_states);
+ 
+ gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
+ 
++atomic_long_t kswapd_waiters = ATOMIC_LONG_INIT(0);
++
+ #ifdef CONFIG_HUGETLB_PAGE_SIZE_VARIABLE
+ unsigned int pageblock_order __read_mostly;
+ #endif
+@@ -4220,7 +4222,6 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+ 	unsigned int cpuset_mems_cookie;
+ 	unsigned int zonelist_iter_cookie;
+ 	int reserve_flags;
+-	pg_data_t *pgdat = ac->preferred_zoneref->zone->zone_pgdat;
+ 	bool woke_kswapd = false;
+ 
+ 	if (unlikely(nofail)) {
+@@ -4282,7 +4283,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+ 
+ 	if (alloc_flags & ALLOC_KSWAPD) {
+ 		if (!woke_kswapd) {
+-			atomic_inc(&pgdat->kswapd_waiters);
++			atomic_long_inc(&kswapd_waiters);
+ 			woke_kswapd = true;
+ 		}
+ 		wake_all_kswapds(order, gfp_mask, ac);
+@@ -4490,7 +4491,7 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
+ fail:
+ got_pg:
+ 	if (woke_kswapd)
+-		atomic_dec(&pgdat->kswapd_waiters);
++		atomic_long_dec(&kswapd_waiters);
+ 	if (!page)
+ 		warn_alloc(gfp_mask, ac->nodemask,
+ 				"page allocation failure: order:%u", order);
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index d1a453d4b999..498a5c75ab1d 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -6983,7 +6983,7 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int highest_zoneidx)
+ 		__fs_reclaim_release(_THIS_IP_);
+ 		ret = kthread_freezable_should_stop(&was_frozen);
+ 		__fs_reclaim_acquire(_THIS_IP_);
+-		if (was_frozen || ret || !atomic_read(&pgdat->kswapd_waiters))
++		if (was_frozen || ret || !atomic_long_read(&kswapd_waiters))
+ 			break;
+ 
+ 		/*
+
+From 6f8d431f773f11f67383f7c48f6b90827c7fcbb9 Mon Sep 17 00:00:00 2001
+From: Sultan Alsawaf <sultan@kerneltoast.com>
+Date: Fri, 16 Jul 2021 23:35:47 -0700
+Subject: [PATCH] mm: Increment kswapd_waiters for throttled direct reclaimers
+
+Throttled direct reclaimers will wake up kswapd and wait for kswapd to
+satisfy their page allocation request, even when the failed allocation
+lacks the __GFP_KSWAPD_RECLAIM flag in its gfp mask. As a result, kswapd
+may think that there are no waiters and thus exit prematurely, causing
+throttled direct reclaimers lacking __GFP_KSWAPD_RECLAIM to stall on
+waiting for kswapd to wake them up. Incrementing the kswapd_waiters
+counter when such direct reclaimers become throttled fixes the problem.
+
+Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
+---
+ mm/vmscan.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 498a5c75ab1d..c1f87301a015 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -6353,7 +6353,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
+ 	return 0;
+ }
+ 
+-static bool allow_direct_reclaim(pg_data_t *pgdat)
++static bool allow_direct_reclaim(pg_data_t *pgdat, bool using_kswapd)
+ {
+ 	struct zone *zone;
+ 	unsigned long pfmemalloc_reserve = 0;
+@@ -6382,6 +6382,10 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
+ 
+ 	wmark_ok = free_pages > pfmemalloc_reserve / 2;
+ 
++	/* The throttled direct reclaimer is now a kswapd waiter */
++	if (unlikely(!using_kswapd && !wmark_ok))
++		atomic_long_inc(&kswapd_waiters);
++
+ 	/* kswapd must be awake if processes are being throttled */
+ 	if (!wmark_ok && waitqueue_active(&pgdat->kswapd_wait)) {
+ 		if (READ_ONCE(pgdat->kswapd_highest_zoneidx) > ZONE_NORMAL)
+@@ -6447,7 +6451,7 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
+ 
+ 		/* Throttle based on the first usable node */
+ 		pgdat = zone->zone_pgdat;
+-		if (allow_direct_reclaim(pgdat))
++		if (allow_direct_reclaim(pgdat, gfp_mask & __GFP_KSWAPD_RECLAIM))
+ 			goto out;
+ 		break;
+ 	}
+@@ -6469,11 +6473,14 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
+ 	 */
+ 	if (!(gfp_mask & __GFP_FS))
+ 		wait_event_interruptible_timeout(pgdat->pfmemalloc_wait,
+-			allow_direct_reclaim(pgdat), HZ);
++			allow_direct_reclaim(pgdat, true), HZ);
+ 	else
+ 		/* Throttle until kswapd wakes the process */
+ 		wait_event_killable(zone->zone_pgdat->pfmemalloc_wait,
+-			allow_direct_reclaim(pgdat));
++			allow_direct_reclaim(pgdat, true));
++
++	if (unlikely(!(gfp_mask & __GFP_KSWAPD_RECLAIM)))
++		atomic_long_dec(&kswapd_waiters);
+ 
+ 	if (fatal_signal_pending(current))
+ 		return true;
+@@ -6976,7 +6983,7 @@ static int balance_pgdat(pg_data_t *pgdat, int order, int highest_zoneidx)
+ 		 * able to safely make forward progress. Wake them
+ 		 */
+ 		if (waitqueue_active(&pgdat->pfmemalloc_wait) &&
+-				allow_direct_reclaim(pgdat))
++				allow_direct_reclaim(pgdat, true))
+ 			wake_up_all(&pgdat->pfmemalloc_wait);
+ 
+ 		/* Check if kswapd should be suspending */
+
 

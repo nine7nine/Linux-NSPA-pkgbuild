@@ -82,7 +82,7 @@
   * using the scheduler IPI. Reduces rq->lock contention/bounces.
   */
 -SCHED_FEAT(TTWU_QUEUE, true)
-+#define SCHED_FEAT_TTWU_QUEUE 1
++#define SCHED_FEAT_TTWU_QUEUE 0
  #endif
  
  /*
