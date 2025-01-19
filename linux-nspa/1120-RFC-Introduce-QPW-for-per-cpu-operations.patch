@@ -421,14 +421,7 @@ diff --git a/mm/memcontrol.c b/mm/memcontrol.c
 index 71fe2a95b8bd..18a987f8c998 100644
 --- a/mm/memcontrol.c
 +++ b/mm/memcontrol.c
-@@ -59,20 +59,21 @@
- #include <linux/swap_cgroup.h>
- #include <linux/cpu.h>
- #include <linux/oom.h>
- #include <linux/lockdep.h>
- #include <linux/file.h>
- #include <linux/resume_user_mode.h>
- #include <linux/psi.h>
+@@ -63,6 +63,7 @@
  #include <linux/seq_buf.h>
  #include <linux/sched/isolation.h>
  #include <linux/kmemleak.h>
@@ -436,44 +429,16 @@ index 71fe2a95b8bd..18a987f8c998 100644
  #include "internal.h"
  #include <net/sock.h>
  #include <net/ip.h>
- #include "slab.h"
- #include "swap.h"
- 
- #include <linux/uaccess.h>
- 
- #include <trace/events/vmscan.h>
- 
-@@ -2415,21 +2416,21 @@ struct memcg_stock_pcp {
- 	unsigned int nr_pages;
- 
- #ifdef CONFIG_MEMCG_KMEM
- 	struct obj_cgroup *cached_objcg;
- 	struct pglist_data *cached_pgdat;
- 	unsigned int nr_bytes;
+@@ -1732,7 +1733,7 @@ struct memcg_stock_pcp {
  	int nr_slab_reclaimable_b;
  	int nr_slab_unreclaimable_b;
- #endif
  
 -	struct work_struct work;
 +	struct qpw_struct qpw;
  	unsigned long flags;
  #define FLUSHING_CACHED_CHARGE	0
  };
- static DEFINE_PER_CPU(struct memcg_stock_pcp, memcg_stock) = {
- 	.stock_lock = INIT_LOCAL_LOCK(stock_lock),
- };
- static DEFINE_MUTEX(percpu_charge_mutex);
- 
- #ifdef CONFIG_MEMCG_KMEM
- static struct obj_cgroup *drain_obj_stock(struct memcg_stock_pcp *stock);
-@@ -2503,39 +2504,40 @@ static void drain_stock(struct memcg_stock_pcp *stock)
- 		if (do_memsw_account())
- 			page_counter_uncharge(&old->memsw, stock_pages);
- 
- 		WRITE_ONCE(stock->nr_pages, 0);
- 	}
- 
- 	css_put(&old->css);
+@@ -1803,25 +1804,26 @@ static void drain_stock(struct memcg_sto
  	WRITE_ONCE(stock->cached, NULL);
  }
  
@@ -504,21 +469,7 @@ index 71fe2a95b8bd..18a987f8c998 100644
  	obj_cgroup_put(old);
  }
  
- /*
-  * Cache charges(val) to local per_cpu area.
-  * This will be consumed by consume_stock() function, later.
-  */
- static void __refill_stock(struct mem_cgroup *memcg, unsigned int nr_pages)
- {
- 	struct memcg_stock_pcp *stock;
-@@ -2592,23 +2594,23 @@ static void drain_all_stock(struct mem_cgroup *root_memcg)
- 		if (memcg && READ_ONCE(stock->nr_pages) &&
- 		    mem_cgroup_is_descendant(memcg, root_memcg))
- 			flush = true;
- 		else if (obj_stock_flush_required(stock, root_memcg))
- 			flush = true;
- 		rcu_read_unlock();
- 
+@@ -1892,9 +1894,9 @@ void drain_all_stock(struct mem_cgroup *
  		if (flush &&
  		    !test_and_set_bit(FLUSHING_CACHED_CHARGE, &stock->flags)) {
  			if (cpu == curcpu)
@@ -530,21 +481,7 @@ index 71fe2a95b8bd..18a987f8c998 100644
  		}
  	}
  	migrate_enable();
- 	mutex_unlock(&percpu_charge_mutex);
- }
- 
- static int memcg_hotplug_cpu_dead(unsigned int cpu)
- {
- 	struct memcg_stock_pcp *stock;
- 
-@@ -7956,22 +7958,22 @@ static int __init mem_cgroup_init(void)
- 	 * used for per-memcg-per-cpu caching of per-node statistics. In order
- 	 * to work fine, we should make sure that the overfill threshold can't
- 	 * exceed S32_MAX / PAGE_SIZE.
- 	 */
- 	BUILD_BUG_ON(MEMCG_CHARGE_BATCH > S32_MAX / PAGE_SIZE);
- 
- 	cpuhp_setup_state_nocalls(CPUHP_MM_MEMCQ_DEAD, "mm/memctrl:dead", NULL,
+@@ -4936,8 +4938,8 @@ static int __init mem_cgroup_init(void)
  				  memcg_hotplug_cpu_dead);
  
  	for_each_possible_cpu(cpu)
@@ -553,15 +490,8 @@ index 71fe2a95b8bd..18a987f8c998 100644
 +		INIT_QPW(&per_cpu_ptr(&memcg_stock, cpu)->qpw,
 +			 drain_local_stock, cpu);
  
- 	for_each_node(node) {
- 		struct mem_cgroup_tree_per_node *rtpn;
- 
- 		rtpn = kzalloc_node(sizeof(*rtpn), GFP_KERNEL, node);
- 
- 		rtpn->rb_root = RB_ROOT;
- 		rtpn->rb_rightmost = NULL;
- 		spin_lock_init(&rtpn->lock);
- 		soft_limit_tree.rb_tree_per_node[node] = rtpn;
+ 	return 0;
+ }
 -- 
 2.45.2
 
