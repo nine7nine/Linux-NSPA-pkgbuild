@@ -96,7 +96,7 @@ _no_RT_throttle=y
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.13
+_major=6.13.0
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -105,17 +105,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.13-rc7
+_srcname=linux-6.13
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=2
+pkgrel=3
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.13-rc7.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.13.tar.gz"
   "0000-patch-6.13-rc6-rt3.patch"
   "config"
   "config_surface7"
@@ -502,8 +502,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('2ee49b0fd7d9b556dd226ca3882b0c0b1f5fb5bd29f6040e6286d9af10f966f0'
-            '474b3ea4b323b65d486ef9eb9432906db393114a17e1af2aa6387c07c435f90a'
+sha256sums=('ff36429c735ae4f2db65c1c09711d637687e208c8af35aeedbf683c865718a80'
+            '3615b6eaf6e7d5ccf303ab43af381506ac3a55e7f2d5ea5a3ef203e091085c64'
             '25621655394cadbbac7d47078ae452a92559fbbccf32be8462a53f55c5cbdecf'
             'dbd387de506a095c2f649fd0e7203834e8dcdd2e4bce6ef61844f5b198377ff7'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
@@ -536,4 +536,4 @@ sha256sums=('2ee49b0fd7d9b556dd226ca3882b0c0b1f5fb5bd29f6040e6286d9af10f966f0'
             '6d5a98e630c2981fbab73b895dab34fd727b4113b3c5a6c3a6c00b8ef93a3ae1'
             'cbcbd40d54e47b97bf44c305b2903f655c7afbf914a0d6c55fcf57ecf1c63713'
             '7e7e8fdec89123a897d8a9cef59753630df06c454afb52fdebf5161fce68443d'
-            'b2d005a7d647852e068cf0829e079b1dcf81954c9052afa2fd7131d38ba1f6c6')
+            'cd3268601fae8e1dbfb1c9ba2526bccb5b1d91735b9e725e6d3bd5831a734ec7')

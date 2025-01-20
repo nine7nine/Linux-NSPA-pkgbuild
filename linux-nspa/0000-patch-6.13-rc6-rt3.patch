@@ -2099,13 +2099,14 @@ diff --git a/kernel/trace/trace.c b/kernel/trace/trace.c
 index f8aebcb01e62c..1e82125d0c8d4 100644
 --- a/kernel/trace/trace.c
 +++ b/kernel/trace/trace.c
-@@ -4119,11 +4119,7 @@ print_trace_header(struct seq_file *m, struct trace_iterator *iter)
+@@ -4119,12 +4119,7 @@ print_trace_header(struct seq_file *m, s
  		   entries,
  		   total,
  		   buf->cpu,
 -		   preempt_model_none()      ? "server" :
 -		   preempt_model_voluntary() ? "desktop" :
 -		   preempt_model_full()      ? "preempt" :
+-		   preempt_model_lazy()	     ? "lazy"    :
 -		   preempt_model_rt()        ? "preempt_rt" :
 -		   "unknown",
 +		   preempt_model_str(),
