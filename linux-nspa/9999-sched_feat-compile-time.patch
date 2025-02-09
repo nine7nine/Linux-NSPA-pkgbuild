@@ -688,7 +688,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	 */
 -	if (sched_feat(PICK_BUDDY) &&
 -	    cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next)) {
-+#if SCHED_FEAT_NEXT_BUDDY
++#if SCHED_FEAT_PICK_BUDDY
 +	if (cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next)) {
  		/* ->next will never be delayed */
  		SCHED_WARN_ON(cfs_rq->next->sched_delayed);
