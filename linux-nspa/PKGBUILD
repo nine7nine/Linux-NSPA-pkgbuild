@@ -96,7 +96,7 @@ _no_RT_throttle=y
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.13.0
+_major=6.14
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -105,18 +105,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.13
+_srcname=linux-6.14-rc1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=3
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.13.tar.gz"
-  "0000-patch-6.13-rc6-rt3.patch"
+  "https://git.kernel.org/torvalds/t/linux-6.14-rc1.tar.gz"
+  "0000-patch-6.14-rc1-rt1.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -128,6 +128,7 @@ source=(
   "0007-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
   "0008-mm-increase_max_map_count.patch"
   "0009-mm-le9uo-add-sysctl-knobs-for-protecting-the-workin.patch"
+  "0010-iosched-6.14-introduce_ADIOS_IO_scheduler.patch"
   "0011-kt-smp-migrate_disable_in_smp_call_function_single_async.patch"
   "0012-kt-rtmutex-no-rcu-lock-while-spinning.patch"
   "0022-kt-vm-mm_optimizations.patch"
@@ -502,10 +503,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('ff36429c735ae4f2db65c1c09711d637687e208c8af35aeedbf683c865718a80'
-            '3615b6eaf6e7d5ccf303ab43af381506ac3a55e7f2d5ea5a3ef203e091085c64'
+sha256sums=('0f419f3dcba884dbaebef753bc311a66cba509dd92437fe23e1a3ae972571d24'
+            'c2683641ce4429d33592c5e70855a77b64713520a8e340f1a98c50564f9eae0a'
             '25621655394cadbbac7d47078ae452a92559fbbccf32be8462a53f55c5cbdecf'
-            'dbd387de506a095c2f649fd0e7203834e8dcdd2e4bce6ef61844f5b198377ff7'
+            '0e453d940183a2a8ae6cffe10ac62ebf41790bfba32fdd195a36d0f1b4921f60'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -514,13 +515,14 @@ sha256sums=('ff36429c735ae4f2db65c1c09711d637687e208c8af35aeedbf683c865718a80'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
-            '23072854d3aa837643103c6bb164243c29a4ade7d865f29d90ce83d2ace83a8b'
+            'f9002afa9abad89fc4ccf19c1d780145439c6d6afce02fddda8b0130fd9691e1'
+            '95c733b1b4e8d2a8b2b3fc4fb6669a3800d4756944dc231026514f3a422c7adf'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
             '5bddf0faf1194b7c759683290b1af786c79e0dcd79037e95b956772ef3ff5542'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '015690390c7aaf64ad7794bc458cc191d6b2b0be6e18b62ae65855a57fb46bea'
-            '32e7c5dc0ea438c811916818564e39e9c601b765dd914b8e79ebe71ba19d9808'
+            '26c7eb5bab68a6afaa79301913045883587b062c01d17386df079aa5a5528dc3'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
@@ -536,4 +538,4 @@ sha256sums=('ff36429c735ae4f2db65c1c09711d637687e208c8af35aeedbf683c865718a80'
             '6d5a98e630c2981fbab73b895dab34fd727b4113b3c5a6c3a6c00b8ef93a3ae1'
             'cbcbd40d54e47b97bf44c305b2903f655c7afbf914a0d6c55fcf57ecf1c63713'
             '7e7e8fdec89123a897d8a9cef59753630df06c454afb52fdebf5161fce68443d'
-            'cd3268601fae8e1dbfb1c9ba2526bccb5b1d91735b9e725e6d3bd5831a734ec7')
+            '1216ddcccc746ec5182dee13aa851649e28a21e8b3973ad3228b93987e8d91b2')

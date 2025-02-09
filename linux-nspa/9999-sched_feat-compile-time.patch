@@ -1,6 +1,6 @@
 --- a/kernel/sched/features.h	2024-04-05 13:15:08.632513679 -0500
 +++ b/kernel/sched/features.h	2024-04-05 14:01:44.437614659 -0500
-@@ -4,38 +4,38 @@
+@@ -4,32 +4,32 @@
   * Using the avg_vruntime, do the right thing and preserve lag across
   * sleep+wake cycles. EEVDF placement strategy #1, #2 if disabled.
   */
@@ -38,6 +38,15 @@
 +#define SCHED_FEAT_NEXT_BUDDY 0
  
  /*
+  * Allow completely ignoring cfs_rq->next; which can be set from various
+@@ -38,13 +38,13 @@ SCHED_FEAT(NEXT_BUDDY, false)
+  *   - yield_to_task()
+  *   - cgroup dequeue / pick
+  */
+-SCHED_FEAT(PICK_BUDDY, true)
++#define SCHED_FEAT_PICK_BUDDY 1
+ 
+ /*
   * Consider buddies to be cache hot, decreases the likeliness of a
   * cache buddy being migrated away, increases cache locality.
   */
@@ -46,7 +55,7 @@
  
  /*
   * Delay dequeueing tasks until they get selected or woken.
-@@ -46,44 +46,44 @@ SCHED_FEAT(CACHE_HOT_BUDDY, true)
+@@ -55,44 +55,44 @@ SCHED_FEAT(CACHE_HOT_BUDDY, true)
   *
   * DELAY_ZERO clips the lag on dequeue (or wakeup) to 0.
   */
@@ -101,7 +110,7 @@
  
  #ifdef HAVE_RT_PUSH_IPI
  /*
-@@ -95,20 +95,20 @@ SCHED_FEAT(WARN_DOUBLE_CLOCK, false)
+@@ -104,20 +104,20 @@ SCHED_FEAT(WARN_DOUBLE_CLOCK, false)
   * IPI to that CPU and let that CPU push the RT task to where
   * it should go may be a better scenario.
   */
@@ -132,6 +141,7 @@
  
 -SCHED_FEAT(LATENCY_WARN, false)
 +#define SCHED_FEAT_LATENCY_WARN 0
+
 diff --git a/kernel/sched/smp.h b/kernel/sched/smp.h
 index 9620e323162c8..e1c57e93033c1 100644
 --- a/kernel/sched/smp.h
@@ -515,7 +525,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	debugfs_create_file("preempt", 0644, debugfs_sched, NULL, &sched_dynamic_fops);
 --- a/kernel/sched/fair.c	2024-04-05 18:01:34.588902528 -0500
 +++ b/kernel/sched/fair.c	2024-04-05 18:00:40.747682546 -0500
-@@ -54,6 +54,7 @@
+@ -57,6 +57,7 @@
  #include "sched.h"
  #include "stats.h"
  #include "autogroup.h"
@@ -523,7 +533,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  /*
   * The initial- and re-scaling of tunables is configurable
-@@ -920,8 +921,9 @@ static struct sched_entity *pick_eevdf(s
+@@ -923,8 +924,9 @@ static struct sched_entity *pick_eevdf(s
  	 * Once selected, run a task until it either becomes non-eligible or
  	 * until it gets a new slice. See the HACK in set_next_entity().
  	 */
@@ -534,7 +544,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1158,8 +1160,9 @@ static inline void update_curr_task(stru
+@@ -1161,8 +1163,9 @@ static inline void update_curr_task(stru
  
  static inline bool did_preempt_short(struct cfs_rq *cfs_rq, struct sched_entity *curr)
  {
@@ -545,7 +555,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (curr->vlag == curr->deadline)
  		return false;
-@@ -1170,8 +1173,9 @@ static inline bool did_preempt_short(str
+@@ -1173,8 +1176,9 @@ static inline bool did_preempt_short(str
  static inline bool do_preempt_short(struct cfs_rq *cfs_rq,
  				    struct sched_entity *pse, struct sched_entity *se)
  {
@@ -556,7 +566,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (pse->slice >= se->slice)
  		return false;
-@@ -4174,8 +4178,9 @@ void set_task_rq_fair(struct sched_entit
+@@ -4173,8 +4177,9 @@ void set_task_rq_fair(struct sched_entit
  	u64 p_last_update_time;
  	u64 n_last_update_time;
  
@@ -568,7 +578,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * We are supposed to update the task to "current" time, then its up to
-@@ -4843,8 +4848,9 @@ static inline void util_est_enqueue(stru
+@@ -4842,8 +4847,9 @@ static inline void util_est_enqueue(stru
  {
  	unsigned int enqueued;
  
@@ -580,7 +590,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/* Update root cfs_rq's estimated utilization */
  	enqueued  = cfs_rq->avg.util_est;
-@@ -4859,8 +4865,9 @@ static inline void util_est_dequeue(stru
+@@ -4858,8 +4864,9 @@ static inline void util_est_dequeue(stru
  {
  	unsigned int enqueued;
  
@@ -592,7 +602,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/* Update root cfs_rq's estimated utilization */
  	enqueued  = cfs_rq->avg.util_est;
-@@ -4878,8 +4885,9 @@ static inline void util_est_update(struc
+@@ -4877,8 +4884,9 @@ static inline void util_est_update(struc
  {
  	unsigned int ewma, dequeued, last_ewma_diff;
  
@@ -604,17 +614,17 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * Skip update of task's estimated utilization when the task has not
-@@ -5185,7 +5193,8 @@ place_entity(struct cfs_rq *cfs_rq, stru
+@@ -5200,7 +5208,8 @@ place_entity(struct cfs_rq *cfs_rq, stru
  	 *
  	 * EEVDF: placement strategy #1 / #2
  	 */
--	if (sched_feat(PLACE_LAG) && cfs_rq->nr_running && se->vlag) {
+-	if (sched_feat(PLACE_LAG) && cfs_rq->nr_queued && se->vlag) {
 +#if SCHED_FEAT_PLACE_LAG
-+	if (cfs_rq->nr_running && se->vlag) {
++	if (cfs_rq->nr_queued && se->vlag) {
  		struct sched_entity *curr = cfs_rq->curr;
  		unsigned long load;
  
-@@ -5252,6 +5261,7 @@ place_entity(struct cfs_rq *cfs_rq, stru
+@@ -5267,6 +5276,7 @@ place_entity(struct cfs_rq *cfs_rq, stru
  			load = 1;
  		lag = div_s64(lag, load);
  	}
@@ -622,7 +632,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	se->vruntime = vruntime - lag;
  
-@@ -5266,8 +5276,10 @@ place_entity(struct cfs_rq *cfs_rq, stru
+@@ -5281,8 +5291,10 @@ place_entity(struct cfs_rq *cfs_rq, stru
  	 * on average, halfway through their slice, as such start tasks
  	 * off with half a slice to ease into the competition.
  	 */
@@ -634,7 +644,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
-@@ -5397,8 +5409,10 @@ static void clear_delayed(struct sched_e
+@@ -5410,8 +5422,10 @@ static void clear_delayed(struct sched_e
  static inline void finish_delayed_dequeue_entity(struct sched_entity *se)
  {
  	clear_delayed(se);
@@ -646,7 +656,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  }
  
  static bool
-@@ -5422,12 +5436,14 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
+@@ -5436,12 +5450,14 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
  
  		SCHED_WARN_ON(delay && se->sched_delayed);
  
@@ -661,8 +671,8 @@ index d82501c1350da..c3fd3ad4a5d85 100644
 +#endif
  	}
  
- 	int action = UPDATE_TG;
-@@ -5449,7 +5465,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
+ 	if (entity_is_task(se) && task_on_rq_migrating(task_of(se)))
+@@ -5462,7 +5478,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
  	update_stats_dequeue_fair(cfs_rq, se, flags);
  
  	update_entity_lag(cfs_rq, se);
@@ -672,11 +682,11 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		se->deadline -= se->vruntime;
  		se->rel_deadline = 1;
  	}
-@@ -5541,12 +5558,13 @@ pick_next_entity(struct rq *rq, struct c
+@@ -5556,12 +5573,13 @@ pick_next_entity(struct rq *rq, struct c
  	/*
- 	 * Enabling NEXT_BUDDY will affect latency but not fairness.
+ 	 * Picking the ->next buddy will affect latency but not fairness.
  	 */
--	if (sched_feat(NEXT_BUDDY) &&
+-	if (sched_feat(PICK_BUDDY) &&
 -	    cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next)) {
 +#if SCHED_FEAT_NEXT_BUDDY
 +	if (cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next)) {
@@ -686,41 +696,41 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	}
 +#endif
  
- 	struct sched_entity *se = pick_eevdf(cfs_rq);
+ 	se = pick_eevdf(cfs_rq);
  	if (se->sched_delayed) {
-@@ -6854,19 +6872,19 @@ requeue_delayed_entity(struct sched_enti
+@@ -6870,19 +6888,19 @@ requeue_delayed_entity(struct sched_enti
  	SCHED_WARN_ON(!se->sched_delayed);
  	SCHED_WARN_ON(!se->on_rq);
  
 -	if (sched_feat(DELAY_ZERO)) {
 -		update_entity_lag(cfs_rq, se);
 -		if (se->vlag > 0) {
--			cfs_rq->nr_running--;
+-			cfs_rq->nr_queued--;
 -			if (se != cfs_rq->curr)
 -				__dequeue_entity(cfs_rq, se);
 -			se->vlag = 0;
 -			place_entity(cfs_rq, se, 0);
 -			if (se != cfs_rq->curr)
 -				__enqueue_entity(cfs_rq, se);
--			cfs_rq->nr_running++;
+-			cfs_rq->nr_queued++;
 -		}
 +#if SCHED_FEAT_DELAY_ZERO
 +	update_entity_lag(cfs_rq, se);
 +	if (se->vlag > 0) {
-+		cfs_rq->nr_running--;
++		cfs_rq->nr_queued--;
 +		if (se != cfs_rq->curr)
 +			__dequeue_entity(cfs_rq, se);
 +		se->vlag = 0;
 +		place_entity(cfs_rq, se, 0);
 +		if (se != cfs_rq->curr)
 +			__enqueue_entity(cfs_rq, se);
-+		cfs_rq->nr_running++;
++		cfs_rq->nr_queued++;
  	}
 +#endif
  
  	update_load_avg(cfs_rq, se, 0);
  	clear_delayed(se);
-@@ -7338,14 +7356,18 @@ wake_affine_weight(struct sched_domain *
+@@ -7354,14 +7372,18 @@ wake_affine_weight(struct sched_domain *
  	task_load = task_h_load(p);
  
  	this_eff_load += task_load;
@@ -743,7 +753,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	prev_eff_load *= capacity_of(this_cpu);
  
  	/*
-@@ -7365,11 +7387,14 @@ static int wake_affine(struct sched_doma
+@@ -7381,11 +7403,14 @@ static int wake_affine(struct sched_doma
  {
  	int target = nr_cpumask_bits;
  
@@ -761,7 +771,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	schedstat_inc(p->stats.nr_wakeups_affine_attempts);
  	if (target != this_cpu)
-@@ -7650,16 +7675,16 @@ static int select_idle_cpu(struct task_s
+@@ -7666,16 +7691,16 @@ static int select_idle_cpu(struct task_s
  
  	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
  
@@ -787,7 +797,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (static_branch_unlikely(&sched_cluster_active)) {
  		struct sched_group *sg = sd->groups;
-@@ -7971,44 +7996,44 @@ cpu_util(int cpu, struct task_struct *p,
+@@ -7987,44 +8012,44 @@ cpu_util(int cpu, struct task_struct *p,
  	else if (p && task_cpu(p) != cpu && dst_cpu == cpu)
  		util += task_util(p);
  
@@ -867,7 +877,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	return min(util, arch_scale_cpu_capacity(cpu));
  }
-@@ -8720,9 +8745,11 @@ static void check_preempt_wakeup_fair(st
+@@ -8736,9 +8761,11 @@ static void check_preempt_wakeup_fair(st
  	if (unlikely(throttled_hierarchy(cfs_rq_of(pse))))
  		return;
  
@@ -880,7 +890,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * We can come here with TIF_NEED_RESCHED already set from new task
-@@ -8737,8 +8764,9 @@ static void check_preempt_wakeup_fair(st
+@@ -8753,8 +8780,9 @@ static void check_preempt_wakeup_fair(st
  	if (test_tsk_need_resched(rq->curr))
  		return;
  
@@ -891,7 +901,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	find_matching_se(&se, &pse);
  	WARN_ON_ONCE(!pse);
-@@ -9216,9 +9244,10 @@ static int task_hot(struct task_struct *
+@@ -9232,9 +9260,10 @@ static int task_hot(struct task_struct *
  	/*
  	 * Buddy candidates are cache hot:
  	 */
@@ -904,7 +914,16 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (sysctl_sched_migration_cost == -1)
  		return 1;
-@@ -9495,9 +9524,10 @@ static int detach_tasks(struct lb_env *e
+@@ -9331,7 +9360,7 @@ static inline int task_is_ineligible_on_
+ #else
+ 	dst_cfs_rq = &cpu_rq(dest_cpu)->cfs;
+ #endif
+-	if (sched_feat(PLACE_LAG) && dst_cfs_rq->nr_queued &&
++	if (dst_cfs_rq->nr_queued &&
+ 	    !entity_eligible(task_cfs_rq(p), &p->se))
+ 		return 1;
+ 
+@@ -9556,9 +9585,10 @@ static int detach_tasks(struct lb_env *e
  			 */
  			load = max_t(unsigned long, task_h_load(p), 1);
  
@@ -917,7 +936,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  			/*
  			 * Make sure that we don't migrate too much load.
-@@ -10855,7 +10885,9 @@ static void update_idle_cpu_scan(struct
+@@ -10924,7 +10954,9 @@ static void update_idle_cpu_scan(struct
  	 * balancing, rather than CPU_NEWLY_IDLE, because the latter
  	 * can fire way more frequently than the former.
  	 */
@@ -928,7 +947,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		return;
  
  	llc_weight = per_cpu(sd_llc_size, env->dst_cpu);
-@@ -13093,7 +13125,10 @@ static void attach_entity_cfs_rq(struct
+@@ -13171,7 +13203,10 @@ static void attach_entity_cfs_rq(struct
  	struct cfs_rq *cfs_rq = cfs_rq_of(se);
  
  	/* Synchronize entity with its cfs_rq */
