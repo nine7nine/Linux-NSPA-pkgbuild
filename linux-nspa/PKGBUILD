@@ -108,7 +108,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.14-rc2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=3
+pkgrel=4
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -150,6 +150,8 @@ source=(
   "1116-kt-pm-suspend_patches.patch"
   "1119-mm-compaction-Skip_all_non-migratable_pages_during_scan.patch"
   "1120-RFC-Introduce-QPW-for-per-cpu-operations.patch"
+  "1122-dma-buf-sync_file-Speed_up_ioctl_by_omitting_debug_names.patch"
+  "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
   "9999-sched_feat-compile-time.patch"
 )
 
@@ -538,4 +540,6 @@ sha256sums=('ff0471dc795fa3cd74fc5f0ad80970104ba376843b9f317865e23a31b6ccf55f'
             '6d5a98e630c2981fbab73b895dab34fd727b4113b3c5a6c3a6c00b8ef93a3ae1'
             'cbcbd40d54e47b97bf44c305b2903f655c7afbf914a0d6c55fcf57ecf1c63713'
             '7e7e8fdec89123a897d8a9cef59753630df06c454afb52fdebf5161fce68443d'
+            '3059893c86b3eee288edb6c7d958d84e92c67a7d8e55ad48a9470a2100b0a22e'
+            'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
             'b5854c58c15a2fdd5bd43234a6199bf96b054198327efa9add378488c4413d25')
