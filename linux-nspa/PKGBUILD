@@ -105,17 +105,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.14-rc2
+_srcname=linux-6.14-rc3
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=4
+pkgrel=6
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.14-rc2.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.14-rc3.tar.gz"
   "0000-patch-6.14-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -505,10 +505,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('ff0471dc795fa3cd74fc5f0ad80970104ba376843b9f317865e23a31b6ccf55f'
+sha256sums=('5ee0e740b85a43a9aab9b694ba7d6a9da7c4a7cf2f378c2af2404f998ed2ca06'
             'c2683641ce4429d33592c5e70855a77b64713520a8e340f1a98c50564f9eae0a'
-            '25621655394cadbbac7d47078ae452a92559fbbccf32be8462a53f55c5cbdecf'
-            '00fc0d83e723cff278319b0e738422c381d31762682dac97b69b82a3ade9b0d4'
+            '0e6e7c2792ca989f361dabf5fa774e1a84c88006e595ee3754b9455dd4da5f9d'
+            'beef6232767bc077af04ce6fdf7021b68088e55a154ae36a1280071ef5f914a2'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '458d5a74cdaf1de427ad18038e310ba328f7be47ce8caed017a5ccda566b79d9'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
@@ -524,7 +524,7 @@ sha256sums=('ff0471dc795fa3cd74fc5f0ad80970104ba376843b9f317865e23a31b6ccf55f'
             '5bddf0faf1194b7c759683290b1af786c79e0dcd79037e95b956772ef3ff5542'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '015690390c7aaf64ad7794bc458cc191d6b2b0be6e18b62ae65855a57fb46bea'
-            '26c7eb5bab68a6afaa79301913045883587b062c01d17386df079aa5a5528dc3'
+            'c0bb9834994db43a6147286d0b94652be69b2d7a67e94be42fd7701227ec38ac'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
