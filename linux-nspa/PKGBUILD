@@ -14,18 +14,10 @@ _makemenuconfig=
 # Compile ONLY used modules to VASTLY reduce the number of modules built
 # and the build time.
 #
-# To keep track of which modules are needed for your specific system/hardware,
-# give module_db script a try: https://aur.archlinux.org/packages/modprobed-db
-# This PKGBUILD read the database kept if it exists
-#
 # More at this wiki page ---> https://wiki.archlinux.org/index.php/Modprobed-db
 _localmodcfg=
 
 # Use the current kernel's .config file
-# Enabling this option will use the .config of the RUNNING kernel rather than
-# the ARCH defaults. Useful when the package gets updated and you already went
-# through the trouble of customizing your config options.  NOT recommended when
-# a new kernel is released, but again, convenient for package bumps.
 _use_current=
 
 # Microsoft Surface 7 specific config
@@ -34,7 +26,6 @@ _config_Surface7=y
 
 # NUMA is optimized for multi-socket motherboards.
 # A single multi-core CPU actually runs slower with NUMA enabled.
-# See, https://bugs.archlinux.org/task/31187
 _NUMAdisable=y
 
 # Disable MQ-Deadline I/O scheduler
@@ -88,11 +79,6 @@ _no_RT_throttle=y
 # Enable converting sched_feat() into compile-time implementation
 # This allows the compiler to make better optimizations to scheduler
 # code. This only supports my config.
-#
-# I can't possibly test all configs, and I am explicit in a few spots of
-# the sched code, where I have a feature enabled, or disabled. That said,
-# assuming none of the sched options or preemption model are messed with
-# and the config is close to mine: it probably will work fine. WIP!
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
@@ -105,17 +91,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.14-rc3
+_srcname=linux-6.14-rc4
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=6
+pkgrel=7
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.14-rc3.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.14-rc4.tar.gz"
   "0000-patch-6.14-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -505,7 +491,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('5ee0e740b85a43a9aab9b694ba7d6a9da7c4a7cf2f378c2af2404f998ed2ca06'
+sha256sums=('ce14b1882ef4ad26607a5afddd473c9957950fa170fb504792d8ed21757f4238'
             'c2683641ce4429d33592c5e70855a77b64713520a8e340f1a98c50564f9eae0a'
             '0e6e7c2792ca989f361dabf5fa774e1a84c88006e595ee3754b9455dd4da5f9d'
             'beef6232767bc077af04ce6fdf7021b68088e55a154ae36a1280071ef5f914a2'
