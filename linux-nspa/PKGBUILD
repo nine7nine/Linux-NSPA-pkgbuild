@@ -91,17 +91,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.14-rc7
+_srcname=linux-6.14
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=10
+pkgrel=11
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://web.git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.14-rc7.tar.gz"
+  "https://web.git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.14.tar.gz"
   "0000-patch-6.14-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -491,7 +491,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('8a561039df48c5e6044655cfb771b9014fbd7df675dfbcc52bf29fbb7011d94c'
+sha256sums=('7d7960d6ce277743e96dbd8d94fce93f13799a69bd9a3e9841eebffde4abe6c2'
             'c2683641ce4429d33592c5e70855a77b64713520a8e340f1a98c50564f9eae0a'
             '0e6e7c2792ca989f361dabf5fa774e1a84c88006e595ee3754b9455dd4da5f9d'
             'beef6232767bc077af04ce6fdf7021b68088e55a154ae36a1280071ef5f914a2'
