@@ -82,7 +82,7 @@ _no_RT_throttle=y
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.14
+_major=6.14.1
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -91,18 +91,18 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.14
+_srcname=linux-6.14.1
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=11
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://web.git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.14.tar.gz"
-  "0000-patch-6.14-rc1-rt1.patch"
+  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.14.1.tar.xz"
+  "0000-patch-6.14-rt3.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -491,8 +491,8 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('7d7960d6ce277743e96dbd8d94fce93f13799a69bd9a3e9841eebffde4abe6c2'
-            'c2683641ce4429d33592c5e70855a77b64713520a8e340f1a98c50564f9eae0a'
+sha256sums=('5bf122d1879fd64fadf0cecfcd477957ebce1bc5931c14835ee0eda88463e407'
+            '83365aa73ea6fa3ca02bbf900e019e326112b094532c5ea7ae26dece9da02c59'
             '0e6e7c2792ca989f361dabf5fa774e1a84c88006e595ee3754b9455dd4da5f9d'
             'beef6232767bc077af04ce6fdf7021b68088e55a154ae36a1280071ef5f914a2'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
