@@ -350,9 +350,9 @@ index b9c077a160ed..d228058405b2 100644
 --- a/kernel/time/tick-common.c
 +++ b/kernel/time/tick-common.c
 @@ -510,7 +510,7 @@ void tick_resume(void)
- 
  #ifdef CONFIG_SUSPEND
  static DEFINE_RAW_SPINLOCK(tick_freeze_lock);
+ static DEFINE_WAIT_OVERRIDE_MAP(tick_freeze_map, LD_WAIT_SLEEP);
 -static unsigned int tick_freeze_depth;
 +static unsigned long tick_frozen_mask;
  
@@ -377,21 +377,20 @@ index b9c077a160ed..d228058405b2 100644
 +	if (tick_frozen_mask == *cpumask_bits(cpu_online_mask)) {
  		trace_suspend_resume(TPS("timekeeping_freeze"),
  				     smp_processor_id(), true);
- 		system_state = SYSTEM_SUSPEND;
-@@ -550,9 +557,11 @@ void tick_freeze(void)
+ 		/*
+@@ -563,9 +570,10 @@ void tick_freeze(void)
   */
  void tick_unfreeze(void)
  {
 +	int cpu = smp_processor_id();
-+
  	raw_spin_lock(&tick_freeze_lock);
  
 -	if (tick_freeze_depth == num_online_cpus()) {
 +	if (tick_frozen_mask == *cpumask_bits(cpu_online_mask)) {
- 		timekeeping_resume();
- 		sched_clock_resume();
- 		system_state = SYSTEM_RUNNING;
-@@ -562,8 +571,10 @@ void tick_unfreeze(void)
+ 		/*
+ 		 * Similar to tick_freeze(). On resumption the first CPU may
+ 		 * acquire uncontended sleeping locks while other CPUs block on
+@@ -583,8 +591,10 @@ void tick_unfreeze(void)
  		touch_softlockup_watchdog();
  		tick_resume_local();
  	}

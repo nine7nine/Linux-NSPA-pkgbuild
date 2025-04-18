@@ -37,7 +37,7 @@ diff --git a/mm/swap.c b/mm/swap.c
 index 9cee7f6a380942..99ce0d2442d7c4 100644
 --- a/mm/swap.c
 +++ b/mm/swap.c
-@@ -1070,6 +1070,10 @@ EXPORT_SYMBOL(pagevec_lookup_range_tag);
+@@ -1091,6 +1091,10 @@ static const struct ctl_table swap_sysct
   */
  void __init swap_setup(void)
  {
@@ -48,11 +48,13 @@ index 9cee7f6a380942..99ce0d2442d7c4 100644
  	unsigned long megs = totalram_pages() >> (20 - PAGE_SHIFT);
  
  	/* Use a smaller cluster for small-memory machines */
-@@ -1081,4 +1085,5 @@ void __init swap_setup(void)
+@@ -1102,6 +1106,6 @@ void __init swap_setup(void)
  	 * Right now other parts of the system means that we
  	 * _really_ don't want to cluster much more
  	 */
+-
 +#endif
+ 	register_sysctl_init("vm", swap_sysctl_table);
  }
 
 From f7f49141a5dbe9c99d78196b58c44307fb2e6be3 Mon Sep 17 00:00:00 2001

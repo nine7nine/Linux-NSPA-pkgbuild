@@ -208,7 +208,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	enqueued = avg->util_est;
 --- a/kernel/sched/core.c	2024-04-05 16:27:53.097047446 -0500
 +++ b/kernel/sched/core.c	2024-04-05 16:34:58.938773823 -0500
-@@ -780,9 +765,11 @@ static void update_rq_clock_task(struct
+@@ -791,9 +791,11 @@ static void update_rq_clock_task(struct
  	rq->clock_task += delta;
  
  #ifdef CONFIG_HAVE_SCHED_AVG_IRQ
@@ -221,18 +221,18 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	update_rq_clock_pelt(rq, delta);
  }
  
-@@ -796,8 +783,9 @@ void update_rq_clock(struct rq *rq)
+@@ -807,8 +809,9 @@ void update_rq_clock(struct rq *rq)
+ 	if (rq->clock_update_flags & RQCF_ACT_SKIP)
  		return;
  
- #ifdef CONFIG_SCHED_DEBUG
 -	if (sched_feat(WARN_DOUBLE_CLOCK))
 +#if SCHED_FEAT_WARN_DOUBLE_CLOCK
- 		SCHED_WARN_ON(rq->clock_update_flags & RQCF_UPDATED);
+ 		WARN_ON_ONCE(rq->clock_update_flags & RQCF_UPDATED);
 +#endif
  	rq->clock_update_flags |= RQCF_UPDATED;
- #endif
  
-@@ -3799,6 +3787,7 @@ static int ttwu_runnable(struct task_str
+ 	clock = sched_clock_cpu(cpu_of(rq));
+@@ -3811,6 +3814,7 @@ static int ttwu_runnable(struct task_str
  }
  
  #ifdef CONFIG_SMP
@@ -240,7 +240,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  void sched_ttwu_pending(void *arg)
  {
  	struct llist_node *llist = arg;
-@@ -3835,6 +3824,7 @@ void sched_ttwu_pending(void *arg)
+@@ -3847,6 +3851,7 @@ void sched_ttwu_pending(void *arg)
  	WRITE_ONCE(rq->ttwu_pending, 0);
  	rq_unlock_irqrestore(rq, &rf);
  }
@@ -248,7 +248,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  /*
   * Prepare the scene for sending an IPI for a remote smp_call
-@@ -3858,6 +3848,7 @@ bool call_function_single_prep_ipi(int c
+@@ -3870,6 +3875,7 @@ bool call_function_single_prep_ipi(int c
   * via sched_ttwu_wakeup() for activation so the wakee incurs the cost
   * of the wakeup instead of the waker.
   */
@@ -256,7 +256,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  static void __ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
  {
  	struct rq *rq = cpu_rq(cpu);
-@@ -3867,6 +3858,7 @@ static void __ttwu_queue_wakelist(struct
+@@ -3879,6 +3885,7 @@ static void __ttwu_queue_wakelist(struct
  	WRITE_ONCE(rq->ttwu_pending, 1);
  	__smp_call_single_queue(cpu, &p->wake_entry.llist);
  }
@@ -264,15 +264,15 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  void wake_up_if_idle(int cpu)
  {
-@@ -3911,6 +3903,7 @@ bool cpus_share_resources(int this_cpu,
+@@ -3923,6 +3930,7 @@ bool cpus_share_resources(int this_cpu,
  	return per_cpu(sd_share_id, this_cpu) == per_cpu(sd_share_id, that_cpu);
  }
  
 +#if SCHED_FEAT_TTWU_QUEUE
  static inline bool ttwu_queue_cond(struct task_struct *p, int cpu)
  {
- 	/*
-@@ -3962,7 +3955,7 @@ static inline bool ttwu_queue_cond(struc
+ 	/* See SCX_OPS_ALLOW_QUEUED_WAKEUP. */
+@@ -3969,7 +3977,7 @@ static inline bool ttwu_queue_cond(struc
  
  static bool ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
  {
@@ -281,7 +281,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		sched_clock_cpu(cpu); /* Sync clocks across CPUs */
  		__ttwu_queue_wakelist(p, cpu, wake_flags);
  		return true;
-@@ -3970,6 +3963,7 @@ static bool ttwu_queue_wakelist(struct t
+@@ -3977,6 +3985,7 @@ static bool ttwu_queue_wakelist(struct t
  
  	return false;
  }
@@ -289,7 +289,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  #else /* !CONFIG_SMP */
  
-@@ -3985,8 +3979,10 @@ static void ttwu_queue(struct task_struc
+@@ -3992,8 +4001,10 @@ static void ttwu_queue(struct task_struc
  	struct rq *rq = cpu_rq(cpu);
  	struct rq_flags rf;
  
@@ -300,7 +300,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	rq_lock(rq, &rf);
  	update_rq_clock(rq);
-@@ -4273,6 +4269,7 @@ int try_to_wake_up(struct task_struct *p
+@@ -4280,6 +4291,7 @@ int try_to_wake_up(struct task_struct *p
  		 */
  		WRITE_ONCE(p->__state, TASK_WAKING);
  
@@ -308,7 +308,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		/*
  		 * If the owning (remote) CPU is still in the middle of schedule() with
  		 * this task as prev, considering queueing p on the remote CPUs wake_list
-@@ -4295,6 +4292,7 @@ int try_to_wake_up(struct task_struct *p
+@@ -4302,6 +4314,7 @@ int try_to_wake_up(struct task_struct *p
  		if (smp_load_acquire(&p->on_cpu) &&
  		    ttwu_queue_wakelist(p, task_cpu(p), wake_flags))
  			break;
@@ -316,23 +316,23 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  		/*
  		 * If the owning (remote) CPU is still in the middle of schedule() with
-@@ -5574,6 +5572,7 @@ unsigned long long task_sched_runtime(st
+@@ -5586,6 +5599,7 @@ unsigned long long task_sched_runtime(st
+ 	return ns;
  }
  
- #ifdef CONFIG_SCHED_DEBUG
 +#if SCHED_FEAT_LATENCY_WARN
  static u64 cpu_resched_latency(struct rq *rq)
  {
  	int latency_warn_ms = READ_ONCE(sysctl_resched_latency_warn_ms);
-@@ -5620,6 +5619,7 @@ static int __init setup_resched_latency_
+@@ -5630,6 +5644,7 @@ static int __init setup_resched_latency_
+ 	return 1;
+ }
  __setup("resched_latency_warn_ms=", setup_resched_latency_warn_ms);
- #else
- static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
 +#endif
- #endif /* CONFIG_SCHED_DEBUG */
  
  /*
-@@ -5634,7 +5634,9 @@ void sched_tick(void)
+  * This function gets called by the timer code, with HZ frequency.
+@@ -5643,7 +5658,9 @@ void sched_tick(void)
  	struct task_struct *donor;
  	struct rq_flags rf;
  	unsigned long hw_pressure;
@@ -340,9 +340,9 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	u64 resched_latency;
 +#endif
  
- 	if (housekeeping_cpu(cpu, HK_TYPE_TICK))
+ 	if (housekeeping_cpu(cpu, HK_TYPE_KERNEL_NOISE))
  		arch_scale_freq_tick();
-@@ -5654,8 +5656,11 @@ void sched_tick(void)
+@@ -5663,8 +5680,11 @@ void sched_tick(void)
  		resched_curr(rq);
  
  	donor->sched_class->task_tick(rq, donor, 0);
@@ -356,7 +356,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	calc_global_load_tick(rq);
  	sched_core_tick(rq);
  	task_tick_mm_cid(rq, donor);
-@@ -5663,8 +5668,12 @@ void sched_tick(void)
+@@ -5672,8 +5692,12 @@ void sched_tick(void)
  
  	rq_unlock(rq, &rf);
  
@@ -371,7 +371,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	perf_event_task_tick();
  
-@@ -6658,8 +6667,9 @@ static void __sched notrace __schedule(i
+@@ -6669,8 +6693,9 @@ static void __sched notrace __schedule(i
  
  	schedule_debug(prev, preempt);
  
@@ -525,26 +525,18 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	debugfs_create_file("preempt", 0644, debugfs_sched, NULL, &sched_dynamic_fops);
 --- a/kernel/sched/fair.c	2024-04-05 18:01:34.588902528 -0500
 +++ b/kernel/sched/fair.c	2024-04-05 18:00:40.747682546 -0500
-@ -57,6 +57,7 @@
- #include "sched.h"
- #include "stats.h"
- #include "autogroup.h"
-+#include "features.h"
+@@ -939,8 +939,9 @@ static struct sched_entity *pick_eevdf(s
+ 	if (curr && (!curr->on_rq || !entity_eligible(cfs_rq, curr)))
+ 		curr = NULL;
  
- /*
-  * The initial- and re-scaling of tunables is configurable
-@@ -923,8 +924,9 @@ static struct sched_entity *pick_eevdf(s
- 	 * Once selected, run a task until it either becomes non-eligible or
- 	 * until it gets a new slice. See the HACK in set_next_entity().
- 	 */
-+	/* SCHED_FEAT_RUN_TO_PARITY 0 
- 	if (sched_feat(RUN_TO_PARITY) && curr && curr->vlag == curr->deadline)
++	/* SCHED_FEAT_RUN_TO_PARITY 0
+ 	if (sched_feat(RUN_TO_PARITY) && curr && protect_slice(curr))
 -		return curr;
 +		return curr; */
  
  	/* Pick the leftmost entity if it's eligible */
  	if (se && entity_eligible(cfs_rq, se)) {
-@@ -1161,8 +1163,9 @@ static inline void update_curr_task(stru
+@@ -1175,8 +1176,9 @@ static inline void update_curr_task(stru
  
  static inline bool did_preempt_short(struct cfs_rq *cfs_rq, struct sched_entity *curr)
  {
@@ -555,7 +547,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (curr->vlag == curr->deadline)
  		return false;
-@@ -1173,8 +1176,9 @@ static inline bool did_preempt_short(str
+@@ -1187,8 +1189,9 @@ static inline bool did_preempt_short(str
  static inline bool do_preempt_short(struct cfs_rq *cfs_rq,
  				    struct sched_entity *pse, struct sched_entity *se)
  {
@@ -566,7 +558,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (pse->slice >= se->slice)
  		return false;
-@@ -4173,8 +4177,9 @@ void set_task_rq_fair(struct sched_entit
+@@ -4189,8 +4192,9 @@ void set_task_rq_fair(struct sched_entit
  	u64 p_last_update_time;
  	u64 n_last_update_time;
  
@@ -578,7 +570,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * We are supposed to update the task to "current" time, then its up to
-@@ -4842,8 +4847,9 @@ static inline void util_est_enqueue(stru
+@@ -4858,8 +4862,9 @@ static inline void util_est_enqueue(stru
  {
  	unsigned int enqueued;
  
@@ -590,7 +582,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/* Update root cfs_rq's estimated utilization */
  	enqueued  = cfs_rq->avg.util_est;
-@@ -4858,8 +4864,9 @@ static inline void util_est_dequeue(stru
+@@ -4874,8 +4879,9 @@ static inline void util_est_dequeue(stru
  {
  	unsigned int enqueued;
  
@@ -602,7 +594,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/* Update root cfs_rq's estimated utilization */
  	enqueued  = cfs_rq->avg.util_est;
-@@ -4877,8 +4884,9 @@ static inline void util_est_update(struc
+@@ -4893,8 +4899,9 @@ static inline void util_est_update(struc
  {
  	unsigned int ewma, dequeued, last_ewma_diff;
  
@@ -614,7 +606,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * Skip update of task's estimated utilization when the task has not
-@@ -5200,7 +5208,8 @@ place_entity(struct cfs_rq *cfs_rq, stru
+@@ -5216,7 +5223,8 @@ place_entity(struct cfs_rq *cfs_rq, stru
  	 *
  	 * EEVDF: placement strategy #1 / #2
  	 */
@@ -624,7 +616,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		struct sched_entity *curr = cfs_rq->curr;
  		unsigned long load;
  
-@@ -5267,6 +5276,7 @@ place_entity(struct cfs_rq *cfs_rq, stru
+@@ -5283,6 +5291,7 @@ place_entity(struct cfs_rq *cfs_rq, stru
  			load = 1;
  		lag = div_s64(lag, load);
  	}
@@ -632,7 +624,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	se->vruntime = vruntime - lag;
  
-@@ -5281,8 +5291,10 @@ place_entity(struct cfs_rq *cfs_rq, stru
+@@ -5297,8 +5306,10 @@ place_entity(struct cfs_rq *cfs_rq, stru
  	 * on average, halfway through their slice, as such start tasks
  	 * off with half a slice to ease into the competition.
  	 */
@@ -644,7 +636,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * EEVDF: vd_i = ve_i + r_i/w_i
-@@ -5410,8 +5422,10 @@ static void clear_delayed(struct sched_e
+@@ -5445,8 +5456,10 @@ static void clear_delayed(struct sched_e
  static inline void finish_delayed_dequeue_entity(struct sched_entity *se)
  {
  	clear_delayed(se);
@@ -656,9 +648,9 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  }
  
  static bool
-@@ -5436,12 +5450,14 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
+@@ -5471,12 +5484,14 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
  
- 		SCHED_WARN_ON(delay && se->sched_delayed);
+ 		WARN_ON_ONCE(delay && se->sched_delayed);
  
 -		if (sched_feat(DELAY_DEQUEUE) && delay &&
 +#if SCHED_FEAT_DELAY_DEQUEUE
@@ -672,7 +664,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	}
  
  	if (entity_is_task(se) && task_on_rq_migrating(task_of(se)))
-@@ -5462,7 +5478,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
+@@ -5497,7 +5512,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, st
  	update_stats_dequeue_fair(cfs_rq, se, flags);
  
  	update_entity_lag(cfs_rq, se);
@@ -682,7 +674,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		se->deadline -= se->vruntime;
  		se->rel_deadline = 1;
  	}
-@@ -5556,12 +5573,13 @@ pick_next_entity(struct rq *rq, struct c
+@@ -5588,12 +5604,13 @@ pick_next_entity(struct rq *rq, struct c
  	/*
  	 * Picking the ->next buddy will affect latency but not fairness.
  	 */
@@ -691,16 +683,16 @@ index d82501c1350da..c3fd3ad4a5d85 100644
 +#if SCHED_FEAT_PICK_BUDDY
 +	if (cfs_rq->next && entity_eligible(cfs_rq, cfs_rq->next)) {
  		/* ->next will never be delayed */
- 		SCHED_WARN_ON(cfs_rq->next->sched_delayed);
+ 		WARN_ON_ONCE(cfs_rq->next->sched_delayed);
  		return cfs_rq->next;
  	}
 +#endif
  
  	se = pick_eevdf(cfs_rq);
  	if (se->sched_delayed) {
-@@ -6870,19 +6888,19 @@ requeue_delayed_entity(struct sched_enti
- 	SCHED_WARN_ON(!se->sched_delayed);
- 	SCHED_WARN_ON(!se->on_rq);
+@@ -6902,19 +6919,19 @@ requeue_delayed_entity(struct sched_enti
+ 	WARN_ON_ONCE(!se->sched_delayed);
+ 	WARN_ON_ONCE(!se->on_rq);
  
 -	if (sched_feat(DELAY_ZERO)) {
 -		update_entity_lag(cfs_rq, se);
@@ -730,7 +722,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	update_load_avg(cfs_rq, se, 0);
  	clear_delayed(se);
-@@ -7354,14 +7372,18 @@ wake_affine_weight(struct sched_domain *
+@@ -7390,14 +7407,18 @@ wake_affine_weight(struct sched_domain *
  	task_load = task_h_load(p);
  
  	this_eff_load += task_load;
@@ -753,7 +745,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	prev_eff_load *= capacity_of(this_cpu);
  
  	/*
-@@ -7381,11 +7403,14 @@ static int wake_affine(struct sched_doma
+@@ -7417,11 +7438,14 @@ static int wake_affine(struct sched_doma
  {
  	int target = nr_cpumask_bits;
  
@@ -771,7 +763,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	schedstat_inc(p->stats.nr_wakeups_affine_attempts);
  	if (target != this_cpu)
-@@ -7666,16 +7691,16 @@ static int select_idle_cpu(struct task_s
+@@ -7702,16 +7726,16 @@ static int select_idle_cpu(struct task_s
  
  	cpumask_and(cpus, sched_domain_span(sd), p->cpus_ptr);
  
@@ -797,7 +789,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (static_branch_unlikely(&sched_cluster_active)) {
  		struct sched_group *sg = sd->groups;
-@@ -7987,44 +8012,44 @@ cpu_util(int cpu, struct task_struct *p,
+@@ -8023,44 +8047,44 @@ cpu_util(int cpu, struct task_struct *p,
  	else if (p && task_cpu(p) != cpu && dst_cpu == cpu)
  		util += task_util(p);
  
@@ -877,7 +869,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	return min(util, arch_scale_cpu_capacity(cpu));
  }
-@@ -8736,9 +8761,11 @@ static void check_preempt_wakeup_fair(st
+@@ -8772,9 +8796,11 @@ static void check_preempt_wakeup_fair(st
  	if (unlikely(throttled_hierarchy(cfs_rq_of(pse))))
  		return;
  
@@ -890,7 +882,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	/*
  	 * We can come here with TIF_NEED_RESCHED already set from new task
-@@ -8753,8 +8780,9 @@ static void check_preempt_wakeup_fair(st
+@@ -8789,8 +8815,9 @@ static void check_preempt_wakeup_fair(st
  	if (test_tsk_need_resched(rq->curr))
  		return;
  
@@ -901,7 +893,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	find_matching_se(&se, &pse);
  	WARN_ON_ONCE(!pse);
-@@ -9232,9 +9260,10 @@ static int task_hot(struct task_struct *
+@@ -9275,9 +9302,10 @@ static int task_hot(struct task_struct *
  	/*
  	 * Buddy candidates are cache hot:
  	 */
@@ -914,7 +906,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  	if (sysctl_sched_migration_cost == -1)
  		return 1;
-@@ -9331,7 +9360,7 @@ static inline int task_is_ineligible_on_
+@@ -9374,7 +9402,7 @@ static inline int task_is_ineligible_on_
  #else
  	dst_cfs_rq = &cpu_rq(dest_cpu)->cfs;
  #endif
@@ -923,7 +915,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  	    !entity_eligible(task_cfs_rq(p), &p->se))
  		return 1;
  
-@@ -9556,9 +9585,10 @@ static int detach_tasks(struct lb_env *e
+@@ -9598,9 +9626,10 @@ static int detach_tasks(struct lb_env *e
  			 */
  			load = max_t(unsigned long, task_h_load(p), 1);
  
@@ -936,7 +928,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  
  			/*
  			 * Make sure that we don't migrate too much load.
-@@ -10924,7 +10954,9 @@ static void update_idle_cpu_scan(struct
+@@ -10966,7 +10995,9 @@ static void update_idle_cpu_scan(struct
  	 * balancing, rather than CPU_NEWLY_IDLE, because the latter
  	 * can fire way more frequently than the former.
  	 */
@@ -947,7 +939,7 @@ index d82501c1350da..c3fd3ad4a5d85 100644
  		return;
  
  	llc_weight = per_cpu(sd_llc_size, env->dst_cpu);
-@@ -13171,7 +13203,10 @@ static void attach_entity_cfs_rq(struct
+@@ -13213,7 +13244,10 @@ static void attach_entity_cfs_rq(struct
  	struct cfs_rq *cfs_rq = cfs_rq_of(se);
  
  	/* Synchronize entity with its cfs_rq */
@@ -1012,13 +1004,14 @@ index d82501c1350da..c3fd3ad4a5d85 100644
 
 --- a/kernel/sched/sched.h	2024-07-04 09:50:09.737296120 -0500
 +++ b/kernel/sched/sched.h	2024-07-04 09:49:49.386196305 -0500
-@@ -1558,7 +1558,7 @@ static inline void assert_clock_updated(
+@@ -1644,7 +1644,7 @@ static inline void assert_clock_updated(
  	 * The only reason for not seeing a clock update since the
  	 * last rq_pin_lock() is if we're currently skipping updates.
  	 */
--	SCHED_WARN_ON(rq->clock_update_flags < RQCF_ACT_SKIP);
-+	// SCHED_WARN_ON(rq->clock_update_flags < RQCF_ACT_SKIP);
+-	WARN_ON_ONCE(rq->clock_update_flags < RQCF_ACT_SKIP);
++	// WARN_ON_ONCE(rq->clock_update_flags < RQCF_ACT_SKIP);
  }
  
  static inline u64 rq_clock(struct rq *rq)
+
 

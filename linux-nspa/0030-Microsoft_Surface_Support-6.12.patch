@@ -7446,14 +7446,6 @@ index e936019d21fe..08fee06fb5fc 100644
  
  	ret = sysfs_create_group(&hdev->dev.kobj, &mt_attribute_group);
  	if (ret)
-@@ -1873,6 +1963,7 @@ static void mt_remove(struct hid_device *hdev)
- {
- 	struct mt_device *td = hid_get_drvdata(hdev);
- 
-+	unregister_pm_notifier(&td->pm_notifier);
- 	del_timer_sync(&td->release_timer);
- 
- 	sysfs_remove_group(&hdev->dev.kobj, &mt_attribute_group);
 @@ -2299,6 +2390,11 @@ static const struct hid_device_id mt_devices[] = {
  		MT_USB_DEVICE(USB_VENDOR_ID_XIROKU,
  			USB_DEVICE_ID_XIROKU_CSR2) },
@@ -7733,9 +7725,9 @@ index 08fee06fb5fc..f6664049f46d 100644
  	/* Some Elan legacy devices require SET_IDLE to be set on resume.
  	 * It should be safe to send it to other devices too.
  	 * Tested on 3M, Stantum, Cypress, Zytronic, eGalax, and Elan panels. */
-@@ -1956,12 +2033,31 @@ static int mt_resume(struct hid_device *hdev)
+@@ -1874,13 +2041,33 @@ static int mt_resume(struct hid_device *
  
- 	mt_set_modes(hdev, HID_LATENCY_NORMAL, true, true);
+ 	mt_set_modes(hdev, HID_LATENCY_NORMAL, TOUCHPAD_REPORT_ALL);
  
 +	/* Request an update on the typecover folding state on resume. */
 +	if (td->mtclass.quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH)
@@ -7749,7 +7741,7 @@ index 08fee06fb5fc..f6664049f46d 100644
  	struct mt_device *td = hid_get_drvdata(hdev);
 +	struct hid_field *field;
 +	struct input_dev *input;
-+
+ 
 +	/* Reset tablet mode switch on disconnect. */
 +	if (td->mtclass.quirks & MT_QUIRK_HAS_TYPE_COVER_TABLET_MODE_SWITCH) {
 +		if (get_type_cover_field(&hdev->report_enum[HID_INPUT_REPORT],
@@ -7762,9 +7754,11 @@ index 08fee06fb5fc..f6664049f46d 100644
 +			hid_err(hdev, "couldn't find tablet mode field\n");
 +		}
 +	}
++
++	unregister_pm_notifier(&td->pm_notifier);
+ 	timer_delete_sync(&td->release_timer);
  
- 	unregister_pm_notifier(&td->pm_notifier);
- 	del_timer_sync(&td->release_timer);
+ 	sysfs_remove_group(&hdev->dev.kobj, &mt_attribute_group);
 -- 
 2.47.1
 
@@ -7854,14 +7848,14 @@ diff --git a/include/linux/pci.h b/include/linux/pci.h
 index 4e77c4230c0a..a4b0e6ef6cfe 100644
 --- a/include/linux/pci.h
 +++ b/include/linux/pci.h
-@@ -467,6 +467,7 @@ struct pci_dev {
+@@ -477,6 +477,7 @@ struct pci_dev {
  	unsigned int	no_command_memory:1;	/* No PCI_COMMAND_MEMORY */
  	unsigned int	rom_bar_overlap:1;	/* ROM BAR disable broken */
  	unsigned int	rom_attr_enabled:1;	/* Display of ROM attribute enabled? */
 +	unsigned int	no_shutdown:1;		/* Do not touch device on shutdown */
+ 	unsigned int	non_mappable_bars:1;	/* BARs can't be mapped to user-space  */
  	pci_dev_flags_t dev_flags;
  	atomic_t	enable_cnt;	/* pci_enable_device has been called */
- 
 -- 
 2.47.1
 
@@ -8136,62 +8130,6 @@ index 1e107fd49f82..e3e1696e7f0e 100644
  	dev_info(dev, "TPS68470 REVID: 0x%02x\n", version);
  
  	return 0;
--- 
-2.47.1
-
-From 46806f2df854794beb466026561dc6446ec77632 Mon Sep 17 00:00:00 2001
-From: Daniel Scally <dan.scally@ideasonboard.com>
-Date: Thu, 2 Mar 2023 12:59:39 +0000
-Subject: [PATCH] platform/x86: int3472: Remap reset GPIO for INT347E
-
-ACPI _HID INT347E represents the OmniVision 7251 camera sensor. The
-driver for this sensor expects a single pin named "enable", but on
-some Microsoft Surface platforms the sensor is assigned a single
-GPIO who's type flag is INT3472_GPIO_TYPE_RESET.
-
-Remap the GPIO pin's function from "reset" to "enable". This is done
-outside of the existing remap table since it is a more widespread
-discrepancy than that method is designed for. Additionally swap the
-polarity of the pin to match the driver's expectation.
-
-Signed-off-by: Daniel Scally <dan.scally@ideasonboard.com>
-Patchset: cameras
----
- drivers/platform/x86/intel/int3472/discrete.c | 15 +++++++++++++++
- 1 file changed, 15 insertions(+)
-
-diff --git a/drivers/platform/x86/intel/int3472/discrete.c b/drivers/platform/x86/intel/int3472/discrete.c
-index 3de463c3d13b..0a012eeed30a 100644
---- a/drivers/platform/x86/intel/int3472/discrete.c
-+++ b/drivers/platform/x86/intel/int3472/discrete.c
-@@ -80,12 +80,27 @@ static int skl_int3472_map_gpio_to_sensor(struct int3472_discrete_device *int347
- 					  const char *func, u32 polarity)
- {
- 	int ret;
-+	const struct acpi_device_id ov7251_ids[] = {
-+		{ "INT347E" },
-+		{ }
-+	};
- 
- 	if (int3472->n_sensor_gpios >= INT3472_MAX_SENSOR_GPIOS) {
- 		dev_warn(int3472->dev, "Too many GPIOs mapped\n");
- 		return -EINVAL;
- 	}
- 
-+	/*
-+	 * In addition to the function remap table we need to bulk remap the
-+	 * "reset" GPIO for the OmniVision 7251 sensor, as the driver for that
-+	 * expects its only GPIO pin to be called "enable" (and to have the
-+	 * opposite polarity).
-+	 */
-+	if (!strcmp(func, "reset") && !acpi_match_device_ids(int3472->sensor, ov7251_ids)) {
-+		func = "enable";
-+		gpio_flags ^= GPIO_ACTIVE_LOW;
-+	}
-+
- 	ret = skl_int3472_fill_gpiod_lookup(&int3472->gpios.table[int3472->n_sensor_gpios],
- 					    agpio, func, polarity);
- 	if (ret)
 -- 
 2.47.1
 

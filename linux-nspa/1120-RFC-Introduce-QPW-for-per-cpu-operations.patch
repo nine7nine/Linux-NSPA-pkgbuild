@@ -429,7 +429,7 @@ index 71fe2a95b8bd..18a987f8c998 100644
  #include "internal.h"
  #include <net/sock.h>
  #include <net/ip.h>
-@@ -1732,7 +1733,7 @@ struct memcg_stock_pcp {
+@@ -1769,7 +1770,7 @@ struct memcg_stock_pcp {
  	int nr_slab_reclaimable_b;
  	int nr_slab_unreclaimable_b;
  
@@ -438,7 +438,7 @@ index 71fe2a95b8bd..18a987f8c998 100644
  	unsigned long flags;
  #define FLUSHING_CACHED_CHARGE	0
  };
-@@ -1803,25 +1804,26 @@ static void drain_stock(struct memcg_sto
+@@ -1846,25 +1847,26 @@ static void drain_stock(struct memcg_sto
  	WRITE_ONCE(stock->cached, NULL);
  }
  
@@ -455,7 +455,7 @@ index 71fe2a95b8bd..18a987f8c998 100644
  	 * drain_stock races is that we always operate on local CPU stock
  	 * here with IRQ disabled
  	 */
--	local_lock_irqsave(&memcg_stock.stock_lock, flags);
+-	localtry_lock_irqsave(&memcg_stock.stock_lock, flags);
 +	qpw_lock_irqsave(&memcg_stock.stock_lock, flags, cpu);
  
 -	stock = this_cpu_ptr(&memcg_stock);
@@ -464,12 +464,12 @@ index 71fe2a95b8bd..18a987f8c998 100644
  	drain_stock(stock);
  	clear_bit(FLUSHING_CACHED_CHARGE, &stock->flags);
  
--	local_unlock_irqrestore(&memcg_stock.stock_lock, flags);
+-	localtry_unlock_irqrestore(&memcg_stock.stock_lock, flags);
 +	qpw_unlock_irqrestore(&memcg_stock.stock_lock, flags, cpu);
  	obj_cgroup_put(old);
  }
  
-@@ -1892,9 +1894,9 @@ void drain_all_stock(struct mem_cgroup *
+@@ -1946,9 +1948,9 @@ void drain_all_stock(struct mem_cgroup *
  		if (flush &&
  		    !test_and_set_bit(FLUSHING_CACHED_CHARGE, &stock->flags)) {
  			if (cpu == curcpu)
@@ -481,7 +481,7 @@ index 71fe2a95b8bd..18a987f8c998 100644
  		}
  	}
  	migrate_enable();
-@@ -4936,8 +4938,8 @@ static int __init mem_cgroup_init(void)
+@@ -4999,8 +5001,8 @@ static int __init mem_cgroup_init(void)
  				  memcg_hotplug_cpu_dead);
  
  	for_each_possible_cpu(cpu)
