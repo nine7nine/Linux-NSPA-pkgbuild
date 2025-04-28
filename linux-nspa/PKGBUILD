@@ -91,17 +91,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.15-rc3
+_srcname=linux-6.15-rc4
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=3
+pkgrel=4
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.15-rc3.tar.gz"
+  "https://git.kernel.org/torvalds/t/linux-6.15-rc4.tar.gz"
   "0000-patch-6.15-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -491,9 +491,9 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('36da24c77bff72ec8b5df304ca92fb196cb93bc2a2030c07d2124905a35b2da2'
+sha256sums=('43342fdf4ede45cb2a95bb25b6b02b370988f07c59c72347321c6cff9d39d670'
             '8149dd3d1e3aeed3d2a21b8e5b1668f262a9c397719d5852468334697e0f4982'
-            '1103c905d79c4d049f06ad9910c2bfa8caf2ad27f9467886f71fb107cf16be1d'
+            '15e4c066d4e8fb4d9db5f7a552b923b42f85c7a6b31c9ef754da8e939f4c3866'
             '5be543c101bc83231fb1946142c6a6d659df204074b17ace649760b70ff6a301'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '0e1259ee5e8481a84dd11408421d82ad419e17e2f84b146578ceb83a7427422f'
