@@ -91,17 +91,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.15-rc4
+_srcname=linux-6.15-rc5
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=4
+pkgrel=5
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/torvalds/t/linux-6.15-rc4.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.15-rc5.tar.gz"
   "0000-patch-6.15-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -113,7 +113,6 @@ source=(
   "0007-Reduce-SCHED_RR-timeslice-100-ms-10-jiffy.patch"
   "0008-mm-increase_max_map_count.patch"
   "0009-mm-le9uo-add-sysctl-knobs-for-protecting-the-workin.patch"
-  "0010-iosched-6.14-introduce_ADIOS_IO_scheduler.patch"
   "0011-kt-smp-migrate_disable_in_smp_call_function_single_async.patch"
   "0012-kt-rtmutex-no-rcu-lock-while-spinning.patch"
   "0022-kt-vm-mm_optimizations.patch"
@@ -137,6 +136,7 @@ source=(
   "1120-RFC-Introduce-QPW-for-per-cpu-operations.patch"
   "1122-dma-buf-sync_file-Speed_up_ioctl_by_omitting_debug_names.patch"
   "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
+  "1131-pmdomain_rt_hacks.patch"
   "9999-sched_feat-compile-time.patch"
   "1130-sched-Introduce-Cache-aware-scheduling.patch"
 )
@@ -491,7 +491,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('43342fdf4ede45cb2a95bb25b6b02b370988f07c59c72347321c6cff9d39d670'
+sha256sums=('de1c5ab237e0a2258061bccd640f1357b9dd25cfc2472ccc935812163ba3d59a'
             '8149dd3d1e3aeed3d2a21b8e5b1668f262a9c397719d5852468334697e0f4982'
             '15e4c066d4e8fb4d9db5f7a552b923b42f85c7a6b31c9ef754da8e939f4c3866'
             '5be543c101bc83231fb1946142c6a6d659df204074b17ace649760b70ff6a301'
@@ -503,7 +503,6 @@ sha256sums=('43342fdf4ede45cb2a95bb25b6b02b370988f07c59c72347321c6cff9d39d670'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
             'f9002afa9abad89fc4ccf19c1d780145439c6d6afce02fddda8b0130fd9691e1'
-            '95c733b1b4e8d2a8b2b3fc4fb6669a3800d4756944dc231026514f3a422c7adf'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
             '5bddf0faf1194b7c759683290b1af786c79e0dcd79037e95b956772ef3ff5542'
@@ -527,5 +526,6 @@ sha256sums=('43342fdf4ede45cb2a95bb25b6b02b370988f07c59c72347321c6cff9d39d670'
             '153060a602abfb32773533301cd06a1b43d43e782a0bb98c14019043ba9f767e'
             '3059893c86b3eee288edb6c7d958d84e92c67a7d8e55ad48a9470a2100b0a22e'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
+            '208f528aa4039971d6b64b6a6e712f29dee5ec89ec2f680f4f9a637d598c01d3'
             '5c8e2ec59f1e42f1dcc6d5527fcee741aef9e4832735facb96fc8d7fe2ea08b6'
             '484acccde28b0c52c566d5dcc85c5fadb0aa1581e53e48cdd3018ccf125acf7a')
