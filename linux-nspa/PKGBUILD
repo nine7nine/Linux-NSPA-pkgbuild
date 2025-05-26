@@ -82,7 +82,7 @@ _no_RT_throttle=y
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.15
+_major=6.15.0
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -91,17 +91,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.15-rc7
+_srcname=linux-6.15
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=7
+pkgrel=8
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.15-rc7.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.15.tar.gz"
   "0000-patch-6.15-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -491,10 +491,10 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('09696d62fb75955ad30ca2c25d5ee23c622144ed6a0ecf705aca526cf00f0157'
+sha256sums=('8292cf5d7f01faedeb4df761d554ab353e79339fca04e43aed48c9d3c685c7a5'
             '8149dd3d1e3aeed3d2a21b8e5b1668f262a9c397719d5852468334697e0f4982'
-            '15e4c066d4e8fb4d9db5f7a552b923b42f85c7a6b31c9ef754da8e939f4c3866'
-            '5be543c101bc83231fb1946142c6a6d659df204074b17ace649760b70ff6a301'
+            'bc5267b9b5b446c3bb9cf900dccb311c5c3e83e9832cf3d86a956fa458dcaee2'
+            '43714b89f219b08c9411bbb85e5bf771b4d78aa9d410c9947a1564e238aa7f83'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '0e1259ee5e8481a84dd11408421d82ad419e17e2f84b146578ceb83a7427422f'
             'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
