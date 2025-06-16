@@ -72,8 +72,8 @@ _tickrate=full
 # !!! WARNING: Do NOT enable this: may have your system !!!
 _vmx_hack=y
 
-# Disable RT Throttling (!!! DANGER ZONE !!!)
-# Don't enable unless you know what you are doing.
+# Disable RT Throttling. This can be risky; RT task could lock up system.
+# However, a properly setup system (kernel/userspace) should avoid this.
 _no_RT_throttle=y
 
 # Enable converting sched_feat() into compile-time implementation
@@ -82,7 +82,7 @@ _no_RT_throttle=y
 _sched_feat_comp=y
 
  pkgbase=linux-nspa
-_major=6.15.0
+_major=6.16.0
 _minor=0
 #_minorc=$((_minor+1))
 #_rcver=rc8
@@ -91,22 +91,21 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.15
+_srcname=linux-6.16-rc2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=8
+pkgrel=2
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.15.tar.gz"
-  "0000-patch-6.15-rc1-rt1.patch"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.16-rc2.tar.gz"
+  "0000-patch-6.16-rc1-rt1.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
-  "0000-Add_the_CONFIG_X86_NATIVE_CPU_option.patch"
   "0001-ClearLinux-patchwork.patch"
   "0002-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
   "0006-background_reclaim_of_hugepages.patch"
@@ -118,7 +117,7 @@ source=(
   "0022-kt-vm-mm_optimizations.patch"
   "0019-hid-wacom-Silence_log_spam.patch"
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
-  "0030-Microsoft_Surface_Support-6.12.patch"
+  "0030-Microsoft_Surface_Support-6.14.patch"
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
@@ -128,12 +127,10 @@ source=(
   "1102-misc-Avoid_Dynamic_Mem_Allocations.patch"
   "1103-drm-Convert_CPU-invariant_uninterruptible_waits_to_TASK_IDLE.patch"
   "1104-Workqueue-Fix_divide_error-in-wq_update_node_max_active.patch"
-  "1108-Add_sysctl_and_CONFIG_to_disallow_unprivileged.patch"
   "1110-add-acs-overrides_iommu.patch"
   "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
   "1116-kt-pm-suspend_patches.patch"
   "1119-mm-compaction-Skip_all_non-migratable_pages_during_scan.patch"
-  "1120-RFC-Introduce-QPW-for-per-cpu-operations.patch"
   "1122-dma-buf-sync_file-Speed_up_ioctl_by_omitting_debug_names.patch"
   "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
   "1131-pmdomain_rt_hacks.patch"
@@ -491,13 +488,12 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('8292cf5d7f01faedeb4df761d554ab353e79339fca04e43aed48c9d3c685c7a5'
-            '8149dd3d1e3aeed3d2a21b8e5b1668f262a9c397719d5852468334697e0f4982'
-            'bc5267b9b5b446c3bb9cf900dccb311c5c3e83e9832cf3d86a956fa458dcaee2'
-            '43714b89f219b08c9411bbb85e5bf771b4d78aa9d410c9947a1564e238aa7f83'
+sha256sums=('5e2362513cd908d1b07556c92846dd0647694beda62d687266073b049947fb71'
+            'd97fbe6ae21d397250cbe64b54cfa5db939300a0b153f6e6857c785ba1b3eec1'
+            '0d88a1316db91ab731c24e9ffaeec0dbb9be308ab571b5bea71dfffdd90bffbc'
+            '2aae716f9dd6bdc8228b77cfd23e9b77ce8da67468ff71cf3cbe47c583925c76'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
-            '0e1259ee5e8481a84dd11408421d82ad419e17e2f84b146578ceb83a7427422f'
-            'eff62970ee3636da157ad868d63f33b891df5114ce25e12319e7b28bf8fc2a29'
+            '19007cf46fbd578d0a2c0a2940cdbca92d31d3ca31b72ddcac0cfe6690e9bf90'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
@@ -505,10 +501,10 @@ sha256sums=('8292cf5d7f01faedeb4df761d554ab353e79339fca04e43aed48c9d3c685c7a5'
             'f9002afa9abad89fc4ccf19c1d780145439c6d6afce02fddda8b0130fd9691e1'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
-            '5bddf0faf1194b7c759683290b1af786c79e0dcd79037e95b956772ef3ff5542'
+            'bc95118f9a6840fa6aabb3a475b9659088a47d1ed1eb4e7880b03eaec7d68aa5'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '17ff4ea2bf922badba9a6e2451d930d303ae9f55733900194f4e345c7d178b9a'
-            '3f4165bf93ef02dcf35b704fb5483fd5460156150a831f762f1454911aee16a6'
+            'a7171f2bad5fb36288ce91abaea4438b176fbf25ad911f93b51373eaaef7ed65'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
@@ -518,12 +514,10 @@ sha256sums=('8292cf5d7f01faedeb4df761d554ab353e79339fca04e43aed48c9d3c685c7a5'
             'db5b0d3d82736e8acd9289e7728af3845244c32ff7a8d2e4151e1efbe89f0c09'
             '79c6dcbf04c30c7edd21beaab80090fb7d00feddc5396e713617463879c65a8e'
             'a7776f80359426e1add5c3d2895953e7fd970aedb162e639b2df16d7a70fcb23'
-            '8d4570520b9e7259c788e60e8e6d7c58c58bb5c5a99e46f03d13a23515491a18'
             'f3e6c8c98ea5172f424971bc20f128c7f1f6416af6944f58dad1048ba4dff168'
             'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
             '005cd66bbec398917e56c0f3f06eebaba9d7fc351c12b215e4e1acf13355e56d'
-            'cbcbd40d54e47b97bf44c305b2903f655c7afbf914a0d6c55fcf57ecf1c63713'
-            '153060a602abfb32773533301cd06a1b43d43e782a0bb98c14019043ba9f767e'
+            'e6ff1293531eefbec669a8fa5258545acf3d95cd6d19919f233e369cf8e289e8'
             '3059893c86b3eee288edb6c7d958d84e92c67a7d8e55ad48a9470a2100b0a22e'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
             '208f528aa4039971d6b64b6a6e712f29dee5ec89ec2f680f4f9a637d598c01d3'

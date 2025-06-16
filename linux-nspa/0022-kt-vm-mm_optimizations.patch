@@ -106,11 +106,11 @@ diff --git a/include/linux/pageblock-flags.h b/include/linux/pageblock-flags.h
 index 973fd731a5206..4fd8f258972a9 100644
 --- a/include/linux/pageblock-flags.h
 +++ b/include/linux/pageblock-flags.h
-@@ -48,7 +48,7 @@ extern unsigned int pageblock_order;
- #else /* CONFIG_HUGETLB_PAGE */
+@@ -52,7 +52,7 @@ extern unsigned int pageblock_order;
+ #else /* CONFIG_TRANSPARENT_HUGEPAGE */
  
- /* If huge pages are not used, group by MAX_ORDER_NR_PAGES */
--#define pageblock_order		MAX_PAGE_ORDER
+ /* If huge pages are not used, group by PAGE_BLOCK_ORDER */
+-#define pageblock_order		PAGE_BLOCK_ORDER
 +#define pageblock_order		PAGE_ALLOC_COSTLY_ORDER
  
  #endif /* CONFIG_HUGETLB_PAGE */

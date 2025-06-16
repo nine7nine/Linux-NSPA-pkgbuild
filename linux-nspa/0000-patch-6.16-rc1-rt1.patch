@@ -1,5 +1,5 @@
 diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
-index 25ed6f1a7c7ae..89466636d460c 100644
+index 3072731fe09c5..d5c6f1507772b 100644
 --- a/arch/arm/Kconfig
 +++ b/arch/arm/Kconfig
 @@ -43,6 +43,7 @@ config ARM
@@ -60,76 +60,8 @@ index ab01b51de5590..cd030e2734e5d 100644
  	do_bad_area(addr, fsr, regs);
  	return 0;
  }
-diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
-index a182295e6f08b..84e3094b00ef2 100644
---- a/arch/arm64/Kconfig
-+++ b/arch/arm64/Kconfig
-@@ -42,6 +42,7 @@ config ARM64
- 	select ARCH_HAS_NMI_SAFE_THIS_CPU_OPS
- 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
- 	select ARCH_HAS_NONLEAF_PMD_YOUNG if ARM64_HAFT
-+	select ARCH_HAS_PREEMPT_LAZY
- 	select ARCH_HAS_PTDUMP
- 	select ARCH_HAS_PTE_DEVMAP
- 	select ARCH_HAS_PTE_SPECIAL
-diff --git a/arch/arm64/include/asm/thread_info.h b/arch/arm64/include/asm/thread_info.h
-index 1114c1c3300a1..4443ef2789758 100644
---- a/arch/arm64/include/asm/thread_info.h
-+++ b/arch/arm64/include/asm/thread_info.h
-@@ -59,11 +59,12 @@ void arch_setup_new_exec(void);
- 
- #define TIF_SIGPENDING		0	/* signal pending */
- #define TIF_NEED_RESCHED	1	/* rescheduling necessary */
--#define TIF_NOTIFY_RESUME	2	/* callback before returning to user */
--#define TIF_FOREIGN_FPSTATE	3	/* CPU's FP state is not current's */
--#define TIF_UPROBE		4	/* uprobe breakpoint or singlestep */
--#define TIF_MTE_ASYNC_FAULT	5	/* MTE Asynchronous Tag Check Fault */
--#define TIF_NOTIFY_SIGNAL	6	/* signal notifications exist */
-+#define TIF_NEED_RESCHED_LAZY	2	/* Lazy rescheduling needed */
-+#define TIF_NOTIFY_RESUME	3	/* callback before returning to user */
-+#define TIF_FOREIGN_FPSTATE	4	/* CPU's FP state is not current's */
-+#define TIF_UPROBE		5	/* uprobe breakpoint or singlestep */
-+#define TIF_MTE_ASYNC_FAULT	6	/* MTE Asynchronous Tag Check Fault */
-+#define TIF_NOTIFY_SIGNAL	7	/* signal notifications exist */
- #define TIF_SYSCALL_TRACE	8	/* syscall trace active */
- #define TIF_SYSCALL_AUDIT	9	/* syscall auditing */
- #define TIF_SYSCALL_TRACEPOINT	10	/* syscall tracepoint for ftrace */
-@@ -85,6 +86,7 @@ void arch_setup_new_exec(void);
- 
- #define _TIF_SIGPENDING		(1 << TIF_SIGPENDING)
- #define _TIF_NEED_RESCHED	(1 << TIF_NEED_RESCHED)
-+#define _TIF_NEED_RESCHED_LAZY	(1 << TIF_NEED_RESCHED_LAZY)
- #define _TIF_NOTIFY_RESUME	(1 << TIF_NOTIFY_RESUME)
- #define _TIF_FOREIGN_FPSTATE	(1 << TIF_FOREIGN_FPSTATE)
- #define _TIF_SYSCALL_TRACE	(1 << TIF_SYSCALL_TRACE)
-@@ -100,10 +102,10 @@ void arch_setup_new_exec(void);
- #define _TIF_NOTIFY_SIGNAL	(1 << TIF_NOTIFY_SIGNAL)
- #define _TIF_TSC_SIGSEGV	(1 << TIF_TSC_SIGSEGV)
- 
--#define _TIF_WORK_MASK		(_TIF_NEED_RESCHED | _TIF_SIGPENDING | \
-+#define _TIF_WORK_MASK		(_TIF_NEED_RESCHED | _TIF_NEED_RESCHED_LAZY | \
- 				 _TIF_NOTIFY_RESUME | _TIF_FOREIGN_FPSTATE | \
- 				 _TIF_UPROBE | _TIF_MTE_ASYNC_FAULT | \
--				 _TIF_NOTIFY_SIGNAL)
-+				 _TIF_NOTIFY_SIGNAL | _TIF_SIGPENDING)
- 
- #define _TIF_SYSCALL_WORK	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | \
- 				 _TIF_SYSCALL_TRACEPOINT | _TIF_SECCOMP | \
-diff --git a/arch/arm64/kernel/entry-common.c b/arch/arm64/kernel/entry-common.c
-index b260ddc4d3e9a..7993fab0cab4c 100644
---- a/arch/arm64/kernel/entry-common.c
-+++ b/arch/arm64/kernel/entry-common.c
-@@ -132,7 +132,7 @@ static void do_notify_resume(struct pt_regs *regs, unsigned long thread_flags)
- 	do {
- 		local_irq_enable();
- 
--		if (thread_flags & _TIF_NEED_RESCHED)
-+		if (thread_flags & (_TIF_NEED_RESCHED | _TIF_NEED_RESCHED_LAZY))
- 			schedule();
- 
- 		if (thread_flags & _TIF_UPROBE)
 diff --git a/arch/powerpc/Kconfig b/arch/powerpc/Kconfig
-index 6722625a406a0..5f1b8d31cbf50 100644
+index c3e0cc83f1205..ab52b5fa756ba 100644
 --- a/arch/powerpc/Kconfig
 +++ b/arch/powerpc/Kconfig
 @@ -173,6 +173,7 @@ config PPC
@@ -145,9 +77,9 @@ index 6722625a406a0..5f1b8d31cbf50 100644
  	select HAVE_PERF_REGS
  	select HAVE_PERF_USER_STACK_DUMP
 +	select HAVE_POSIX_CPU_TIMERS_TASK_WORK	if !KVM
+ 	select HAVE_PREEMPT_DYNAMIC_KEY
  	select HAVE_RETHOOK			if KPROBES
  	select HAVE_REGS_AND_STACK_ACCESS_API
- 	select HAVE_RELIABLE_STACKTRACE
 diff --git a/arch/powerpc/include/asm/stackprotector.h b/arch/powerpc/include/asm/stackprotector.h
 index 283c346478565..4727f40052ddd 100644
 --- a/arch/powerpc/include/asm/stackprotector.h
@@ -168,10 +100,10 @@ index 283c346478565..4727f40052ddd 100644
  #ifdef CONFIG_PPC64
  	get_paca()->canary = canary;
 diff --git a/arch/powerpc/kvm/Kconfig b/arch/powerpc/kvm/Kconfig
-index dbfdc126bf144..82dd033cf7968 100644
+index 2f2702c867f76..8e5a7bab208ab 100644
 --- a/arch/powerpc/kvm/Kconfig
 +++ b/arch/powerpc/kvm/Kconfig
-@@ -221,6 +221,7 @@ config KVM_E500MC
+@@ -234,6 +234,7 @@ config KVM_E500MC
  config KVM_MPIC
  	bool "KVM in-kernel MPIC emulation"
  	depends on KVM && PPC_E500
@@ -180,7 +112,7 @@ index dbfdc126bf144..82dd033cf7968 100644
  	select HAVE_KVM_IRQ_ROUTING
  	select HAVE_KVM_MSI
 diff --git a/arch/powerpc/platforms/pseries/Kconfig b/arch/powerpc/platforms/pseries/Kconfig
-index a934c2a262f66..2cab4f532966f 100644
+index fa3c2fff082a8..ea4f42cfe825e 100644
 --- a/arch/powerpc/platforms/pseries/Kconfig
 +++ b/arch/powerpc/platforms/pseries/Kconfig
 @@ -2,6 +2,7 @@
@@ -192,7 +124,7 @@ index a934c2a262f66..2cab4f532966f 100644
  	select MPIC
  	select OF_DYNAMIC
 diff --git a/arch/powerpc/platforms/pseries/iommu.c b/arch/powerpc/platforms/pseries/iommu.c
-index d6ebc19fb99c5..34657e0288e94 100644
+index eec333dd2e598..0b952ad638f9c 100644
 --- a/arch/powerpc/platforms/pseries/iommu.c
 +++ b/arch/powerpc/platforms/pseries/iommu.c
 @@ -26,6 +26,7 @@
@@ -299,10 +231,10 @@ index 5e939004b6463..40a9234e6e5dc 100644
  	select INTERVAL_TREE
  	# we need shmfs for the swappable backing store, and in particular
 diff --git a/drivers/gpu/drm/i915/display/intel_crtc.c b/drivers/gpu/drm/i915/display/intel_crtc.c
-index 5b2603ef2ff75..6e9145ff4a7c9 100644
+index 29cfc38f12e04..5cfe6ecf1c115 100644
 --- a/drivers/gpu/drm/i915/display/intel_crtc.c
 +++ b/drivers/gpu/drm/i915/display/intel_crtc.c
-@@ -560,7 +560,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
+@@ -559,7 +559,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
  	 */
  	intel_psr_wait_for_idle_locked(new_crtc_state);
  
@@ -312,7 +244,7 @@ index 5b2603ef2ff75..6e9145ff4a7c9 100644
  
  	crtc->debug.min_vbl = evade.min;
  	crtc->debug.max_vbl = evade.max;
-@@ -578,7 +579,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
+@@ -577,7 +578,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
  	return;
  
  irq_disable:
@@ -322,7 +254,7 @@ index 5b2603ef2ff75..6e9145ff4a7c9 100644
  }
  
  #if IS_ENABLED(CONFIG_DRM_I915_DEBUG_VBLANK_EVADE)
-@@ -724,7 +726,8 @@ void intel_pipe_update_end(struct intel_atomic_state *state,
+@@ -723,7 +725,8 @@ void intel_pipe_update_end(struct intel_atomic_state *state,
  	if (!state->base.legacy_cursor_update)
  		intel_vrr_send_push(NULL, new_crtc_state);
  
@@ -333,10 +265,10 @@ index 5b2603ef2ff75..6e9145ff4a7c9 100644
  	if (intel_vgpu_active(dev_priv))
  		goto out;
 diff --git a/drivers/gpu/drm/i915/display/intel_cursor.c b/drivers/gpu/drm/i915/display/intel_cursor.c
-index 3276a5b4a9b00..48bf07df28e5a 100644
+index 2fec5ba58373a..d3cfc20f866f5 100644
 --- a/drivers/gpu/drm/i915/display/intel_cursor.c
 +++ b/drivers/gpu/drm/i915/display/intel_cursor.c
-@@ -929,13 +929,15 @@ intel_legacy_cursor_update(struct drm_plane *_plane,
+@@ -930,13 +930,15 @@ intel_legacy_cursor_update(struct drm_plane *_plane,
  		 */
  		intel_psr_wait_for_idle_locked(crtc_state);
  
@@ -354,7 +286,7 @@ index 3276a5b4a9b00..48bf07df28e5a 100644
  	}
  
  	if (new_plane_state->uapi.visible) {
-@@ -945,7 +947,8 @@ intel_legacy_cursor_update(struct drm_plane *_plane,
+@@ -946,7 +948,8 @@ intel_legacy_cursor_update(struct drm_plane *_plane,
  		intel_plane_disable_arm(NULL, plane, crtc_state);
  	}
  
@@ -380,10 +312,10 @@ index 27ebc32cb61a5..a519d94700c36 100644
  #include <linux/string_helpers.h>
  #include <linux/types.h>
 diff --git a/drivers/gpu/drm/i915/display/intel_vblank.c b/drivers/gpu/drm/i915/display/intel_vblank.c
-index 4efd4f7d497ab..ada64f78f6152 100644
+index 139fa5deba805..0c29ca3bb5e32 100644
 --- a/drivers/gpu/drm/i915/display/intel_vblank.c
 +++ b/drivers/gpu/drm/i915/display/intel_vblank.c
-@@ -309,6 +309,20 @@ static void intel_vblank_section_exit(struct intel_display *display)
+@@ -312,6 +312,20 @@ static void intel_vblank_section_exit(struct intel_display *display)
  	struct drm_i915_private *i915 = to_i915(display->drm);
  	spin_unlock(&i915->uncore.lock);
  }
@@ -404,7 +336,7 @@ index 4efd4f7d497ab..ada64f78f6152 100644
  #else
  static void intel_vblank_section_enter(struct intel_display *display)
  {
-@@ -317,6 +331,17 @@ static void intel_vblank_section_enter(struct intel_display *display)
+@@ -320,6 +334,17 @@ static void intel_vblank_section_enter(struct intel_display *display)
  static void intel_vblank_section_exit(struct intel_display *display)
  {
  }
@@ -422,7 +354,7 @@ index 4efd4f7d497ab..ada64f78f6152 100644
  #endif
  
  static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
-@@ -353,10 +378,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
+@@ -356,10 +381,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
  	 * timing critical raw register reads, potentially with
  	 * preemption disabled, so the following code must not block.
  	 */
@@ -436,7 +368,7 @@ index 4efd4f7d497ab..ada64f78f6152 100644
  
  	/* Get optional system timestamp before query. */
  	if (stime)
-@@ -420,10 +445,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
+@@ -423,10 +448,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
  	if (etime)
  		*etime = ktime_get();
  
@@ -450,7 +382,7 @@ index 4efd4f7d497ab..ada64f78f6152 100644
  
  	/*
  	 * While in vblank, position will be negative
-@@ -461,13 +486,11 @@ int intel_get_crtc_scanline(struct intel_crtc *crtc)
+@@ -464,13 +489,11 @@ int intel_get_crtc_scanline(struct intel_crtc *crtc)
  	unsigned long irqflags;
  	int position;
  
@@ -466,7 +398,7 @@ index 4efd4f7d497ab..ada64f78f6152 100644
  
  	return position;
  }
-@@ -727,11 +750,13 @@ int intel_vblank_evade(struct intel_vblank_evade_ctx *evade)
+@@ -730,11 +753,13 @@ int intel_vblank_evade(struct intel_vblank_evade_ctx *evade)
  			break;
  		}
  
@@ -594,10 +526,10 @@ index 7ed41ce9b7085..6b87ef6005c69 100644
  #include <linux/types.h>
  #include <linux/tracepoint.h>
 diff --git a/drivers/gpu/drm/i915/i915_utils.h b/drivers/gpu/drm/i915/i915_utils.h
-index 609214231ffcb..91b3e55c389eb 100644
+index f7fb40cfdb705..9cb40c2c4b124 100644
 --- a/drivers/gpu/drm/i915/i915_utils.h
 +++ b/drivers/gpu/drm/i915/i915_utils.h
-@@ -269,8 +269,13 @@ wait_remaining_ms_from_jiffies(unsigned long timestamp_jiffies, int to_wait_ms)
+@@ -267,8 +267,13 @@ wait_remaining_ms_from_jiffies(unsigned long timestamp_jiffies, int to_wait_ms)
  						   (Wmax))
  #define wait_for(COND, MS)		_wait_for((COND), (MS) * 1000, 10, 1000)
  
@@ -629,7 +561,7 @@ index f13ff71edf2db..3c67e267fb602 100644
  
  #include <linux/types.h>
 diff --git a/drivers/tty/serial/8250/8250_core.c b/drivers/tty/serial/8250/8250_core.c
-index 5a56f853cf6d8..1f4916e53cc32 100644
+index 7a6050f1c094b..d237f3e278b06 100644
 --- a/drivers/tty/serial/8250/8250_core.c
 +++ b/drivers/tty/serial/8250/8250_core.c
 @@ -388,12 +388,34 @@ void __init serial8250_register_ports(struct uart_driver *drv, struct device *de
@@ -689,10 +621,10 @@ index 5a56f853cf6d8..1f4916e53cc32 100644
  	.data		= &serial8250_reg,
  };
 diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_port.c
-index 8ac452cea36c6..22b3f7a193070 100644
+index 6d7b8c4667c9c..9537e44a4226f 100644
 --- a/drivers/tty/serial/8250/8250_port.c
 +++ b/drivers/tty/serial/8250/8250_port.c
-@@ -709,7 +709,12 @@ static void serial8250_set_sleep(struct uart_8250_port *p, int sleep)
+@@ -705,7 +705,12 @@ static void serial8250_set_sleep(struct uart_8250_port *p, int sleep)
  	serial8250_rpm_put(p);
  }
  
@@ -706,7 +638,7 @@ index 8ac452cea36c6..22b3f7a193070 100644
  {
  	if (up->capabilities & UART_CAP_UUE)
  		serial_out(up, UART_IER, UART_IER_UUE);
-@@ -717,6 +722,14 @@ static void serial8250_clear_IER(struct uart_8250_port *up)
+@@ -713,6 +718,14 @@ static void serial8250_clear_IER(struct uart_8250_port *up)
  		serial_out(up, UART_IER, 0);
  }
  
@@ -721,7 +653,7 @@ index 8ac452cea36c6..22b3f7a193070 100644
  #ifdef CONFIG_SERIAL_8250_RSA
  /*
   * Attempts to turn on the RSA FIFO.  Returns zero on failure.
-@@ -1404,9 +1417,6 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p, bool toggle_ier)
+@@ -1400,9 +1413,6 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p, bool toggle_ier)
  {
  	unsigned char mcr = serial8250_in_MCR(p);
  
@@ -731,7 +663,7 @@ index 8ac452cea36c6..22b3f7a193070 100644
  	if (p->port.rs485.flags & SER_RS485_RTS_AFTER_SEND)
  		mcr |= UART_MCR_RTS;
  	else
-@@ -1422,6 +1432,16 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p, bool toggle_ier)
+@@ -1418,6 +1428,16 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p, bool toggle_ier)
  		serial8250_clear_and_reinit_fifos(p);
  
  		if (toggle_ier) {
