@@ -94,7 +94,7 @@ _stable=${_major}.${_minor}
 _srcname=linux-6.16-rc2
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=2
+pkgrel=3
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
@@ -119,6 +119,10 @@ source=(
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
   "0030-Microsoft_Surface_Support-6.14.patch"
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
+  "0050-async-patches.patch"
+  "0051-drm-patches.patch"
+  "0052-block-patches.patch"
+  "0053-Kcompressd-Unofficial-v0.5.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
   "0999-cpu-Force-Enable-VMX-hack.patch"
@@ -135,7 +139,7 @@ source=(
   "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
   "1131-pmdomain_rt_hacks.patch"
   "9999-sched_feat-compile-time.patch"
-  "1130-sched-Introduce-Cache-aware-scheduling.patch"
+  "1130-sched-Introduce-Cache-aware-scheduling-V3.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -491,7 +495,7 @@ done
 sha256sums=('5e2362513cd908d1b07556c92846dd0647694beda62d687266073b049947fb71'
             'd97fbe6ae21d397250cbe64b54cfa5db939300a0b153f6e6857c785ba1b3eec1'
             '0d88a1316db91ab731c24e9ffaeec0dbb9be308ab571b5bea71dfffdd90bffbc'
-            '2aae716f9dd6bdc8228b77cfd23e9b77ce8da67468ff71cf3cbe47c583925c76'
+            'dc53eeaf110aa53fba257fdda26e219f2b3b9dc7bcdb3839276382853df75062'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '19007cf46fbd578d0a2c0a2940cdbca92d31d3ca31b72ddcac0cfe6690e9bf90'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
@@ -506,6 +510,10 @@ sha256sums=('5e2362513cd908d1b07556c92846dd0647694beda62d687266073b049947fb71'
             '17ff4ea2bf922badba9a6e2451d930d303ae9f55733900194f4e345c7d178b9a'
             'a7171f2bad5fb36288ce91abaea4438b176fbf25ad911f93b51373eaaef7ed65'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
+            '973ecc4b169496a56bcc65e559c40bccab9744234717d74a2d472c2730c4466e'
+            '7ace8f9481f30fa351f5197a809243f6f901b6bb30eb811c9eb29280acc30fca'
+            '60ead75282d3b56d611ca6b1461cbd55798025411d3ec57f24befaa43be8cef5'
+            '69e1d1ab89b1ce992cacac16c1a93136a4d4475f4fc893c5717f5f838dad3366'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
             '88620fb4c05734f0da4e2ea7098d40ff8bdafe2485ab449085da769550ae18b6'
@@ -522,4 +530,4 @@ sha256sums=('5e2362513cd908d1b07556c92846dd0647694beda62d687266073b049947fb71'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
             '208f528aa4039971d6b64b6a6e712f29dee5ec89ec2f680f4f9a637d598c01d3'
             '5c8e2ec59f1e42f1dcc6d5527fcee741aef9e4832735facb96fc8d7fe2ea08b6'
-            '484acccde28b0c52c566d5dcc85c5fadb0aa1581e53e48cdd3018ccf125acf7a')
+            'cc6bb84cef2c628bd13d7df3859824555a8e4c53abc5e1e7851930d215e625b1')
