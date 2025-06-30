@@ -93,17 +93,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.16-rc3
+_srcname=linux-6.16-rc4
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=5
+pkgrel=6
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.16-rc3.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.16-rc4.tar.gz"
   "0000-patch-6.16-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -141,7 +141,6 @@ source=(
   "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
   "1131-pmdomain_rt_hacks.patch"
   "9999-sched_feat-compile-time.patch"
-  "9999-iwlwifi-cmd_ver-range_checking.patch"
   "1130-sched-Introduce-Cache-aware-scheduling-V3.patch"
 )
 
@@ -170,9 +169,6 @@ prepare() {
     elif [[ $src == "9999-sched_feat-compile-time.patch" && $_sched_feat_comp == "y" ]]; then
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
-    elif [[ $src == "9999-iwlwifi-cmd_ver-range_checking.patch" && $_revert_iwlwifi_cmdver == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Rp1 < "../$src"
     elif [[ $src == *.patch ]]; then
       # Apply other patches if they are present
       echo "Applying patch $src..."
@@ -498,7 +494,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('95c47f76a60170be0febb0860d9050e432c3471c8b78a486f56ec18ce31e8c16'
+sha256sums=('8777435f56b90dacf873209c8c0009550602f51fb7a8fd61c2b9fd3d7eb48d3d'
             'd97fbe6ae21d397250cbe64b54cfa5db939300a0b153f6e6857c785ba1b3eec1'
             '0d88a1316db91ab731c24e9ffaeec0dbb9be308ab571b5bea71dfffdd90bffbc'
             '876e384b37d6aa39a5f30bc01b80ec8b7c28c856aa828e4db7a6afc6dec01c2a'
@@ -519,7 +515,7 @@ sha256sums=('95c47f76a60170be0febb0860d9050e432c3471c8b78a486f56ec18ce31e8c16'
             '973ecc4b169496a56bcc65e559c40bccab9744234717d74a2d472c2730c4466e'
             '7ace8f9481f30fa351f5197a809243f6f901b6bb30eb811c9eb29280acc30fca'
             '60ead75282d3b56d611ca6b1461cbd55798025411d3ec57f24befaa43be8cef5'
-            '69e1d1ab89b1ce992cacac16c1a93136a4d4475f4fc893c5717f5f838dad3366'
+            'a872485230d888d098820143eb10c83d92a4dce2a6f9096b2a4381a51dd4bafb'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
             '88620fb4c05734f0da4e2ea7098d40ff8bdafe2485ab449085da769550ae18b6'
@@ -536,5 +532,4 @@ sha256sums=('95c47f76a60170be0febb0860d9050e432c3471c8b78a486f56ec18ce31e8c16'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
             '208f528aa4039971d6b64b6a6e712f29dee5ec89ec2f680f4f9a637d598c01d3'
             '5c8e2ec59f1e42f1dcc6d5527fcee741aef9e4832735facb96fc8d7fe2ea08b6'
-            '4b06d1f159ded182e85413e1f54004438e91aa5c7eb3f83ef1c867a33e950c81'
             'cc6bb84cef2c628bd13d7df3859824555a8e4c53abc5e1e7851930d215e625b1')
