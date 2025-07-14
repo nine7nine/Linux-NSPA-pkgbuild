@@ -80,9 +80,6 @@ _no_RT_throttle=y
 # code. This only supports my config.
 _sched_feat_comp=y
 
-# iwlwifi on my Surface 7 is borked on Linux-6.16-rc3 ~ revert changes
-_revert_iwlwifi_cmdver=y
-
  pkgbase=linux-nspa
 _major=6.16.0
 _minor=0
@@ -93,17 +90,17 @@ _stable=${_major}.${_minor}
 #_stable=${_major}
 #_stablerc=${_major}-${_rcver}
 #_srcname=linux-${_stable}
-_srcname=linux-6.16-rc5
+_srcname=linux-6.16-rc6
 arch=(x86_64 x86_64_v3)
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=7
+pkgrel=8
 arch=('x86_64' 'x86_64_v3')
 url="https://github.com/nine7nine/Linux-NSPA"
 license=('GPL2')
 options=('!strip')
 makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
 source=(
-  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.16-rc5.tar.gz"
+  "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.16-rc6.tar.gz"
   "0000-patch-6.16-rc1-rt1.patch"
   "config"
   "config_surface7"
@@ -494,7 +491,7 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('e1319b7580c97826560a2e5f8306d6353e46df1d91c3d6c35b85edb3afe04b60'
+sha256sums=('99c5fd53a51377f3a7faf9a1aa1700465773562720d1fc9c4399caceac268f7a'
             'd97fbe6ae21d397250cbe64b54cfa5db939300a0b153f6e6857c785ba1b3eec1'
             '0d88a1316db91ab731c24e9ffaeec0dbb9be308ab571b5bea71dfffdd90bffbc'
             '876e384b37d6aa39a5f30bc01b80ec8b7c28c856aa828e4db7a6afc6dec01c2a'
