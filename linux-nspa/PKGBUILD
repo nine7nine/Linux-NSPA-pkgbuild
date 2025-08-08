@@ -45,9 +45,6 @@ _spf_enable=y
 # Enable Linux Random Number Generator
 _lrng_enable=
 
-# Apply Kernel automatic Optimization
-_use_auto_optimization=y
-
 # disable debug to lower the size of the kernel
 _disable_debug=
 
@@ -104,7 +101,6 @@ source=(
   "0000-patch-6.16-rc1-rt1.patch"
   "config"
   "config_surface7"
-  "auto-cpu-optimization.sh"
   "0001-ClearLinux-patchwork.patch"
   "0002-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
   "0006-background_reclaim_of_hugepages.patch"
@@ -157,15 +153,16 @@ prepare() {
     src="${src%%::*}"
     src="${src##*/}"
 
-    if [[ $src == "0999-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Np1 < "../$src"
-    elif [[ $src == "201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch" && $_no_RT_throttle == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Np1 < "../$src"
-    elif [[ $src == "9999-sched_feat-compile-time.patch" && $_sched_feat_comp == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Np1 < "../$src"
+    if [[ $src == "0999-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack != "y" ]]; then
+      echo "Skipping patch $src..."
+    elif [[ $src == "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch" && $_no_RT_throttle != "y" ]]; then
+      echo "Skipping patch $src..."
+    elif [[ $src == "0030-Microsoft_Surface_Support-6.14.patch" && $_config_Surface7 != "y" ]]; then
+      echo "Skipping patch $src..."
+    elif [[ $src == "1116-kt-pm-suspend_patches.patch" && $_config_Surface7 != "y" ]]; then
+      echo "Skipping patch $src..."
+    elif [[ $src == "9999-sched_feat-compile-time.patch" && $_sched_feat_comp != "y" ]]; then
+      echo "Skipping patch $src..."
     elif [[ $src == *.patch ]]; then
       # Apply other patches if they are present
       echo "Applying patch $src..."
@@ -180,10 +177,6 @@ prepare() {
   else
       cp ../config .config
   fi
-
-    if [ -n "$_use_auto_optimization" ]; then
-        "${srcdir}"/auto-cpu-optimization.sh
-    fi
 
     if [ -n "$_NUMAdisable" ]; then
         echo "Disabling NUMA from kernel config..."
@@ -349,7 +342,7 @@ prepare() {
     if [ -n "$_localmodcfg" ]; then
         if [ -e $HOME/.config/modprobed.db ]; then
             echo "Running Steven Rostedt's make localmodconfig now"
-            make ${BUILD_FLAGS[*]} LSMOD=$HOME/.config/modprobed.db localmodconfig
+            yes "" | make ${BUILD_FLAGS[*]} LSMOD=$HOME/.config/modprobed.db localmodconfig
         else
             echo "No modprobed.db data found"
             exit
@@ -371,7 +364,7 @@ prepare() {
 
 build() {
   cd ${_srcname}
-  make ${BUILD_FLAGS[*]} -j3 all
+  make ${BUILD_FLAGS[*]} -j$(nproc) all
 }
 
 _package() {
@@ -493,9 +486,8 @@ done
 
 sha256sums=('99c5fd53a51377f3a7faf9a1aa1700465773562720d1fc9c4399caceac268f7a'
             'd97fbe6ae21d397250cbe64b54cfa5db939300a0b153f6e6857c785ba1b3eec1'
-            '0d88a1316db91ab731c24e9ffaeec0dbb9be308ab571b5bea71dfffdd90bffbc'
+            'f9a5a14038f2c3ba29256691862cb5ea65520b42966f282fe6ea0a0075379026'
             '876e384b37d6aa39a5f30bc01b80ec8b7c28c856aa828e4db7a6afc6dec01c2a'
-            'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '19007cf46fbd578d0a2c0a2940cdbca92d31d3ca31b72ddcac0cfe6690e9bf90'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
@@ -527,6 +519,6 @@ sha256sums=('99c5fd53a51377f3a7faf9a1aa1700465773562720d1fc9c4399caceac268f7a'
             'e6ff1293531eefbec669a8fa5258545acf3d95cd6d19919f233e369cf8e289e8'
             '3059893c86b3eee288edb6c7d958d84e92c67a7d8e55ad48a9470a2100b0a22e'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
-            '208f528aa4039971d6b64b6a6e712f29dee5ec89ec2f680f4f9a637d598c01d3'
+            'dd53f589aa8816560576234f306be8761bceb72e837872107fe9a5d0e1bf1a87'
             '5c8e2ec59f1e42f1dcc6d5527fcee741aef9e4832735facb96fc8d7fe2ea08b6'
             'cc6bb84cef2c628bd13d7df3859824555a8e4c53abc5e1e7851930d215e625b1')

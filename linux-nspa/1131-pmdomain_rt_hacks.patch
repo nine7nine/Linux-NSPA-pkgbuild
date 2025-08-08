@@ -2,6 +2,15 @@ diff --git a/drivers/base/power/domain.c b/drivers/base/power/domain.c
 index 967bcf9d415e..4dfce1d476f4 100644
 --- a/drivers/pmdomain/core.c
 +++ b/drivers/pmdomain/core.c
+@@ -24,5 +24,7 @@
+ #include <linux/cpu.h>
+ #include <linux/debugfs.h>
+
++#include "../base/power/power.h"
++
+ /* Provides a unique ID for each genpd device */
+ static DEFINE_IDA(genpd_ida);
+
 @@ -163,6 +163,48 @@ static const struct genpd_lock_ops genpd
  	.unlock = genpd_unlock_raw_spin,
  };
