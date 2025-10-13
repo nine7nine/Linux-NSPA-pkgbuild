@@ -1,5 +1,5 @@
 diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
-index 3072731fe09c5..d5c6f1507772b 100644
+index 962451e54fdda..786d0e8d1d317 100644
 --- a/arch/arm/Kconfig
 +++ b/arch/arm/Kconfig
 @@ -43,6 +43,7 @@ config ARM
@@ -24,7 +24,7 @@ index 3072731fe09c5..d5c6f1507772b 100644
  	select HAVE_EFFICIENT_UNALIGNED_ACCESS if (CPU_V6 || CPU_V6K || CPU_V7) && MMU
  	select HAVE_EXIT_THREAD
 -	select HAVE_GUP_FAST if ARM_LPAE
-+	select HAVE_GUP_FAST if ARM_LPAE && !(PREEMPT_RT && HIGHPTE)
++	select HAVE_GUP_FAST if ARM_LPAE  && !(PREEMPT_RT && HIGHPTE)
  	select HAVE_FTRACE_MCOUNT_RECORD if !XIP_KERNEL
  	select HAVE_FUNCTION_ERROR_INJECTION
  	select HAVE_FUNCTION_GRAPH_TRACER
@@ -414,6 +414,19 @@ index 139fa5deba805..0c29ca3bb5e32 100644
  	}
  
  	finish_wait(wq, &wait);
+diff --git a/drivers/gpu/drm/i915/gt/intel_engine_cs.c b/drivers/gpu/drm/i915/gt/intel_engine_cs.c
+index b721bbd233567..f5a6143ea8a24 100644
+--- a/drivers/gpu/drm/i915/gt/intel_engine_cs.c
++++ b/drivers/gpu/drm/i915/gt/intel_engine_cs.c
+@@ -1609,7 +1609,7 @@ u64 intel_engine_get_last_batch_head(const struct intel_engine_cs *engine)
+ 
+ static unsigned long stop_timeout(const struct intel_engine_cs *engine)
+ {
+-	if (in_atomic() || irqs_disabled()) /* inside atomic preempt-reset? */
++	if (in_atomic() || irqs_disabled() || rcu_preempt_depth()) /* inside atomic preempt-reset? */
+ 		return 0;
+ 
+ 	/*
 diff --git a/drivers/gpu/drm/i915/gt/intel_execlists_submission.c b/drivers/gpu/drm/i915/gt/intel_execlists_submission.c
 index 03baa7fa0a27c..799e943d9facb 100644
 --- a/drivers/gpu/drm/i915/gt/intel_execlists_submission.c
@@ -638,7 +651,7 @@ index 6d7b8c4667c9c..9537e44a4226f 100644
  {
  	if (up->capabilities & UART_CAP_UUE)
  		serial_out(up, UART_IER, UART_IER_UUE);
-@@ -713,6 +718,14 @@ static void serial8250_clear_IER(struct uart_8250_port *up)
+@@ -713,6 +718,14 @@ static void serial8250_clear_IER(struct
  		serial_out(up, UART_IER, 0);
  }
  
@@ -650,9 +663,9 @@ index 6d7b8c4667c9c..9537e44a4226f 100644
 +	__serial8250_clear_IER(up);
 +}
 +
- #ifdef CONFIG_SERIAL_8250_RSA
  /*
-  * Attempts to turn on the RSA FIFO.  Returns zero on failure.
+  * This is a quickie test to see how big the FIFO is.
+  * It doesn't work at all the time, more's the pity.
 @@ -1400,9 +1413,6 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p, bool toggle_ier)
  {
  	unsigned char mcr = serial8250_in_MCR(p);
@@ -1004,8 +1017,8 @@ index eefb67d9883c2..20ac8a5ac27d7 100644
  };
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..6f206be67cd28
+index 0000000000000..1445cd65885cd
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt1
++-rt3
