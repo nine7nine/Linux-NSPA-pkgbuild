@@ -1,0 +1,203 @@
+From 038f5b65a1923b3b55f6a33995f970b002676b3b Mon Sep 17 00:00:00 2001
+From: jordan Johnston <johnstonljordan@gmail.com>
+Date: Sun, 5 Apr 2026 20:03:28 -0500
+Subject: [PATCH 1/3] scripts: add sched_feat compile-time header generator
+
+---
+ kernel/sched/features.override   |  32 +++++++
+ scripts/gen_sched_feat_header.py | 144 +++++++++++++++++++++++++++++++
+ 2 files changed, 176 insertions(+)
+ create mode 100644 kernel/sched/features.override
+ create mode 100644 scripts/gen_sched_feat_header.py
+
+diff --git a/kernel/sched/features.override b/kernel/sched/features.override
+new file mode 100644
+index 000000000..e267c13c4
+--- /dev/null
++++ b/kernel/sched/features.override
+@@ -0,0 +1,32 @@
++# SPDX-License-Identifier: GPL-2.0
++#
++# Explicit scheduler feature policy for compile-time sched_feat() mode.
++# The generator will use these values instead of upstream defaults.
++
++PLACE_LAG=1
++PLACE_DEADLINE_INITIAL=1
++PLACE_REL_DEADLINE=1
++RUN_TO_PARITY=1
++PREEMPT_SHORT=1
++NEXT_BUDDY=0
++PICK_BUDDY=1
++CACHE_HOT_BUDDY=1
++DELAY_DEQUEUE=1
++DELAY_ZERO=1
++WAKEUP_PREEMPTION=1
++HRTICK=0
++HRTICK_DL=0
++NONTASK_CAPACITY=1
++TTWU_QUEUE=0
++SIS_UTIL=1
++WARN_DOUBLE_CLOCK=0
++RT_PUSH_IPI=1
++RT_RUNTIME_SHARE=0
++LB_MIN=0
++ATTACH_AGE_LOAD=1
++WA_IDLE=1
++WA_WEIGHT=1
++WA_BIAS=1
++UTIL_EST=1
++LATENCY_WARN=0
++NI_RANDOM=1
+diff --git a/scripts/gen_sched_feat_header.py b/scripts/gen_sched_feat_header.py
+new file mode 100644
+index 000000000..522474162
+--- /dev/null
++++ b/scripts/gen_sched_feat_header.py
+@@ -0,0 +1,144 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0
++
++"""Generate compile-time scheduler feature constants.
++
++This converts kernel/sched/features.h into kernel/sched/features_compile.h by
++replacing each SCHED_FEAT(name, default) entry with a preprocessor constant.
++An optional overrides file can pin feature values independent of upstream
++defaults so release-to-release updates stop requiring hand edits in scheduler
++code.
++"""
++
++from __future__ import annotations
++
++import argparse
++import re
++import sys
++from collections import OrderedDict
++from pathlib import Path
++
++
++SCRIPT_DIR = Path(__file__).resolve().parent
++TREE_ROOT = SCRIPT_DIR.parent
++DEFAULT_INPUT = TREE_ROOT / "kernel" / "sched" / "features.h"
++DEFAULT_OVERRIDES = TREE_ROOT / "kernel" / "sched" / "features.override"
++DEFAULT_OUTPUT = TREE_ROOT / "kernel" / "sched" / "features_compile.h"
++
++FEATURE_RE = re.compile(
++    r"^(?P<indent>\s*)SCHED_FEAT\((?P<name>[A-Z0-9_]+)\s*,\s*"
++    r"(?P<enabled>true|false)\)\s*$"
++)
++OVERRIDE_RE = re.compile(r"^(?P<name>[A-Z0-9_]+)\s*=\s*(?P<value>.+?)\s*$")
++
++TRUE_VALUES = {"1", "y", "yes", "true", "on"}
++FALSE_VALUES = {"0", "n", "no", "false", "off"}
++
++
++def parse_bool(text: str) -> int:
++    value = text.strip().lower()
++    if value in TRUE_VALUES:
++        return 1
++    if value in FALSE_VALUES:
++        return 0
++    raise ValueError(f"unsupported boolean value: {text!r}")
++
++
++def load_overrides(path: Path) -> OrderedDict[str, int]:
++    overrides: OrderedDict[str, int] = OrderedDict()
++
++    if not path.exists():
++        return overrides
++
++    for lineno, raw_line in enumerate(path.read_text().splitlines(), start=1):
++        line = raw_line.split("#", 1)[0].strip()
++        if not line:
++            continue
++
++        match = OVERRIDE_RE.match(line)
++        if not match:
++            raise SystemExit(f"{path}:{lineno}: invalid override: {raw_line!r}")
++
++        name = match.group("name")
++        try:
++            overrides[name] = parse_bool(match.group("value"))
++        except ValueError as exc:
++            raise SystemExit(f"{path}:{lineno}: {exc}") from exc
++
++    return overrides
++
++
++def generate(input_path: Path, overrides: OrderedDict[str, int], output_path: Path) -> None:
++    emitted: list[str] = []
++    feature_values: OrderedDict[str, int] = OrderedDict()
++
++    for raw_line in input_path.read_text().splitlines():
++        if raw_line.startswith("/* SPDX-License-Identifier:"):
++            continue
++
++        match = FEATURE_RE.match(raw_line)
++        if not match:
++            emitted.append(raw_line)
++            continue
++
++        name = match.group("name")
++        value = overrides.get(name, parse_bool(match.group("enabled")))
++        feature_values.setdefault(name, value)
++        emitted.append(f"{match.group('indent')}#define SCHED_FEAT_{name} {value}")
++
++    unknown = [name for name in overrides if name not in feature_values]
++    if unknown:
++        names = ", ".join(unknown)
++        raise SystemExit(f"{input_path}: unknown override(s): {names}")
++
++    mask_lines = [
++        "#define SCHED_FEAT_DEFAULT_MASK (\\",
++    ]
++    for name in feature_values:
++        mask_lines.append(
++            f"\t((unsigned int)SCHED_FEAT_{name} * (1U << __SCHED_FEAT_{name})) |\\"
++        )
++    mask_lines.append("\t0U)")
++
++    contents = [
++        "/* SPDX-License-Identifier: GPL-2.0 */",
++        "/* Auto-generated by scripts/gen_sched_feat_header.py. */",
++        "/*",
++        f" * Source: {input_path.relative_to(TREE_ROOT)}",
++        f" * Overrides: {output_path.parent.joinpath('features.override').relative_to(TREE_ROOT)}",
++        " */",
++        "",
++        "#ifndef _KERNEL_SCHED_FEATURES_COMPILE_H",
++        "#define _KERNEL_SCHED_FEATURES_COMPILE_H",
++        "",
++        *emitted,
++        "",
++        *mask_lines,
++        "",
++        "#endif /* _KERNEL_SCHED_FEATURES_COMPILE_H */",
++        "",
++    ]
++
++    output_path.write_text("\n".join(contents))
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
++    parser.add_argument("--overrides", type=Path, default=DEFAULT_OVERRIDES)
++    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
++    args = parser.parse_args()
++
++    try:
++        generate(args.input.resolve(), load_overrides(args.overrides.resolve()), args.output.resolve())
++    except SystemExit:
++        raise
++    except Exception as exc:  # pragma: no cover - defensive CLI error path
++        print(exc, file=sys.stderr)
++        return 1
++
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+-- 
+2.53.0
+

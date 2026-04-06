@@ -1,33 +1,9 @@
-From 4bf9ddcb32906f96e46ba4c79af95c9be0a5634c Mon Sep 17 00:00:00 2001
-From: Sultan Alsawaf <sultan@kerneltoast.com>
-Date: Wed, 6 Jan 2021 21:00:31 -0800
-Subject: [PATCH] dma-buf/sync_file: Speed up ioctl by omitting debug names
-
-A lot of CPU time is wasted on allocating, populating, and copying
-debug names back and forth with userspace when they're not actually
-needed. We can't just remove the name buffers from the various sync data
-structures though because we must preserve ABI compatibility with
-userspace, but instead we can just pretend the name fields of the
-user-shared structs aren't there. This massively reduces the sizes of
-memory allocated for these data structures and the amount of data passed
-between userspace, as well as eliminates a kzalloc() entirely from
-sync_file_ioctl_fence_info(), thus improving graphics performance.
-
-Signed-off-by: Sultan Alsawaf <sultan@kerneltoast.com>
----
- drivers/dma-buf/sync_file.c | 100 +++++++++++-------------------------
- include/linux/sync_file.h   |   9 ----
- 2 files changed, 30 insertions(+), 79 deletions(-)
-
-diff --git a/drivers/dma-buf/sync_file.c b/drivers/dma-buf/sync_file.c
-index 2e9a316c596a3..4123d6acdcaf7 100644
 --- a/drivers/dma-buf/sync_file.c
 +++ b/drivers/dma-buf/sync_file.c
-@@ -116,36 +116,6 @@ struct dma_fence *sync_file_get_fence(int fd)
- }
+@@ -117,44 +117,7 @@ struct dma_fence *sync_file_get_fence(in
  EXPORT_SYMBOL(sync_file_get_fence);
  
--/**
+ /**
 - * sync_file_get_name - get the name of the sync_file
 - * @sync_file:		sync_file to get the fence from
 - * @buf:		destination buffer to copy sync_file name into
@@ -46,21 +22,30 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
 -		strscpy(buf, sync_file->user_name, len);
 -	} else {
 -		struct dma_fence *fence = sync_file->fence;
+-		const char __rcu *timeline;
+-		const char __rcu *driver;
 -
+-		rcu_read_lock();
+-		driver = dma_fence_driver_name(fence);
+-		timeline = dma_fence_timeline_name(fence);
 -		snprintf(buf, len, "%s-%s%llu-%lld",
--			 fence->ops->get_driver_name(fence),
--			 fence->ops->get_timeline_name(fence),
+-			 rcu_dereference(driver),
+-			 rcu_dereference(timeline),
 -			 fence->context,
 -			 fence->seqno);
+-		rcu_read_unlock();
 -	}
 -
 -	return buf;
 -}
 -
- /**
+-/**
   * sync_file_merge() - merge two sync_files
-  * @name:	name of new fence
-@@ -156,7 +126,7 @@ char *sync_file_get_name(struct sync_file *sync_file, char *buf, int len)
+- * @name:	name of new fence
+  * @a:		sync_file a
+  * @b:		sync_file b
+  *
+@@ -162,7 +125,7 @@ char *sync_file_get_name(struct sync_fil
   * @a and @b.  @a and @b remain valid, independent sync_file. Returns the
   * new merged sync_file or NULL in case of error.
   */
@@ -69,7 +54,7 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
  					 struct sync_file *b)
  {
  	struct sync_file *sync_file;
-@@ -172,7 +142,6 @@ static struct sync_file *sync_file_merge(const char *name, struct sync_file *a,
+@@ -178,7 +141,6 @@ static struct sync_file *sync_file_merge
  		return NULL;
  	}
  	sync_file->fence = fence;
@@ -77,7 +62,7 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
  	return sync_file;
  }
  
-@@ -211,11 +180,14 @@ static long sync_file_ioctl_merge(struct sync_file *sync_file,
+@@ -217,11 +179,14 @@ static long sync_file_ioctl_merge(struct
  	int err;
  	struct sync_file *fence2, *fence3;
  	struct sync_merge_data data;
@@ -93,7 +78,7 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
  		err = -EFAULT;
  		goto err_put_fd;
  	}
-@@ -231,15 +203,14 @@ static long sync_file_ioctl_merge(struct sync_file *sync_file,
+@@ -237,15 +202,14 @@ static long sync_file_ioctl_merge(struct
  		goto err_put_fd;
  	}
  
@@ -111,19 +96,35 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
  		err = -EFAULT;
  		goto err_put_fence3;
  	}
-@@ -262,11 +233,6 @@ static long sync_file_ioctl_merge(struct sync_file *sync_file,
+@@ -268,26 +232,11 @@ err_put_fd:
  static int sync_fill_fence_info(struct dma_fence *fence,
  				 struct sync_fence_info *info)
  {
--	strscpy(info->obj_name, fence->ops->get_timeline_name(fence),
+-	const char __rcu *timeline;
+-	const char __rcu *driver;
+-
+-	rcu_read_lock();
+-
+-	driver = dma_fence_driver_name(fence);
+-	timeline = dma_fence_timeline_name(fence);
+-
+-	strscpy(info->obj_name, rcu_dereference(timeline),
 -		sizeof(info->obj_name));
--	strscpy(info->driver_name, fence->ops->get_driver_name(fence),
+-	strscpy(info->driver_name, rcu_dereference(driver),
 -		sizeof(info->driver_name));
 -
  	info->status = dma_fence_get_status(fence);
  	info->timestamp_ns =
  		dma_fence_is_signaled(fence) ?
-@@ -279,15 +245,15 @@ static int sync_fill_fence_info(struct dma_fence *fence,
+ 			ktime_to_ns(dma_fence_timestamp(fence)) :
+-			ktime_set(0, 0);
+-
+-	rcu_read_unlock();
++				ktime_set(0, 0);
+ 
+ 	return info->status;
+ }
+@@ -295,15 +244,15 @@ static int sync_fill_fence_info(struct d
  static long sync_file_ioctl_fence_info(struct sync_file *sync_file,
  				       unsigned long arg)
  {
@@ -143,7 +144,7 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
  		return -EFAULT;
  
  	if (info.flags || info.pad)
-@@ -313,38 +279,32 @@ static long sync_file_ioctl_fence_info(struct sync_file *sync_file,
+@@ -329,38 +278,32 @@ static long sync_file_ioctl_fence_info(s
  	if (info.num_fences < num_fences)
  		return -EINVAL;
  
@@ -156,8 +157,6 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
 +	offset = offsetof(struct sync_fence_info, status);
  	dma_fence_unwrap_for_each(fence, &iter, sync_file->fence) {
 -		int status;
--
--		status = sync_fill_fence_info(fence, &fence_info[num_fences++]);
 +		struct {
 +			__s32	status;
 +			__u32	flags;
@@ -166,7 +165,8 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
 +		struct sync_fence_info *finfo = (void *)&fence_info - offset;
 +		int status = sync_fill_fence_info(fence, finfo);
 +		u64 dest;
-+
+ 
+-		status = sync_fill_fence_info(fence, &fence_info[num_fences++]);
 +		/* Don't leak kernel memory to userspace via finfo->flags */
 +		finfo->flags = 0;
  		info.status = info.status <= 0 ? info.status : status;
@@ -200,9 +200,8 @@ index 2e9a316c596a3..4123d6acdcaf7 100644
 +	return 0;
  }
  
- static long sync_file_ioctl(struct file *file, unsigned int cmd,
-diff --git a/include/linux/sync_file.h b/include/linux/sync_file.h
-index 790ca021203a7..a022809009ac2 100644
+ static int sync_file_ioctl_set_deadline(struct sync_file *sync_file,
+
 --- a/include/linux/sync_file.h
 +++ b/include/linux/sync_file.h
 @@ -34,14 +34,6 @@

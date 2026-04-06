@@ -1,0 +1,136 @@
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 1188b5d24933..93a1dbc02667 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -539,6 +539,11 @@ void __trace_set_current_state(int state_value)
+ }
+ EXPORT_SYMBOL(__trace_set_current_state);
+ 
++int task_llc(const struct task_struct *p)
++{
++	return per_cpu(sd_llc_id, task_cpu(p));
++}
++
+ /*
+  * Serialization rules:
+  *
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 1eda689e0136..4b760bd604e7 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1291,6 +1291,30 @@ static int llc_id(int cpu)
+ 	return per_cpu(sd_llc_id, cpu);
+ }
+ 
++static void account_llc_enqueue(struct rq *rq, struct task_struct *p)
++{
++	int pref_llc;
++
++	pref_llc = p->preferred_llc;
++	if (pref_llc < 0)
++		return;
++
++	rq->nr_llc_running++;
++	rq->nr_pref_llc_running += (pref_llc == task_llc(p));
++}
++
++static void account_llc_dequeue(struct rq *rq, struct task_struct *p)
++{
++	int pref_llc;
++
++	pref_llc = p->preferred_llc;
++	if (pref_llc < 0)
++		return;
++
++	rq->nr_llc_running--;
++	rq->nr_pref_llc_running -= (pref_llc == task_llc(p));
++}
++
+ void mm_init_sched(struct mm_struct *mm,
+ 		   struct sched_cache_time __percpu *_pcpu_sched)
+ {
+@@ -1397,6 +1421,8 @@ static int get_pref_llc(struct task_struct *p, struct mm_struct *mm)
+ 	return mm_sched_llc;
+ }
+ 
++static unsigned int task_running_on_cpu(int cpu, struct task_struct *p);
++
+ static inline
+ void account_mm_sched(struct rq *rq, struct task_struct *p, s64 delta_exec)
+ {
+@@ -1439,8 +1465,13 @@ void account_mm_sched(struct rq *rq, struct task_struct *p, s64 delta_exec)
+ 
+ 	mm_sched_llc = get_pref_llc(p, mm);
+ 
+-	if (READ_ONCE(p->preferred_llc) != mm_sched_llc)
++	/* task not on rq accounted later in account_entity_enqueue() */
++	if (task_running_on_cpu(rq->cpu, p) &&
++	    READ_ONCE(p->preferred_llc) != mm_sched_llc) {
++		account_llc_dequeue(rq, p);
+ 		WRITE_ONCE(p->preferred_llc, mm_sched_llc);
++		account_llc_enqueue(rq, p);
++	}
+ }
+ 
+ static void task_tick_cache(struct rq *rq, struct task_struct *p)
+@@ -1620,6 +1651,10 @@ static inline int get_pref_llc(struct task_struct *p,
+ 	return -1;
+ }
+ 
++static void account_llc_enqueue(struct rq *rq, struct task_struct *p) {}
++
++static void account_llc_dequeue(struct rq *rq, struct task_struct *p) {}
++
+ #endif /* CONFIG_SCHED_CACHE */
+ 
+ /*
+@@ -4106,9 +4141,11 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ {
+ 	update_load_add(&cfs_rq->load, se->load.weight);
+ 	if (entity_is_task(se)) {
++		struct task_struct *p = task_of(se);
+ 		struct rq *rq = rq_of(cfs_rq);
+ 
+-		account_numa_enqueue(rq, task_of(se));
++		account_numa_enqueue(rq, p);
++		account_llc_enqueue(rq, p);
+ 		list_add(&se->group_node, &rq->cfs_tasks);
+ 	}
+ 	cfs_rq->nr_queued++;
+@@ -4119,7 +4156,11 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
+ {
+ 	update_load_sub(&cfs_rq->load, se->load.weight);
+ 	if (entity_is_task(se)) {
+-		account_numa_dequeue(rq_of(cfs_rq), task_of(se));
++		struct task_struct *p = task_of(se);
++		struct rq *rq = rq_of(cfs_rq);
++
++		account_numa_dequeue(rq, p);
++		account_llc_dequeue(rq, p);
+ 		list_del_init(&se->group_node);
+ 	}
+ 	cfs_rq->nr_queued--;
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 9defeeeb3e8e..081f23a48414 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -1201,6 +1201,8 @@
+ 	u64			cpu_runtime;
+ 	unsigned long		cpu_epoch;
+ 	unsigned long		cpu_epoch_next;
++	unsigned int		nr_pref_llc_running;
++	unsigned int		nr_llc_running;
+ #endif
+ 
+ 	atomic_t		nr_iowait;
+@@ -2066,6 +2072,8 @@ init_numa_balancing(u64 clone_flags, struct task_struct *p)
+ 
+ #endif /* !CONFIG_NUMA_BALANCING */
+ 
++int task_llc(const struct task_struct *p);
++
+ static inline void
+ queue_balance_callback(struct rq *rq,
+ 		       struct balance_callback *head,
+-- 
+2.32.0

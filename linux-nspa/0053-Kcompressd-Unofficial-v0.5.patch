@@ -1,19 +1,3 @@
-From 4bb878bf1af16d5780d9fe6beb9e6e63371f3585 Mon Sep 17 00:00:00 2001
-From: Masahito S <firelzrd@gmail.com>
-Date: Sun, 15 Jun 2025 03:37:19 +0900
-Subject: [PATCH] Kcompressd-Unofficial v0.5
-
----
- include/linux/mmzone.h |   7 +++
- include/linux/swap.h   |   2 +
- mm/mm_init.c           |   1 +
- mm/page_io.c           | 138 +++++++++++++++++++++++++++++++++++++++++
- mm/swap.h              |   6 ++
- mm/vmscan.c            |  39 ++++++++++++
- 6 files changed, 193 insertions(+)
-
-diff --git a/include/linux/mmzone.h b/include/linux/mmzone.h
-index 283913d42..4a9ba9894 100644
 --- a/include/linux/mmzone.h
 +++ b/include/linux/mmzone.h
 @@ -23,6 +23,7 @@
@@ -24,9 +8,9 @@ index 283913d42..4a9ba9894 100644
  #include <asm/page.h>
  
  /* Free memory management - zoned buddy allocator.  */
-@@ -1413,6 +1414,12 @@ typedef struct pglist_data {
+@@ -1438,6 +1439,12 @@ typedef struct pglist_data {
  
- 	int kswapd_failures;		/* Number of 'reclaimed == 0' runs */
+ 	atomic_t kswapd_failures;	/* Number of 'reclaimed == 0' runs */
  
 +#define KCOMPRESS_FIFO_SIZE 256
 +	wait_queue_head_t kcompressd_wait;
@@ -37,11 +21,10 @@ index 283913d42..4a9ba9894 100644
  #ifdef CONFIG_COMPACTION
  	int kcompactd_max_order;
  	enum zone_type kcompactd_highest_zoneidx;
-diff --git a/include/linux/swap.h b/include/linux/swap.h
-index bc0e1c275..f8221be36 100644
+
 --- a/include/linux/swap.h
 +++ b/include/linux/swap.h
-@@ -684,5 +684,7 @@ static inline bool mem_cgroup_swap_full(struct folio *folio)
+@@ -656,5 +656,7 @@ static inline bool mem_cgroup_swap_full(
  }
  #endif
  
@@ -49,11 +32,10 @@ index bc0e1c275..f8221be36 100644
 +
  #endif /* __KERNEL__*/
  #endif /* _LINUX_SWAP_H */
-diff --git a/mm/mm_init.c b/mm/mm_init.c
-index f2944748f..8208ae997 100644
+
 --- a/mm/mm_init.c
 +++ b/mm/mm_init.c
-@@ -1409,6 +1409,7 @@ static void __meminit pgdat_init_internals(struct pglist_data *pgdat)
+@@ -1412,6 +1412,7 @@ static void __meminit pgdat_init_interna
  	pgdat_init_kcompactd(pgdat);
  
  	init_waitqueue_head(&pgdat->kswapd_wait);
@@ -61,8 +43,7 @@ index f2944748f..8208ae997 100644
  	init_waitqueue_head(&pgdat->pfmemalloc_wait);
  
  	for (i = 0; i < NR_VMSCAN_THROTTLE; i++)
-diff --git a/mm/page_io.c b/mm/page_io.c
-index f7716b656..628e1dd07 100644
+
 --- a/mm/page_io.c
 +++ b/mm/page_io.c
 @@ -25,6 +25,8 @@
@@ -74,11 +55,10 @@ index f7716b656..628e1dd07 100644
  #include "swap.h"
  
  static void __end_swap_bio_write(struct bio *bio)
-@@ -233,6 +235,102 @@ static void swap_zeromap_folio_clear(struct folio *folio)
- 	}
+@@ -234,6 +236,99 @@ static void swap_zeromap_folio_clear(str
  }
  
-+/*
+ /*
 + * do_swapout() - Write a folio to swap space
 + * @folio: The folio to write out
 + *
@@ -88,19 +68,16 @@ index f7716b656..628e1dd07 100644
 + */
 +static inline void do_swapout(struct folio *folio)
 +{
-+	struct writeback_control wbc = {
-+		.sync_mode = WB_SYNC_NONE,
-+		.nr_to_write = SWAP_CLUSTER_MAX,
-+		.range_start = 0,
-+		.range_end = LLONG_MAX,
-+		.for_reclaim = 1,
-+	};
++	struct swap_iocb *swap_plug = NULL;
 +
 +	if (zswap_store(folio)) {
 +		count_mthp_stat(folio_order(folio), MTHP_STAT_ZSWPOUT);
 +		folio_unlock(folio);
-+	} else
-+		__swap_writepage(folio, &wbc); /* Implies folio_unlock(folio) */
++	} else {
++		__swap_writepage(folio, &swap_plug); /* Implies folio_unlock(folio) */
++		if (swap_plug)
++			swap_write_unplug(swap_plug);
++	}
 +
 +	/* Decrement the folio reference count */
 +	folio_put(folio);
@@ -141,7 +118,7 @@ index f7716b656..628e1dd07 100644
 +
 +	/* Swap device must be sync-efficient */
 +	if (!zswap_is_enabled() &&
-+		!data_race(swp_swap_info(folio->swap)->flags & SWP_SYNCHRONOUS_IO))
++		!data_race(folio_swap_flags(folio) & SWP_SYNCHRONOUS_IO))
 +		return false;
 +
 +	/* If the kcompress_fifo is full, we must swap out the head
@@ -174,14 +151,14 @@ index f7716b656..628e1dd07 100644
 +	return ret;
 +}
 +
- /*
++/*
   * We may have stale swap cache pages in memory: notice
   * them here and get rid of the unnecessary final write.
-@@ -274,6 +372,15 @@ int swap_writeout(struct folio *folio, struct writeback_control *wbc)
- 		 */
- 		swap_zeromap_folio_clear(folio);
- 	}
-+
+  */
+@@ -272,6 +367,14 @@ int swap_writeout(struct folio *folio, s
+ 	 */
+ 	swap_zeromap_folio_clear(folio);
+ 
 +	/*
 +	 * Compression within zswap and zram might block rmap, unmap
 +	 * of both file and anon pages, try to do compression async
@@ -192,9 +169,9 @@ index f7716b656..628e1dd07 100644
 +
  	if (zswap_store(folio)) {
  		count_mthp_stat(folio_order(folio), MTHP_STAT_ZSWPOUT);
- 		folio_unlock(folio);
-@@ -288,6 +395,37 @@ int swap_writeout(struct folio *folio, struct writeback_control *wbc)
- 	return 0;
+ 		goto out_unlock;
+@@ -288,6 +391,37 @@ out_unlock:
+ 	return ret;
  }
  
 +/*
@@ -231,19 +208,18 @@ index f7716b656..628e1dd07 100644
  static inline void count_swpout_vm_event(struct folio *folio)
  {
  #ifdef CONFIG_TRANSPARENT_HUGEPAGE
-diff --git a/mm/swap.h b/mm/swap.h
-index 2269eb9df..a858fc16b 100644
+
 --- a/mm/swap.h
 +++ b/mm/swap.h
-@@ -22,6 +22,7 @@ static inline void swap_read_unplug(stru
+@@ -196,6 +196,7 @@ static inline void swap_read_unplug(stru
  void swap_write_unplug(struct swap_iocb *sio);
- int swap_writeout(struct folio *folio, struct writeback_control *wbc);
- void __swap_writepage(struct folio *folio, struct writeback_control *wbc);
+ int swap_writeout(struct folio *folio, struct swap_iocb **swap_plug);
+ void __swap_writepage(struct folio *folio, struct swap_iocb **swap_plug);
 +int kcompressd(void *p);
  
  /* linux/mm/swap_state.c */
- /* One swap address space for each 64M swap space */
-@@ -222,6 +223,12 @@ static inline int non_swapcache_batch(sw
+ extern struct address_space swap_space __read_mostly;
+@@ -444,5 +445,11 @@ static inline int non_swapcache_batch(sw
  {
  	return 0;
  }
@@ -254,13 +230,11 @@ index 2269eb9df..a858fc16b 100644
 +}
 +
  #endif /* CONFIG_SWAP */
- 
- /**
-diff --git a/mm/vmscan.c b/mm/vmscan.c
-index f8dfd2864..67c1f94a4 100644
+ #endif /* _MM_SWAP_H */
+
 --- a/mm/vmscan.c
 +++ b/mm/vmscan.c
-@@ -7464,6 +7464,7 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
+@@ -7623,6 +7623,7 @@ unsigned long shrink_all_memory(unsigned
  void __meminit kswapd_run(int nid)
  {
  	pg_data_t *pgdat = NODE_DATA(nid);
@@ -268,7 +242,7 @@ index f8dfd2864..67c1f94a4 100644
  
  	pgdat_kswapd_lock(pgdat);
  	if (!pgdat->kswapd) {
-@@ -7477,7 +7478,28 @@ void __meminit kswapd_run(int nid)
+@@ -7636,7 +7637,28 @@ void __meminit kswapd_run(int nid)
  		} else {
  			wake_up_process(pgdat->kswapd);
  		}
@@ -297,7 +271,7 @@ index f8dfd2864..67c1f94a4 100644
  	pgdat_kswapd_unlock(pgdat);
  }
  
-@@ -7496,9 +7518,17 @@ void __meminit kswapd_stop(int nid)
+@@ -7655,9 +7677,17 @@ void __meminit kswapd_stop(int nid)
  		kthread_stop(kswapd);
  		pgdat->kswapd = NULL;
  	}
@@ -315,7 +289,7 @@ index f8dfd2864..67c1f94a4 100644
  static const struct ctl_table vmscan_sysctl_table[] = {
  	{
  		.procname	= "swappiness",
-@@ -7509,6 +7539,15 @@ static const struct ctl_table vmscan_sysctl_table[] = {
+@@ -7668,6 +7698,15 @@ static const struct ctl_table vmscan_sys
  		.extra1		= SYSCTL_ZERO,
  		.extra2		= SYSCTL_TWO_HUNDRED,
  	},
@@ -331,6 +305,4 @@ index f8dfd2864..67c1f94a4 100644
  #ifdef CONFIG_NUMA
  	{
  		.procname	= "zone_reclaim_mode",
--- 
-2.49.0
 

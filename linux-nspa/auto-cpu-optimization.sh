@@ -1,6 +1,6 @@
 #!/bin/bash
-CPU=$(gcc -Q -march=native --help=target|grep march=|awk '{print $2}'|head -1)
-MARCH=$(echo $CPU|tr '[:lower:]' '[:upper:]'&&echo)
+CPU=$(gcc -Q -march=native --help=target | grep march= | awk '{print $2}' | head -1)
+MARCH=$(printf '%s\n' "$CPU" | tr '[:lower:]' '[:upper:]')
 if [[ ${MARCH} == "ZNVER1" ]]; then
     MARCH="ZEN"
 elif [[ ${MARCH} == "ZNVER2" ]]; then
@@ -30,8 +30,8 @@ elif [[ ${MARCH} == "GOLDMONT-PLUS" ]]; then
 elif [[ ${MARCH} == "SKYLAKE-AVX512" ]]; then
     MARCH="SKYLAKE2"
 elif [[ ${MARCH} == "MIVYBRIDGE" ]]; then
-    scripts/config --disable CONFIG_AGP_AMD64 
-    scripts/config --disable CONFIG_MICROCODE_AMD
+    scripts/config --disable AGP_AMD64
+    scripts/config --disable MICROCODE_AMD
     MARCH="MIVYBRIDGE"
 elif [[ ${MARCH} == "ICELAKE-CLIENT" ]]; then
     MARCH="ICELAKE"
@@ -42,6 +42,6 @@ echo "----------------------------------"
 echo "| APPLYING AUTO-CPU-OPTIMIZATION |"
 echo "----------------------------------"
 echo "[*] DETECTED CPU (MARCH) : ${MARCH2}"
-scripts/config -k --disable CONFIG_GENERIC_CPU
-scripts/config -k --enable CONFIG_${MARCH2}
-sleep 3&&echo
+scripts/config -k --disable GENERIC_CPU
+scripts/config -k --enable "${MARCH2}"
+sleep 3 && echo

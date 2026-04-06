@@ -1,43 +1,6 @@
- - These defaults are all pulled from zen kernel and/or chromeOS kernels.  
- - Trimmed off anything I already use and unnecessary bits
-
-diff --git a/Makefile b/Makefile
-index b5d570810e23b3..df75f91d4dc157 100644
---- a/Makefile
-+++ b/Makefile
-@@ -834,6 +834,9 @@ KBUILD_CFLAGS	+= $(call cc-disable-warni
- ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
- KBUILD_CFLAGS += -O2
- KBUILD_RUSTFLAGS += -Copt-level=2
-+else ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
-+KBUILD_CFLAGS += -O3
-+KBUILD_RUSTFLAGS += -Copt-level=3
- else ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
- KBUILD_CFLAGS += -Os
- KBUILD_RUSTFLAGS += -Copt-level=s
-diff --git a/init/Kconfig b/init/Kconfig
-index 532362fcfe31fd..26e42fabc16cde 100644
---- a/init/Kconfig
-+++ b/init/Kconfig
-@@ -1407,6 +1407,12 @@ config CC_OPTIMIZE_FOR_PERFORMANCE
- 	  with the "-O2" compiler flag for best performance and most
- 	  helpful compile-time warnings.
- 
-+config CC_OPTIMIZE_FOR_PERFORMANCE_O3
-+	bool "Optimize more for performance (-O3)"
-+	help
-+	  Choosing this option will pass "-O3" to your compiler to optimize
-+	  the kernel yet more for performance.
-+
- config CC_OPTIMIZE_FOR_SIZE
- 	bool "Optimize for size (-Os)"
- 	help
-
-diff --git a/mm/swap.c b/mm/swap.c
-index 9cee7f6a380942..99ce0d2442d7c4 100644
 --- a/mm/swap.c
 +++ b/mm/swap.c
-@@ -1091,6 +1091,10 @@ static const struct ctl_table swap_sysct
+@@ -1101,6 +1101,10 @@ static const struct ctl_table swap_sysct
   */
  void __init swap_setup(void)
  {
@@ -45,10 +8,10 @@ index 9cee7f6a380942..99ce0d2442d7c4 100644
 +	/* Only swap-in pages requested, avoid readahead */
 +	page_cluster = 0;
 +#else
- 	unsigned long megs = totalram_pages() >> (20 - PAGE_SHIFT);
+ 	unsigned long megs = PAGES_TO_MB(totalram_pages());
  
  	/* Use a smaller cluster for small-memory machines */
-@@ -1102,6 +1106,6 @@ void __init swap_setup(void)
+@@ -1112,6 +1116,6 @@ void __init swap_setup(void)
  	 * Right now other parts of the system means that we
  	 * _really_ don't want to cluster much more
  	 */
@@ -57,66 +20,3 @@ index 9cee7f6a380942..99ce0d2442d7c4 100644
  	register_sysctl_init("vm", swap_sysctl_table);
  }
 
-From f7f49141a5dbe9c99d78196b58c44307fb2e6be3 Mon Sep 17 00:00:00 2001
-From: Tk-Glitch <ti3nou@gmail.com>
-Date: Wed, 3 Feb 2021 11:20:12 +0200
-Subject: Revert "cpufreq: Avoid configuring old governors as default with intel_pstate"
-
-This is an undesirable behavior for us since our aggressive ondemand performs
-better than schedutil for gaming when using intel_pstate in passive mode.
-Also it interferes with the option to select the desired default governor we have.
-
-diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
-index 2c7171e0b0010..85de313ddec29 100644
---- a/drivers/cpufreq/Kconfig
-+++ b/drivers/cpufreq/Kconfig
-@@ -71,7 +71,6 @@ config CPU_FREQ_DEFAULT_GOV_USERSPACE
- 
- config CPU_FREQ_DEFAULT_GOV_ONDEMAND
- 	bool "ondemand"
--	depends on !(X86_INTEL_PSTATE && SMP)
- 	select CPU_FREQ_GOV_ONDEMAND
- 	select CPU_FREQ_GOV_PERFORMANCE
- 	help
-@@ -83,7 +84,6 @@ config CPU_FREQ_DEFAULT_GOV_ONDEMAND
- 
- config CPU_FREQ_DEFAULT_GOV_CONSERVATIVE
- 	bool "conservative"
--	depends on !(X86_INTEL_PSTATE && SMP)
- 	select CPU_FREQ_GOV_CONSERVATIVE
- 	select CPU_FREQ_GOV_PERFORMANCE
- 	help
-
-From 3a88b77d3cb9f9cd8a8aee052ab479b73aeb2e80 Mon Sep 17 00:00:00 2001
-From: "Jan Alexander Steffens (heftig)" <heftig@archlinux.org>
-Date: Sat, 13 Jan 2024 15:29:25 +0100
-Subject: [PATCH] arch/Kconfig: Default to maximum amount of ASLR bits
-
-To mitigate https://zolutal.github.io/aslrnt/; do this with a patch to
-avoid having to enable `CONFIG_EXPERT`.
----
- arch/Kconfig | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
-
-diff --git a/arch/Kconfig b/arch/Kconfig
-index f4b210ab061291..837d0dbb28ea08 100644
---- a/arch/Kconfig
-+++ b/arch/Kconfig
-@@ -1032,7 +1032,7 @@ config ARCH_MMAP_RND_BITS
- 	int "Number of bits to use for ASLR of mmap base address" if EXPERT
- 	range ARCH_MMAP_RND_BITS_MIN ARCH_MMAP_RND_BITS_MAX
- 	default ARCH_MMAP_RND_BITS_DEFAULT if ARCH_MMAP_RND_BITS_DEFAULT
--	default ARCH_MMAP_RND_BITS_MIN
-+	default ARCH_MMAP_RND_BITS_MAX
- 	depends on HAVE_ARCH_MMAP_RND_BITS
- 	help
- 	  This value can be used to select the number of bits to use to
-@@ -1066,7 +1066,7 @@ config ARCH_MMAP_RND_COMPAT_BITS
- 	int "Number of bits to use for ASLR of mmap base address for compatible applications" if EXPERT
- 	range ARCH_MMAP_RND_COMPAT_BITS_MIN ARCH_MMAP_RND_COMPAT_BITS_MAX
- 	default ARCH_MMAP_RND_COMPAT_BITS_DEFAULT if ARCH_MMAP_RND_COMPAT_BITS_DEFAULT
--	default ARCH_MMAP_RND_COMPAT_BITS_MIN
-+	default ARCH_MMAP_RND_COMPAT_BITS_MAX
- 	depends on HAVE_ARCH_MMAP_RND_COMPAT_BITS
- 	help
- 	  This value can be used to select the number of bits to use to

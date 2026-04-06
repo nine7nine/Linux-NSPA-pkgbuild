@@ -1,0 +1,135 @@
+From 2757d0368cc332271a824ff8435336cfda65b82a Mon Sep 17 00:00:00 2001
+From: jordan Johnston <johnstonljordan@gmail.com>
+Date: Sun, 5 Apr 2026 20:03:34 -0500
+Subject: [PATCH 3/3] sched: add compile-time sched_feat mode
+
+---
+ kernel/sched/core.c  |  9 ++++++---
+ kernel/sched/debug.c | 16 ++++++++++++++++
+ kernel/sched/sched.h | 16 ++++++++++++----
+ 3 files changed, 34 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 011fe1b2a..94cf41e92 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -158,16 +158,19 @@ __setup("sched_proxy_exec", setup_proxy_exec);
+ /*
+  * Debugging: various feature bits
+  *
+- * If SCHED_DEBUG is disabled, each compilation unit has its own copy of
+- * sysctl_sched_features, defined in sched.h, to allow constants propagation
+- * at compile time and compiler optimization based on features default.
++ * In compile-time mode, keep the resolved feature mask visible for debug
++ * output while sched_feat() itself resolves through generated constants.
+  */
++#ifdef CONFIG_SCHED_FEAT_COMPILE_TIME
++__read_mostly unsigned int sysctl_sched_features = SCHED_FEAT_DEFAULT_MASK;
++#else
+ #define SCHED_FEAT(name, enabled)	\
+ 	(1UL << __SCHED_FEAT_##name) * enabled |
+ __read_mostly unsigned int sysctl_sched_features =
+ #include "features.h"
+ 	0;
+ #undef SCHED_FEAT
++#endif
+ 
+ /*
+  * Print a warning if need_resched is set for the given duration (if
+diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
+index 93f009e10..2d2ef20c4 100644
+--- a/kernel/sched/debug.c
++++ b/kernel/sched/debug.c
+@@ -70,6 +70,8 @@ static int sched_feat_show(struct seq_file *m, void *v)
+ 	return 0;
+ }
+ 
++#ifndef CONFIG_SCHED_FEAT_COMPILE_TIME
++
+ #ifdef CONFIG_JUMP_LABEL
+ 
+ #define jump_label_key__true  STATIC_KEY_INIT_TRUE
+@@ -155,12 +157,21 @@ sched_feat_write(struct file *filp, const char __user *ubuf,
+ 
+ 	return cnt;
+ }
++#endif /* !CONFIG_SCHED_FEAT_COMPILE_TIME */
+ 
+ static int sched_feat_open(struct inode *inode, struct file *filp)
+ {
+ 	return single_open(filp, sched_feat_show, NULL);
+ }
+ 
++#ifdef CONFIG_SCHED_FEAT_COMPILE_TIME
++static const struct file_operations sched_feat_fops = {
++	.open		= sched_feat_open,
++	.read		= seq_read,
++	.llseek		= seq_lseek,
++	.release	= single_release,
++};
++#else
+ static const struct file_operations sched_feat_fops = {
+ 	.open		= sched_feat_open,
+ 	.write		= sched_feat_write,
+@@ -168,6 +179,7 @@ static const struct file_operations sched_feat_fops = {
+ 	.llseek		= seq_lseek,
+ 	.release	= single_release,
+ };
++#endif
+ 
+ static ssize_t sched_scaling_write(struct file *filp, const char __user *ubuf,
+ 				   size_t cnt, loff_t *ppos)
+@@ -495,7 +507,11 @@ static __init int sched_init_debug(void)
+ 
+ 	debugfs_sched = debugfs_create_dir("sched", NULL);
+ 
++#ifdef CONFIG_SCHED_FEAT_COMPILE_TIME
++	debugfs_create_file("features", 0444, debugfs_sched, NULL, &sched_feat_fops);
++#else
+ 	debugfs_create_file("features", 0644, debugfs_sched, NULL, &sched_feat_fops);
++#endif
+ 	debugfs_create_file_unsafe("verbose", 0644, debugfs_sched, &sched_debug_verbose, &sched_verbose_fops);
+ #ifdef CONFIG_PREEMPT_DYNAMIC
+ 	debugfs_create_file("preempt", 0644, debugfs_sched, NULL, &sched_dynamic_fops);
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index d3485d48b..578068849 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -2266,12 +2266,19 @@ enum {
+ #undef SCHED_FEAT
+ 
+ /*
+- * To support run-time toggling of sched features, all the translation units
+- * (but core.c) reference the sysctl_sched_features defined in core.c.
++ * Scheduler features can either be selected at run time through
++ * sysctl_sched_features or fixed at build time through features_compile.h.
+  */
++#ifdef CONFIG_SCHED_FEAT_COMPILE_TIME
++
++#include <generated/sched/features_compile.h>
++
+ extern __read_mostly unsigned int sysctl_sched_features;
++#define sched_feat(x) (!!SCHED_FEAT_##x)
+ 
+-#ifdef CONFIG_JUMP_LABEL
++#elif defined(CONFIG_JUMP_LABEL)
++
++extern __read_mostly unsigned int sysctl_sched_features;
+ 
+ #define SCHED_FEAT(name, enabled)					\
+ static __always_inline bool static_branch_##name(struct static_key *key) \
+@@ -2287,9 +2294,10 @@ extern struct static_key sched_feat_keys[__SCHED_FEAT_NR];
+ 
+ #else /* !CONFIG_JUMP_LABEL: */
+ 
++extern __read_mostly unsigned int sysctl_sched_features;
+ #define sched_feat(x) (sysctl_sched_features & (1UL << __SCHED_FEAT_##x))
+ 
+-#endif /* !CONFIG_JUMP_LABEL */
++#endif /* CONFIG_SCHED_FEAT_COMPILE_TIME */
+ 
+ extern struct static_key_false sched_numa_balancing;
+ extern struct static_key_false sched_schedstats;
+-- 
+2.53.0
+

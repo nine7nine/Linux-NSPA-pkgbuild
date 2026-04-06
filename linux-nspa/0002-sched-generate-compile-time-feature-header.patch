@@ -1,0 +1,96 @@
+From da65c59f47f784f406cf951bed41adb2d6c9b142 Mon Sep 17 00:00:00 2001
+From: jordan Johnston <johnstonljordan@gmail.com>
+Date: Sun, 5 Apr 2026 20:03:31 -0500
+Subject: [PATCH 2/3] sched: generate compile-time feature header
+
+---
+ Kbuild                | 18 +++++++++++++++++-
+ init/Kconfig          | 13 +++++++++++++
+ kernel/sched/Makefile | 18 ++++++++++++++++++
+ 3 files changed, 48 insertions(+), 1 deletion(-)
+
+diff --git a/Kbuild b/Kbuild
+index 13324b4bb..2c07d7381 100644
+--- a/Kbuild
++++ b/Kbuild
+@@ -37,10 +37,26 @@ $(offsets-file): arch/$(SRCARCH)/kernel/asm-offsets.s FORCE
+ # Generate rq-offsets.h
+ 
+ rq-offsets-file := include/generated/rq-offsets.h
++sched-features-file := include/generated/sched/features_compile.h
+ 
+ targets += kernel/sched/rq-offsets.s
+ 
+-kernel/sched/rq-offsets.s: $(offsets-file)
++quiet_cmd_sched_feat_header = GEN     $@
++      cmd_sched_feat_header = mkdir -p $(dir $@); \
++	$(PYTHON3) $(srctree)/scripts/gen_sched_feat_header.py \
++		--input $(srctree)/kernel/sched/features.h \
++		--overrides $(srctree)/kernel/sched/features.override \
++		--output $@
++
++ifdef CONFIG_SCHED_FEAT_COMPILE_TIME
++targets += $(sched-features-file)
++
++$(sched-features-file): kernel/sched/features.h kernel/sched/features.override \
++		scripts/gen_sched_feat_header.py FORCE
++	$(call if_changed,sched_feat_header)
++endif
++
++kernel/sched/rq-offsets.s: $(offsets-file) $(if $(CONFIG_SCHED_FEAT_COMPILE_TIME),$(sched-features-file))
+ 
+ $(rq-offsets-file): kernel/sched/rq-offsets.s FORCE
+ 	$(call filechk,offsets,__RQ_OFFSETS_H__)
+diff --git a/init/Kconfig b/init/Kconfig
+index fa79feb8f..3efc79262 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -918,6 +918,19 @@ config SCHED_PROXY_EXEC
+ 	  This option enables proxy execution, a mechanism for mutex-owning
+ 	  tasks to inherit the scheduling context of higher priority waiters.
+ 
++config SCHED_FEAT_COMPILE_TIME
++	bool "Compile scheduler features to constants"
++	help
++	  Replace sched_feat(NAME) runtime toggles with compile-time constants
++	  from an auto-generated header under include/generated/sched/.
++
++	  Runtime writes to /sys/kernel/debug/sched/features are disabled in
++	  this mode because scheduler feature selection becomes fixed at build
++	  time.
++
++	  The generated header is rebuilt automatically when kernel/sched/
++	  features.h or kernel/sched/features.override changes.
++
+ endmenu
+ 
+ #
+diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
+index 8ae86371d..d7d112c74 100644
+--- a/kernel/sched/Makefile
++++ b/kernel/sched/Makefile
+@@ -37,3 +37,21 @@ obj-y += core.o
+ obj-y += fair.o
+ obj-y += build_policy.o
+ obj-y += build_utility.o
++
++quiet_cmd_sched_feat_header = GEN     $@
++      cmd_sched_feat_header = mkdir -p $(dir $@); \
++	$(PYTHON3) $(srctree)/scripts/gen_sched_feat_header.py \
++		--input $(src)/features.h \
++		--overrides $(src)/features.override \
++		--output $@
++
++$(obj)/../../include/generated/sched/features_compile.h: $(src)/features.h \
++		$(src)/features.override $(srctree)/scripts/gen_sched_feat_header.py FORCE
++	$(call if_changed,sched_feat_header)
++
++always-$(CONFIG_SCHED_FEAT_COMPILE_TIME) += ../../include/generated/sched/features_compile.h
++targets += ../../include/generated/sched/features_compile.h
++
++ifdef CONFIG_SCHED_FEAT_COMPILE_TIME
++$(obj)/%.o $(obj)/%.s: $(obj)/../../include/generated/sched/features_compile.h
++endif
+-- 
+2.53.0
+

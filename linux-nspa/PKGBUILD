@@ -36,9 +36,6 @@ _kyber_disable=y
 # Enable multigenerational LRU
 _lru_enable=y
 
-## Enable DAMON
-_damon=
-
 # enable SPECULATIVE_PAGE_FAULT
 _spf_enable=y
 
@@ -50,9 +47,6 @@ _use_auto_optimization=y
 
 # disable debug to lower the size of the kernel
 _disable_debug=
-
-# Enable zram/zswap ZSTD compression
-_zstd_compression=y
 
 # Enable NetFilter Full Cone Nat
 _nf_cone=y
@@ -71,37 +65,37 @@ _tickrate=full
 # !!! WARNING: Do NOT enable this: may have your system !!!
 _vmx_hack=y
 
-# Disable RT Throttling. This can be risky; RT task could lock up system.
-# However, a properly setup system (kernel/userspace) should avoid this.
-_no_RT_throttle=y
-
-# Enable converting sched_feat() into compile-time implementation
-# This allows the compiler to make better optimizations to scheduler
-# code. This only supports my config.
-_sched_feat_comp=y
-
- pkgbase=linux-nspa
-_major=6.16.9
-_minor=0
-#_minorc=$((_minor+1))
-#_rcver=rc8
-pkgver=${_major}
-_stable=${_major}.${_minor}
-#_stable=${_major}
-#_stablerc=${_major}-${_rcver}
-#_srcname=linux-${_stable}
-_srcname=linux-6.16.9
-arch=(x86_64 x86_64_v3)
+pkgbase=linux-nspa
+pkgver=6.19.11
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=10
+pkgrel=1
 arch=('x86_64' 'x86_64_v3')
+_srcname=linux-${pkgver}
 url="https://github.com/nine7nine/Linux-NSPA"
-license=('GPL2')
-options=('!strip')
-makedepends=('bc' 'texlive-latexextra' 'libelf' 'pahole' 'cpio' 'perl' 'tar' 'xz' 'zstd' 'xmlto' 'git' 'gcc' 'gcc-libs' 'glibc' 'binutils' 'make' 'patch')
+license=('GPL-2.0-only')
+options=('!debug' '!strip')
+makedepends=(
+  'bc'
+  'binutils'
+  'cpio'
+  'gcc'
+  'gcc-libs'
+  'git'
+  'glibc'
+  'libelf'
+  'make'
+  'patch'
+  'pahole'
+  'perl'
+  'tar'
+  'texlive-latexextra'
+  'xmlto'
+  'xz'
+  'zstd'
+)
 source=(
-  "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.16.9.tar.xz"
-  "0000-patch-6.16-rt3.patch"
+  "https://cdn.kernel.org/pub/linux/kernel/v${pkgver%%.*}.x/${_srcname}.tar.xz"
+  "0000-patch-6.19.3-rt1.patch"
   "config"
   "config_surface7"
   "auto-cpu-optimization.sh"
@@ -116,11 +110,9 @@ source=(
   "0022-kt-vm-mm_optimizations.patch"
   "0019-hid-wacom-Silence_log_spam.patch"
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
-  "0030-Microsoft_Surface_Support-6.14.patch"
+  "0030-Microsoft_Surface_Support-6.19.patch"
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0050-async-patches.patch"
-  "0051-drm-patches.patch"
-  "0052-block-patches.patch"
   "0053-Kcompressd-Unofficial-v0.5.patch"
   "0102-Sched-Improve_rq_selection_for_blocked_task_when_affinity_changes.patch"
   "0202-sched-fair-Always_update_CPU_capacity_when_load_balancing.patch"
@@ -128,15 +120,35 @@ source=(
   "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch"
   "1101-sched-fair-Reduce_PELT_half-life_from_32ms_to_16ms.patch"
   "1102-misc-Avoid_Dynamic_Mem_Allocations.patch"
-  "1103-drm-Convert_CPU-invariant_uninterruptible_waits_to_TASK_IDLE.patch"
   "1110-add-acs-overrides_iommu.patch"
   "1112-sched-core-Skip_Superfluous_acquire_barrier_in_ttwu.patch"
   "1116-kt-pm-suspend_patches.patch"
   "1119-mm-compaction-Skip_all_non-migratable_pages_during_scan.patch"
   "1122-dma-buf-sync_file-Speed_up_ioctl_by_omitting_debug_names.patch"
   "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
-  "9999-sched_feat-compile-time.patch"
-  "1130-sched-Introduce-Cache-aware-scheduling-V3.patch"
+  "0001-sched-cache-Introduce-infrastructure-for-cache-aware-load-balancing.patch"
+  "0002-sched-cache-Limit-the-scan-number-of-CPUs-when-calculating-task-occupancy.patch"
+  "0003-sched-cache-Record-per-LLC-utilization-to-guide-cache-aware-scheduling-decisions.patch"
+  "0004-sched-cache-Introduce-helper-functions-to-enforce-LLC-migration-policy.patch"
+  "0005-sched-cache-Make-LLC-id-continuous.patch"
+  "0006-sched-cache-Assign-preferred-LLC-ID-to-processes.patch"
+  "0007-sched-cache-Track-LLC-preferred-tasks-per-runqueue.patch"
+  "0008-sched-cache-Introduce-per-CPU-s-tasks-LLC-preference-counter.patch"
+  "0009-sched-cache-Calculate-the-percpu-sd-task-LLC-preference.patch"
+  "0010-sched-cache-Count-tasks-prefering-destination-LLC-in-a-sched-group.patch"
+  "0011-sched-cache-Check-local-group-only-once-in-update-sg-lb-stats.patch"
+  "0012-sched-cache-Prioritize-tasks-preferring-destination-LLC-during-balancing.patch"
+  "0013-sched-cache-Add-migrate-llc-task-migration-type-for-cache-aware-balancing.patch"
+  "0014-sched-cache-Handle-moving-single-tasks-to-from-their-preferred-LLC.patch"
+  "0015-sched-cache-Respect-LLC-preference-in-task-migration-and-detach.patch"
+  "0016-sched-cache-Disable-cache-aware-scheduling-for-processes-with-high-thread-counts.patch"
+  "0017-sched-cache-Avoid-cache-aware-scheduling-for-memory-heavy-processes.patch"
+  "0018-sched-cache-Enable-cache-aware-scheduling-for-multi-LLCs-NUMA-node.patch"
+  "0019-sched-cache-Allow-the-user-space-to-turn-on-and-off-cache-aware-scheduling.patch"
+  "0020-sched-cache-Add-user-control-to-adjust-the-aggressiveness-of-cache-aware-scheduling.patch"
+  "0001-scripts-add-sched_feat-compile-time-header-generator.patch"
+  "0002-sched-generate-compile-time-feature-header.patch"
+  "0003-sched-add-compile-time-sched_feat-mode.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -144,9 +156,9 @@ export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
 
 prepare() {
+  cd "${srcdir}/${_srcname}"
 
-  cd ${srcdir}/$_srcname
-
+  echo "Setting version..."
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
@@ -154,30 +166,36 @@ prepare() {
   for src in "${source[@]}"; do
     src="${src%%::*}"
     src="${src##*/}"
+    [[ $src = *.patch ]] || continue
 
-    if [[ $src == "0999-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Np1 < "../$src"
-    elif [[ $src == "201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch" && $_no_RT_throttle == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Np1 < "../$src"
-    elif [[ $src == "9999-sched_feat-compile-time.patch" && $_sched_feat_comp == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Np1 < "../$src"
-    elif [[ $src == *.patch ]]; then
-      # Apply other patches if they are present
-      echo "Applying patch $src..."
-      patch -Np1 < "../$src"
+    if [[ $src == "0999-cpu-Force-Enable-VMX-hack.patch" && -z $_vmx_hack ]]; then
+      continue
     fi
+
+    echo "Applying patch $src..."
+    patch -Np1 < "../$src"
   done
 
   echo "Setting config..."
 
-  if [ -n "$_config_Surface7" ]; then
+  if [ -n "$_use_current" ]; then
+      if [[ -s /proc/config.gz ]]; then
+          echo "Extracting config from /proc/config.gz..."
+          zcat /proc/config.gz > .config
+      else
+          warning "Your kernel was not compiled with IKPROC!"
+          warning "You cannot read the current config!"
+          warning "Aborting!"
+          return 1
+      fi
+  elif [ -n "$_config_Surface7" ]; then
       cp ../config_surface7 .config
   else
       cp ../config .config
   fi
+
+    echo "Enabling compile-time scheduler features..."
+    scripts/config --enable SCHED_FEAT_COMPILE_TIME
 
     if [ -n "$_use_auto_optimization" ]; then
         "${srcdir}"/auto-cpu-optimization.sh
@@ -209,7 +227,7 @@ prepare() {
         scripts/config --disable MQ_IOSCHED_KYBER
     fi
 
-    if [ "$_tickrate" = "perodic" ]; then
+    if [ "$_tickrate" = "periodic" ]; then
         echo "Enabling periodic ticks..."
         scripts/config --disable NO_HZ_IDLE \
                       --disable NO_HZ_FULL \
@@ -253,15 +271,6 @@ prepare() {
                        --enable LRU_GEN_ENABLED \
                        --disable LRU_GEN_STATS
     fi
-
-#    if [ -n "$_damon" ]; then
-#        echo "Enabling DAMON..."
-#        scripts/config --enable DAMON \
-#                       --disable DAMON_VADDR \
-#                       --disable DAMON_DBGFS \
-#                       --enable DAMON_PADDR \
-#                       --enable DAMON_RECLAIM
-#    fi
 
     if [ -n "$_lrng_enable" ]; then
         echo "Enabling Linux Random Number Generator ..."
@@ -327,40 +336,25 @@ prepare() {
                        --disable DEBUG_PREEMPT
     fi
 
-    ### Optionally use running kernel's config
-    # code originally by nous; http://aur.archlinux.org/packages.php?ID=40191
-    if [ -n "$_use_current" ]; then
-        if [[ -s /proc/config.gz ]]; then
-            echo "Extracting config from /proc/config.gz..."
-            # modprobe configs
-            zcat /proc/config.gz > ./.config
-        else
-            warning "Your kernel was not compiled with IKPROC!"
-            warning "You cannot read the current config!"
-            warning "Aborting!"
-            exit
-        fi
-    fi
-
     ### Optionally load needed modules for the make localmodconfig
     # See https://aur.archlinux.org/packages/modprobed-db
     if [ -n "$_localmodcfg" ]; then
-        if [ -e $HOME/.config/modprobed.db ]; then
+        if [ -e "$HOME/.config/modprobed.db" ]; then
             echo "Running Steven Rostedt's make localmodconfig now"
-            make ${BUILD_FLAGS[*]} LSMOD=$HOME/.config/modprobed.db localmodconfig
+            make LSMOD="$HOME/.config/modprobed.db" localmodconfig
         else
             echo "No modprobed.db data found"
-            exit
+            return 1
         fi
     fi
 
     echo "Applying default config..."
-    make ${BUILD_FLAGS[*]}  olddefconfig
-    make ${BUILD_FLAGS[*]} -s kernelrelease > version
+    make olddefconfig
+    make -s kernelrelease > version
     echo "Prepared $pkgbase version $(<version)"
 
     ### Running make nconfig
-    [[ -z "$_makemenuonfig" ]] || make ${BUILD_FLAGS[*]} menuconfig
+    [[ -z "$_makemenuconfig" ]] || make menuconfig
 
     ### Save configuration for later reuse
     cp -Tf ./.config "${startdir}/config-${pkgver}-${pkgrel}${pkgbase#linux}"
@@ -368,19 +362,22 @@ prepare() {
 }
 
 build() {
-  cd ${_srcname}
-  make ${BUILD_FLAGS[*]} -j3 all
+  cd "${srcdir}/${_srcname}"
+  make -j3 all
 }
 
 _package() {
     pkgdesc="The $pkgdesc kernel and modules"
-    depends=('coreutils' 'kmod' 'initramfs')
-    optdepends=('crda: to set the correct wireless channels of your country'
+    depends=('coreutils' 'initramfs' 'kmod')
+    optdepends=(
+        "$pkgbase-headers: headers and scripts for building modules"
         'linux-firmware: firmware images needed for some devices'
-    'modprobed-db: Keeps track of EVERY kernel module that has ever been probed - useful for those of us who make localmodconfig')
-    provides=(VIRTUALBOX-GUEST-MODULES WIREGUARD-MODULE KSMBD-MODULE)
+        'modprobed-db: Keeps track of every kernel module that has ever been probed'
+        'wireless-regdb: to set the correct wireless channels of your country'
+    )
+    provides=('KSMBD-MODULE' 'VIRTUALBOX-GUEST-MODULES' 'WIREGUARD-MODULE')
 
-  cd ${srcdir}/$_srcname
+  cd "${srcdir}/${_srcname}"
 
   local modulesdir="$pkgdir/usr/lib/modules/$(<version)"
 
@@ -393,7 +390,8 @@ _package() {
   echo "$pkgbase" | install -Dm644 /dev/stdin "$modulesdir/pkgbase"
 
   echo "Installing modules..."
-  make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 modules_install
+  ZSTD_CLEVEL=19 make INSTALL_MOD_PATH="$pkgdir/usr" INSTALL_MOD_STRIP=1 \
+    DEPMOD=/doesnt/exist modules_install
 
   # remove build and source links
   rm -f "$modulesdir"/{source,build}
@@ -401,9 +399,10 @@ _package() {
 
 _package-headers() {
   pkgdesc="Headers and scripts for building modules for the $pkgdesc kernel"
-  depends=(pahole)
+  depends=('binutils' 'gcc-libs' 'glibc' 'libelf' 'pahole' 'xxhash' 'zlib' 'zstd')
+  provides=('LINUX-HEADERS')
 
-  cd ${_srcname}
+  cd "${srcdir}/${_srcname}"
   local builddir="$pkgdir/usr/lib/modules/$(<version)/build"
 
   echo "Installing build files..."
@@ -414,7 +413,9 @@ _package-headers() {
   cp -t "$builddir" -a scripts
 
   # required when STACK_VALIDATION is enabled
-  install -Dt "$builddir/tools/objtool" tools/objtool/objtool
+  if [[ $(scripts/config -s CONFIG_HAVE_STACK_VALIDATION) = y ]]; then
+    install -Dt "$builddir/tools/objtool" tools/objtool/objtool
+  fi
 
   # add xfs and shmem for aufs building
   mkdir -p "$builddir"/{fs/xfs,mm}
@@ -489,40 +490,58 @@ for _p in "${pkgname[@]}"; do
   }"
 done
 
-sha256sums=('7ac8c8a3cf05476375deaaa85dfcee095a826ffe557b437f43774fc3b64ce58d'
-            'ced71dc17bd457182b36722e3d341e286d11f663793899e3f3cb34b9b6be0703'
-            '0d88a1316db91ab731c24e9ffaeec0dbb9be308ab571b5bea71dfffdd90bffbc'
-            '876e384b37d6aa39a5f30bc01b80ec8b7c28c856aa828e4db7a6afc6dec01c2a'
-            'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
-            '19007cf46fbd578d0a2c0a2940cdbca92d31d3ca31b72ddcac0cfe6690e9bf90'
+sha256sums=('20039d7b6b256c08be2f8fac43c3ff9a620308c703c643cf2f80c3910b9bd59b'
+            '5dab3fe3a2c8d4633b61cec9a864dd44a5a4868ca93437781388dbcc68b7ab6c'
+            'd200fc81eaf3159b9a370022242264283c63b49f0f6c74abe7297128015fa306'
+            '62732133221161794e9d16eb0a5d93545de5d69bfb79495823c7058ba9672b1a'
+            '0980380adc3e2c3931bce72b29becb0e19ba3cbf05f7ab30a87ff27e94478b9e'
+            '5a49d7244410a25c013e30ba0fb8f304c52aa732474407091042a3d29455ec60'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
             '36928ee323a84d8eb75460619b8e2b6493ea6e03f438c0820f73aa79a58cf9b2'
             '05616703ad898f967b7055bdc6dc6c5aab33257005c2ef9d87d55af15c12927b'
             '925b3edafe5aae0e577a5a51f653ef0a93d4299c44e9dcba13882010d4bc58ee'
-            'f9002afa9abad89fc4ccf19c1d780145439c6d6afce02fddda8b0130fd9691e1'
+            '95c8eda619b44b2ef1085287580255c5431c4cba6f2d75199e84b4435cd6daee'
             '9c2dee249ba6fd79eb8d8142a4591e6a64d88d44d2bf49d486499f70c31b5bf3'
             '53bc1fc5f0c44072222c67ce5fa53a729643d5269d391b742bab1834bfe4d313'
-            'bc95118f9a6840fa6aabb3a475b9659088a47d1ed1eb4e7880b03eaec7d68aa5'
+            '4507394cdde5e4944a1ab89579aeecc4c432e0e644f61ad8f0921a9f055c0d46'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
-            '17ff4ea2bf922badba9a6e2451d930d303ae9f55733900194f4e345c7d178b9a'
-            'a7171f2bad5fb36288ce91abaea4438b176fbf25ad911f93b51373eaaef7ed65'
+            '2c9b70a53eab0a1e5272120992a34ad313e3616daeefd6049367a63ff8af0369'
+            'c183b5cdd0f4f073cabae4f12ca4a25961b5f2e0123db2f9d91c030a4957d497'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
-            '973ecc4b169496a56bcc65e559c40bccab9744234717d74a2d472c2730c4466e'
-            '7ace8f9481f30fa351f5197a809243f6f901b6bb30eb811c9eb29280acc30fca'
-            '60ead75282d3b56d611ca6b1461cbd55798025411d3ec57f24befaa43be8cef5'
-            'a872485230d888d098820143eb10c83d92a4dce2a6f9096b2a4381a51dd4bafb'
+            '243bc2495d8bd67375f63d2c830dfd939a134f442dc7f80d12d566bf4e55db55'
+            'cc0f2e6981cd566e741f039f404f68c38294291d1b232f587c0c7c4c753658ee'
             '299caa16bc960c3907e9513354e04f1f7683e4cb4972882ec5e92652f42a7070'
             '82427ed401357b5dbc4d095db2abc12d003501da31d49b2acd0c7899def50b2b'
             '88620fb4c05734f0da4e2ea7098d40ff8bdafe2485ab449085da769550ae18b6'
             '3a776118280a9f28d7f779d86b9a0328673ba4efb558ca4b7a47288a19b96546'
             '4352a282b865b2ee50b70d3d2537661dedc9617463cd3e61ddc52e12bb8b53ac'
-            'db5b0d3d82736e8acd9289e7728af3845244c32ff7a8d2e4151e1efbe89f0c09'
-            '79c6dcbf04c30c7edd21beaab80090fb7d00feddc5396e713617463879c65a8e'
+            'fecf3471d2001be5655865500af150dca009eb2cb60b30338beebbfacef5df27'
             'f3e6c8c98ea5172f424971bc20f128c7f1f6416af6944f58dad1048ba4dff168'
-            'a07a110ec5bf4ebcfa1fa04e446ca00145caf72cc3d28d3f5937361f1b4e2e11'
-            '005cd66bbec398917e56c0f3f06eebaba9d7fc351c12b215e4e1acf13355e56d'
+            'e41d8a575ebd2b5daaae4f23bb88484aab78ced7e64bb97db21b5c9985277c4f'
+            '17c5d9adc2e07d4931bb5562933fcde462fbedf56c1be1f2f6b69aa93076e2dc'
             'e6ff1293531eefbec669a8fa5258545acf3d95cd6d19919f233e369cf8e289e8'
-            '3059893c86b3eee288edb6c7d958d84e92c67a7d8e55ad48a9470a2100b0a22e'
+            'c1f8a7cd2eb63e1dc1a4c1e35618cf8c8e34714e0634d91c293f70a4335b7122'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
-            '5c8e2ec59f1e42f1dcc6d5527fcee741aef9e4832735facb96fc8d7fe2ea08b6'
-            'cc6bb84cef2c628bd13d7df3859824555a8e4c53abc5e1e7851930d215e625b1')
+            '84d28687c8b45705c0373800fde9a2ad94684c80d6a585471cdace295544b27f'
+            'e65d97f8be05430e6a851992541eaaac80690863a5a74edf2aed50cf3544b042'
+            'dde1dc58b19fa38486da2b99418e8f6de41c05c002460f012749662a7b72c2bb'
+            'a8478189d1c0bd2b5c5ba8a49eb3a6de5fdee49172725c720a6a18a259092076'
+            '746c0619c26c6aa65e4eab5bef8ab5773078c77dbe46f0a35105869ef971d9fc'
+            'a16658aec2285e2318c4c56caccc29827d275237f56bfb22969cc24eeb68e38b'
+            '39e7384bdb707f6d694e8721b6c94644fcbe2490b5cb84956c0bc32ffc08fb25'
+            '07d1a24994a2f085b11404a18ba664c74fb74a6deb589eaa29c692e04a65df91'
+            '421ab1b4efe6945aa8d9aa3566cb826d489eee4177cb04606e281de8f30dcfec'
+            '845bdcce139eea222e11f98a8a50ff5dbbe1f0e7ebaffe73495bd582142ed0b6'
+            '475ccd410d6922dad75f92ac70e960475312cb43618366867b5c852cd1a9b1be'
+            '1264b46a74d0370fc8c3949b2caec10bcc5987b72db7a74be0c076eabfc199a3'
+            '09123a92899dfba3543a3e0806d5c1fe9204d3cf74c5d6953e84c6d9e6d9790f'
+            '678a83ccdbe1c9b427a96cb3a7f7570ed9ad4789186f45e385ff0705e65efeaf'
+            '11c935abe59b7a68f3b3c6042dbf97e2daabd40770739bab6cd561530ffeb882'
+            '625691ecd2eeb2ec89482d0f5895136bae5b803af4da03916998b5828907986c'
+            'b42c160e093f6c199dcbcc485bcbed3c030716ea6c4678fc3738a805f66ae12b'
+            '1a4cf44ef6c89dc99df8cb2da066a47ae60e1123d8a61db49aca24e1da2488ce'
+            '517e17e684356bea6bd2d99947f734166698a6e77bf127e035fc1c3ae23a7a59'
+            'dabb85e99bdcb87189f645c7be8c617de9ed944183435b9c42fe8c6c18f75dfc'
+            '6f175cb93f55d043deaa5257acf2889b3135a4730aa14f24f60e3757101b7fba'
+            'd75fdd487921ac7ceeeaf385d952a9376b872da8829c4f3c07e6833b58c59029'
+            '899f036e85640d3aa07a255bdf256231363cb16461f099540b39e01c8eb689c3')
