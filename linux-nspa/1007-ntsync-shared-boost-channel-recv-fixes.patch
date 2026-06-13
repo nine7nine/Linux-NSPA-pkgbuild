@@ -1,0 +1,312 @@
+ntsync 1007 (combined 1007-1008): exclusive recv + channel-entry refcount
+
+Combined patch — 1007 (channel exclusive recv) and 1008 (channel-entry
+refcount for REPLY-vs-SEND_PI UAF) fold into one chunk because no
+intermediate post-1007 snapshot exists.
+
+1007: channel exclusive recv — close priority-inversion race in
+ntsync_channel_send_pi.  Speculative boost of recv_wq.head was racing
+with non-exclusive waiters (wait_event_interruptible default).  Non-head
+receivers could win the entry-pop race, leaving the boosted head with
+high priority + no work and the winner with low priority + actual work
+— a real priority inversion.
+
+1008: refcount channel entries to fix REPLY-vs-SEND_PI UAF.  REPLY's
+wake_up_all on e->wq runs outside obj_lock; SEND_PI cleanup can free
+the entry between REPLY's obj_unlock and REPLY's wake_up_all reaching
+the freed wait queue.  refcount_t on channel_entry; whichever
+decrement reaches 0 frees.
+
+Regenerated 2026-05-04 from snapshot delta ntsync.c.post1006 →
+ntsync.c.post1008 to replace the original 1007/1008 .patch files.
+
+---
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -74,6 +74,20 @@
+ 		struct {
+ 			bool manual;
+ 			bool signaled;
++			/* NSPA: deferred EVENT_SET_PI boost.  Staged here at
++			 * EVENT_SET_PI time and applied to the *consumer* of
++			 * the signal at wait-return.  Closes the fast-path
++			 * race where the consumer takes obj_lock first, sees
++			 * signaled and returns without queueing, leaving an
++			 * "apply-to-queued-waiter" approach with no target.
++			 * One-shot: cleared when consumed.  new_ep is the
++			 * pre-allocated tracking entry that apply_event_pi_boost
++			 * will consume; ownership transferred from EVENT_SET_PI. */
++			struct {
++				u32 policy;
++				u32 prio;
++				struct ntsync_event_pi *new_ep;
++			} pending_pi;
+ 		} event;
+ 		/* NSPA: kernel-mediated request/reply mailbox. */
+ 		struct {
+@@ -1100,33 +1114,88 @@
+ }
+ 
+ /*
+- * NSPA: Set an event and atomically apply a PI boost to the first waiter.
++ * NSPA: Consume any pending EVENT_SET_PI boost staged on @event and
++ * apply it to current task.  Called from wait_any/wait_all return paths
++ * when @event is the obj that signaled the wait.  One-shot — first
++ * consumer wins; the staged entry is cleared atomically under obj_lock.
++ * No-op if no pending boost.
++ *
++ * Closes a fast-path race in the previous "find target at SET_PI time"
++ * design: a waiter that took obj_lock first, saw signaled=true and
++ * returned without queueing was never visible to event->any_waiters,
++ * so no target could be captured and no boost was applied — observed
++ * as ~4% missing-boost rate under PREEMPT_RT debug-kernel scheduling.
+  *
+- * Used for cross-thread SendMessage bypass: the sender (e.g. an
+- * RT AudioCalc thread) signals the receiver's queue event with its
+- * own priority intent.  The kernel wakes the receiver at the boosted
+- * priority; the boost auto-releases on the receiver's next wait entry.
+- *
+- * If no waiter is currently blocked, behaves exactly like EVENT_SET —
+- * the signal is latched and a future wait_any returns immediately.
+- * No boost can be applied in that case (no target); the sender's
+- * intent is "boost whoever handles my message *now*".
++ * Caller must NOT hold obj_lock; this takes it.
++ */
++static void consume_event_pi_boost(struct ntsync_obj *event)
++{
++	struct ntsync_event_pi *new_ep = NULL;
++	u32 policy = 0, prio = 0;
++	bool valid = false;
++	bool all;
++
++	if (event->type != NTSYNC_TYPE_EVENT)
++		return;
++
++	all = ntsync_lock_obj(event->dev, event);
++	if (event->u.event.pending_pi.new_ep) {
++		new_ep = event->u.event.pending_pi.new_ep;
++		policy = event->u.event.pending_pi.policy;
++		prio   = event->u.event.pending_pi.prio;
++		event->u.event.pending_pi.new_ep = NULL;
++		valid = true;
++	}
++	ntsync_unlock_obj(event->dev, event, all);
++
++	if (valid) {
++		if (!apply_event_pi_boost(event->dev, current,
++					  policy, prio, new_ep))
++			kfree(new_ep);
++	}
++}
++
++/*
++ * NSPA: Set an event and stage a PI boost for the consumer of the signal.
++ *
++ * Used for cross-thread SendMessage bypass: the sender (e.g. an RT
++ * AudioCalc thread) signals the receiver's queue event with its own
++ * priority intent.  The kernel wakes the receiver and applies the boost
++ * to whichever task actually consumes the signal — handled at wait-
++ * return via consume_event_pi_boost().
++ *
++ * Design — deferred boost (replaces "find queued waiter at SET_PI"):
++ *   1. Pre-allocate tracking entry outside any locks (slab on RT).
++ *   2. Stage (policy, prio, new_ep) on the event under obj_lock; ALSO
++ *      set signaled=true and wake any queued waiter.
++ *   3. The first task to consume the signal — whether it was queued
++ *      and then woken, or fast-path (already-signaled) — applies the
++ *      staged boost to itself via consume_event_pi_boost() at wait-
++ *      return.  This is race-free: the consumer is by definition the
++ *      task whose wait_any/wait_all returned with this event as the
++ *      signaled obj.
++ *   4. Last-writer-wins if EVENT_SET_PI is called twice without an
++ *      intervening consumption — earlier staged new_ep is freed.
++ *   5. EVENT_RESET clears the staging (signal cancelled, boost too).
++ *   6. ntsync_free_obj frees a leaked staging entry on object death.
++ *
++ * If no consumer ever arrives (event freed unconsumed), the staged
++ * new_ep is freed in ntsync_free_obj — no leak.
+  *
+  * PREEMPT_RT notes:
+  *  - kzalloc done BEFORE obj lock (GFP_KERNEL, may sleep).
+- *  - sched_setattr_nocheck called under boost_lock (raw_spin) per
+- *    established PI v2 pattern.
+- *  - target get_task_struct taken under obj->lock to prevent UAF
+- *    between wake and boost application.
++ *  - kfree of overwritten prior staging done AFTER obj_unlock.
++ *  - sched_setattr_nocheck happens later (in apply_event_pi_boost from
++ *    consume_event_pi_boost), under boost_lock per established PI v2
++ *    pattern.
+  */
+ static int ntsync_event_set_pi(struct ntsync_obj *event, void __user *argp)
+ {
+ 	struct ntsync_event_set_pi_args args;
+ 	struct ntsync_device *dev = event->dev;
+-	struct ntsync_event_pi *new_ep = NULL;
++	struct ntsync_event_pi *new_ep;
++	struct ntsync_event_pi *prior_new_ep = NULL;
+ 	struct ntsync_pi_work pi_work;
+-	struct task_struct *target = NULL;
+-	bool consumed = false;
+ 	bool all;
+ 
+ 	if (event->type != NTSYNC_TYPE_EVENT)
+@@ -1142,31 +1211,24 @@
+ 	if (args.prio < 1 || args.prio > MAX_RT_PRIO - 1)
+ 		return -EINVAL;
+ 
+-	/* Pre-allocate tracking entry outside any locks.  May be unused
+-	 * if target already has an entry; freed at the tail. */
+ 	new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++	if (!new_ep)
++		return -ENOMEM;
+ 
+ 	ntsync_pi_work_init(&pi_work);
+ 	ntsync_pi_work_prealloc(&pi_work);
+ 
+ 	all = ntsync_lock_obj(dev, event);
+ 
++	/* Stage the boost on the event.  Last-writer-wins. */
++	prior_new_ep = event->u.event.pending_pi.new_ep;
++	event->u.event.pending_pi.policy = args.policy;
++	event->u.event.pending_pi.prio   = args.prio;
++	event->u.event.pending_pi.new_ep = new_ep;
++
+ 	/* Signal identical to EVENT_SET — set, try wake-all, try wake-any. */
+ 	event->u.event.signaled = true;
+ 
+-	/* Capture the first waiter while under obj->lock so the reference
+-	 * is safe even after try_wake_any_event rearranges the queue.
+-	 * Priority-ordered queue (Patch 1002) means list head is the
+-	 * highest-priority waiter — the one that will actually wake. */
+-	if (!list_empty(&event->any_waiters)) {
+-		struct ntsync_q_entry *entry;
+-
+-		entry = list_first_entry(&event->any_waiters,
+-					 struct ntsync_q_entry, node);
+-		target = entry->q->task;
+-		get_task_struct(target);
+-	}
+-
+ 	if (all)
+ 		try_wake_all_obj(dev, event, &pi_work);
+ 	try_wake_any_event(event);
+@@ -1175,16 +1237,8 @@
+ 
+ 	ntsync_pi_work_finish(&pi_work);
+ 
+-	/* Apply the boost outside obj->lock; helper takes boost_lock. */
+-	if (target) {
+-		consumed = apply_event_pi_boost(dev, target,
+-						args.policy, args.prio,
+-						new_ep);
+-		put_task_struct(target);
+-	}
+-
+-	if (!consumed)
+-		kfree(new_ep);
++	/* Free overwritten prior staging outside lock (slab on RT). */
++	kfree(prior_new_ep);
+ 
+ 	return 0;
+ }
+@@ -1192,6 +1246,7 @@
+ static int ntsync_event_reset(struct ntsync_obj *event, void __user *argp)
+ {
+ 	struct ntsync_device *dev = event->dev;
++	struct ntsync_event_pi *prior_new_ep = NULL;
+ 	__u32 prev_state;
+ 	bool all;
+ 
+@@ -1203,8 +1258,15 @@
+ 	prev_state = event->u.event.signaled;
+ 	event->u.event.signaled = false;
+ 
++	/* NSPA: cancelling the signal cancels any pending EVENT_SET_PI
++	 * boost too — no consumer should arrive after a reset. */
++	prior_new_ep = event->u.event.pending_pi.new_ep;
++	event->u.event.pending_pi.new_ep = NULL;
++
+ 	ntsync_unlock_obj(dev, event, all);
+ 
++	kfree(prior_new_ep);
++
+ 	if (put_user(prev_state, (__u32 __user *)argp))
+ 		return -EFAULT;
+ 
+@@ -1563,7 +1625,13 @@
+ 	obj_lock(ch);
+ 	while (RB_EMPTY_ROOT(&ch->u.channel.pending)) {
+ 		obj_unlock(ch);
+-		ret = wait_event_interruptible(ch->u.channel.recv_wq,
++		/* Exclusive wait: wake_up() in SEND_PI walks the recv_wq and
++		 * stops at the first exclusive waiter.  This makes the head
++		 * (which SEND_PI speculatively boosted) the unique winner of
++		 * the entry-pop race — closes the priority-inversion window
++		 * where a non-head receiver could pop the entry while the
++		 * boosted head got stranded with high prio and no work. */
++		ret = wait_event_interruptible_exclusive(ch->u.channel.recv_wq,
+ 			!RB_EMPTY_ROOT(&ch->u.channel.pending));
+ 		if (ret < 0) {
+ 			kfree(new_ep);
+@@ -1625,7 +1693,8 @@
+ 	obj_lock(ch);
+ 	while (RB_EMPTY_ROOT(&ch->u.channel.pending)) {
+ 		obj_unlock(ch);
+-		ret = wait_event_interruptible(ch->u.channel.recv_wq,
++		/* See exclusive-wait commentary in ntsync_channel_recv. */
++		ret = wait_event_interruptible_exclusive(ch->u.channel.recv_wq,
+ 			!RB_EMPTY_ROOT(&ch->u.channel.pending));
+ 		if (ret < 0) {
+ 			kfree(new_ep);
+@@ -1820,6 +1889,12 @@
+ 		ntsync_pi_work_finish(&pi_work);
+ 	}
+ 
++	/* NSPA: free any unconsumed EVENT_SET_PI staging — the signal was
++	 * either consumed (clears it), reset (clears it), or the event
++	 * died unconsumed (this path). */
++	if (obj->type == NTSYNC_TYPE_EVENT)
++		kfree(obj->u.event.pending_pi.new_ep);
++
+ 	/* NSPA: channels should be empty by the time we're freed.  Pending
+ 	 * and dispatched senders hold the file open via ioctl ref, so we
+ 	 * cannot reach this path with active entries.  WARN if we do. */
+@@ -2254,6 +2329,7 @@
+ 
+ 	/* and finally, unqueue */
+ unqueue:
++	signaled = atomic_read(&q->signaled);
+ 	for (i = 0; i < total_count; i++) {
+ 		struct ntsync_q_entry *entry = &q->entries[i];
+ 		struct ntsync_obj *obj = entry->obj;
+@@ -2269,10 +2345,15 @@
+ 			ntsync_pi_recalc(obj, &pi_work);
+ 		ntsync_unlock_obj(dev, obj, all);
+ 
++		/* NSPA: if this is the signaled obj and it's an event, consume
++		 * any pending EVENT_SET_PI boost — applies to current task.
++		 * Done before put_obj so the obj reference is still safe. */
++		if ((int)i == signaled && obj->type == NTSYNC_TYPE_EVENT)
++			consume_event_pi_boost(obj);
++
+ 		put_obj(obj);
+ 	}
+ 
+-	signaled = atomic_read(&q->signaled);
+ 	if (signaled != -1) {
+ 		struct ntsync_wait_args __user *user_args = argp;
+ 
+@@ -2421,6 +2502,13 @@
+ 
+ 		atomic_dec(&obj->all_hint);
+ 
++		/* NSPA: TODO — wait_all consumer hook for EVENT_SET_PI deferred
++		 * boost.  Cannot call consume_event_pi_boost here because it
++		 * takes obj's wait-all lock path and we already hold
++		 * wait_all_lock.  Audio-callback path uses wait_any (handled in
++		 * the wait_any unqueue), so this is rare in practice; revisit
++		 * if cross-event boost becomes a workload concern. */
++
+ 		put_obj(obj);
+ 	}
+ 

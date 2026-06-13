@@ -1,0 +1,49 @@
+--- a/drivers/misc/ntsync.c	2026-04-12 21:30:34.087180713 -0500
++++ b/drivers/misc/ntsync.c	2026-04-12 21:31:24.524633210 -0500
+@@ -197,6 +197,28 @@
+ 	raw_spin_unlock(&obj->lock);
+ }
+ 
++/*
++ * Insert waiter into list ordered by task priority (highest first).
++ * Same-priority waiters are FIFO within their priority level.
++ * task->prio: lower value = higher scheduling priority.
++ *
++ * This matches Windows NT scheduling semantics where the highest-priority
++ * waiter is always woken first on object release.
++ */
++static void ntsync_insert_waiter(struct ntsync_q_entry *new_entry,
++				 struct list_head *head)
++{
++	struct ntsync_q_entry *entry;
++
++	list_for_each_entry(entry, head, node) {
++		if (new_entry->q->task->prio < entry->q->task->prio) {
++			list_add_tail(&new_entry->node, &entry->node);
++			return;
++		}
++	}
++	list_add_tail(&new_entry->node, head);
++}
++
+ static bool ntsync_lock_obj(struct ntsync_device *dev, struct ntsync_obj *obj)
+ {
+ 	bool all;
+@@ -968,7 +990,7 @@
+ 		struct ntsync_obj *obj = entry->obj;
+ 
+ 		all = ntsync_lock_obj(dev, obj);
+-		list_add_tail(&entry->node, &obj->any_waiters);
++		ntsync_insert_waiter(entry, &obj->any_waiters);
+ 		ntsync_unlock_obj(dev, obj, all);
+ 	}
+ 
+@@ -1062,7 +1084,7 @@
+ 		struct ntsync_obj *obj = entry->obj;
+ 
+ 		dev_lock_obj(dev, obj);
+-		list_add_tail(&entry->node, &obj->any_waiters);
++		ntsync_insert_waiter(entry, &obj->any_waiters);
+ 		dev_unlock_obj(dev, obj);
+ 	}
+ 

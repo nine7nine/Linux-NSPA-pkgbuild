@@ -1,0 +1,647 @@
+ntsync 1010: NTSYNC_IOC_AGGREGATE_WAIT — heterogeneous PI-aware wait
+
+Add a new ioctl on the ntsync device fd that atomically waits over
+N ntsync objects + M file descriptors + optional absolute deadline,
+returning the index of the first source that fired.  This is the
+unified completion-handling primitive Wine has lacked.
+
+Object sources reuse the existing obj->any_waiters list and the
+existing PI-propagation paths (mutex pi_recalc, EVENT_SET_PI consume,
+channel SEND_PI boost), so aggregate-waiters participate in priority
+inheritance transparently.  Channel object sources are made notify-only
+via four minimal hooks (is_signaled returns depth>0, try_wake_any_obj
+dispatches to a new try_wake_any_channel_notify, send_pi calls it
+inside the existing obj_lock window AND falls back to walking
+any_waiters when recv_wq has no boost target) so the gamma-channel
+dispatcher can wait on (channel, io_uring eventfd) atomically AND
+correctly receive PI propagation from high-prio SEND_PI senders.
+Userspace then issues NTSYNC_IOC_CHANNEL_RECV2 to actually consume
+the entry.
+
+Fd sources use the standard kernel poll machinery (one shared
+poll_wqueues, vfs_poll(file, &pwq.pt) per source for registration,
+vfs_poll(file, NULL) per source for level-triggered peek), mirroring
+the WAIT_ANY uring_fd extension's pattern.
+
+PREEMPT_RT discipline mirrors patches 1006-1009: all kmalloc/kfree
+happen outside raw_spinlock_t; pi_work pool pre-allocated for any
+mutex sources, drained on exit; empty pool falls back to silent
+skip-boost (transient priority inversion, not deadlock).
+
+Inherits wait_any's narrow signaled-vs-timeout race window between
+schedule-return and the unqueue list_del — same trade-off, separate
+fix if needed.
+
+ABI: NTSYNC_IOC_AGGREGATE_WAIT _IOWR('N', 0x97, ...).  timeout/flags
+follow NTSYNC_IOC_WAIT_ANY exactly (CLOCK_MONOTONIC ABSTIME ns,
+U64_MAX = no deadline, NTSYNC_AGG_FLAG_REALTIME -> CLOCK_REALTIME).
+
+NT semantics:
+ - sem/mutex/event: unchanged from WaitForMultipleObjects (mutex
+   acquired, auto-event reset, sem decremented on signal)
+ - channel: notify-only (no NT equivalent; PeekMessage-style)
+ - fd: pure Linux poll composition (no NT equivalent)
+
+Channel SEND_PI any_waiters fallback rationale:
+
+  Pre-patch SEND_PI walks recv_wq for the first blocked receiver.
+  AGG_WAIT registers waiters on any_waiters (a different list).
+  Without the fallback, an aggregate-waiting dispatcher would not
+  be boosted by a high-prio audio thread's SEND_PI — kernel walks
+  recv_wq, finds nothing, no boost.  Functionally fine (no lockup,
+  dispatcher still wakes via try_wake_any_channel_notify) but a
+  real PI regression for audio workloads.
+
+  Fix: after recv_wq lookup yields nothing, walk any_waiters
+  (priority-sorted; first entry is highest-prio waiter) under
+  obj_lock briefly to find the boost target.  Symmetric with how
+  EVENT_SET_PI works on event objects.
+
+This patch is purely additive to existing Wine-using code paths:
+ - is_signaled CHANNEL case: was always-false, now depth>0.  No
+   existing caller passes a channel to WAIT_ANY/WAIT_ALL (channels
+   use CHANNEL_RECV/SEND_PI/REPLY exclusively).  Zero impact.
+ - try_wake_any_obj CHANNEL case: was no-op, now iterates an
+   any_waiters list that is empty for channels in pre-1010 code.
+   Zero behavior change for existing callers.
+ - send_pi any_waiters fallback: only fires when recv_wq has no
+   waiter AND any_waiters is non-empty (i.e., AGG_WAIT in use).
+   Pre-AGG_WAIT code paths are unchanged.
+
+Files:
+ drivers/misc/ntsync.c       | +400 lines
+ include/uapi/linux/ntsync.h |  +69 lines
+
+Signed-off-by: jordan Johnston <johnstonljordan@gmail.com>
+---
+
+---
+--- a/include/uapi/linux/ntsync.h
++++ b/include/uapi/linux/ntsync.h
+@@ -156,4 +156,73 @@
+ 				_IOW ('N', 0x95, __u32)
+ #define NTSYNC_IOC_CHANNEL_RECV2	_IOWR('N', 0x96, struct ntsync_channel_recv2_args)
+ 
++/*
++ * NSPA: Heterogeneous aggregate wait — patch 1010.
++ *
++ * Wait atomically on N ntsync objects + M file descriptors + optional
++ * absolute deadline.  Returns the index of the first source that fired,
++ * or NTSYNC_AGG_TIMEOUT on deadline expiry.
++ *
++ * For NTSYNC_AGG_OBJECT sources the waiter is registered on the existing
++ * obj->any_waiters list, so the existing PI-propagation paths
++ * (mutex pi_recalc, EVENT_SET_PI consume, channel SEND_PI boost) find
++ * aggregate-waiters without modification.
++ *
++ * For NTSYNC_AGG_FD sources the kernel registers a poll wait against
++ * the fd's wait queue (vfs_poll machinery).  No PI propagation for fd
++ * sources — fd readiness has no priority owner.
++ *
++ * Channel-typed object sources are notify-only: aggregate-waiters wake
++ * when the channel's pending depth becomes nonzero, but do NOT consume
++ * a queue entry.  Userspace then issues NTSYNC_IOC_CHANNEL_RECV2 to
++ * pop the entry.
++ *
++ * timeout is a CLOCK_MONOTONIC absolute nanosecond value, U64_MAX = no
++ * deadline; NTSYNC_AGG_FLAG_REALTIME switches to CLOCK_REALTIME.  This
++ * matches the semantics of NTSYNC_IOC_WAIT_ANY exactly.
++ *
++ * fired_index is the index in the user-supplied sources[] array of the
++ * source that fired.  fired_events carries the POLL* mask for fd
++ * sources; 0 for object sources.
++ *
++ * On deadline expiry, fired_index is set to NTSYNC_AGG_TIMEOUT and the
++ * ioctl returns -ETIMEDOUT.
++ *
++ * The owner field carries the Win32 mutex-owner identifier exactly as
++ * NTSYNC_IOC_WAIT_ANY uses it (re-entrant mutex acquisition).  Pass 0
++ * if no mutex sources are present.
++ *
++ * Primary motivating consumer: gamma-channel dispatcher waiting
++ * atomically on (channel, io_uring CQE eventfd).  See
++ * wine/nspa/docs/aggregate-wait-and-async-completion.md.
++ */
++struct ntsync_aggregate_source {
++	__u32 type;          /* NTSYNC_AGG_OBJECT | NTSYNC_AGG_FD */
++	__u32 events;        /* if FD: POLL* bits to watch; if OBJECT: must be 0 */
++	__u32 fd;            /* ntsync object fd, or unix file fd */
++	__u32 __pad;         /* reserved, must be 0 */
++};
++
++struct ntsync_aggregate_wait_args {
++	__u64 timeout;       /* IN: ABSTIME ns; U64_MAX = no deadline */
++	__u64 sources;       /* IN: user ptr to ntsync_aggregate_source[] */
++	__u32 nb_sources;    /* IN: 1..NTSYNC_AGG_MAX */
++	__u32 fired_index;   /* OUT: 0..nb-1 of firing source, or NTSYNC_AGG_TIMEOUT */
++	__u32 flags;         /* IN: NTSYNC_AGG_FLAG_REALTIME */
++	__u32 owner;         /* IN: Win32 mutex owner; 0 if none */
++	__u32 fired_events;  /* OUT: POLL* bits for FD source, 0 for OBJECT */
++	__u32 __pad;         /* reserved, must be 0 */
++};
++
++#define NTSYNC_AGG_OBJECT		0x1
++#define NTSYNC_AGG_FD			0x2
++
++#define NTSYNC_AGG_MAX			64
++
++#define NTSYNC_AGG_FLAG_REALTIME	0x1
++
++#define NTSYNC_AGG_TIMEOUT		0xFFFFFFFFu
++
++#define NTSYNC_IOC_AGGREGATE_WAIT	_IOWR('N', 0x97, struct ntsync_aggregate_wait_args)
++
+ #endif
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -724,9 +724,13 @@
+ 	case NTSYNC_TYPE_EVENT:
+ 		return obj->u.event.signaled;
+ 	case NTSYNC_TYPE_CHANNEL:
+-		/* NSPA: channels are not waited on via WAIT_ANY/WAIT_ALL.
+-		 * They use CHANNEL_RECV / CHANNEL_SEND_PI exclusively. */
+-		return false;
++		/* NSPA: For aggregate-wait (patch 1010), a channel is "signaled"
++		 * when its pending queue is non-empty.  Notify-only — the
++		 * aggregate-waiter wakes and userspace then issues
++		 * NTSYNC_IOC_CHANNEL_RECV2 to actually pop the entry.  No state
++		 * mutation here; mirrors the level-triggered semantics fd
++		 * sources have via vfs_poll. */
++		return obj->u.channel.depth > 0;
+ 	}
+ 
+ 	WARN(1, "bad object type %#x\n", obj->type);
+@@ -891,6 +895,37 @@
+ }
+ 
+ /*
++ * NSPA: Notify aggregate-waiters that a channel has pending requests.
++ *
++ * Called from ntsync_channel_send_pi after channel_pending_insert and
++ * from try_wake_any_obj on the channel-source path.  Mirrors
++ * try_wake_any_event but never mutates channel state — aggregate-waiters
++ * are notify-only on channels (they go on to call CHANNEL_RECV2 from
++ * userspace to actually consume the entry).
++ *
++ * PREEMPT_RT: wake_up_process is safe under raw_spinlock_t (uses rq->lock
++ * which is also raw, same as sched_setattr_nocheck used by pi_recalc).
++ */
++static void try_wake_any_channel_notify(struct ntsync_obj *ch)
++{
++	struct ntsync_q_entry *entry;
++
++	ntsync_assert_held(ch);
++	lockdep_assert(ch->type == NTSYNC_TYPE_CHANNEL);
++
++	list_for_each_entry(entry, &ch->any_waiters, node) {
++		struct ntsync_q *q = entry->q;
++		int signaled = -1;
++
++		if (!ch->u.channel.depth)
++			break;
++
++		if (atomic_try_cmpxchg(&q->signaled, &signaled, entry->index))
++			wake_up_process(q->task);
++	}
++}
++
++/*
+  * Actually change the semaphore state, returning -EOVERFLOW if it is made
+  * invalid.
+  */
+@@ -1545,7 +1580,27 @@
+ 
+ 	/* If we became the new minimum and a recv'er is blocked, boost it.
+ 	 * Same pattern as EVENT_SET_PI: pre-allocated tracking entry,
+-	 * apply_event_pi_boost handles list maintenance under boost_lock. */
++	 * apply_event_pi_boost handles list maintenance under boost_lock.
++	 *
++	 * NSPA 1010: We look in TWO places, in order:
++	 *   1. ch->u.channel.recv_wq — legacy CHANNEL_RECV / RECV2 waiters
++	 *      (today's gamma dispatcher pre-Phase-3).
++	 *   2. ch->any_waiters — NTSYNC_IOC_AGGREGATE_WAIT waiters
++	 *      registered via ntsync_insert_waiter (Phase 3+ dispatcher).
++	 * Without (2), an agg-waiting dispatcher would not be boosted by
++	 * SEND_PI even though it IS the receiver — a real PI regression
++	 * for audio workloads.  any_waiters is priority-sorted, so the
++	 * first entry is the highest-prio waiter (matches the recv_wq
++	 * "first blocked" semantic).  Lock discipline: any_waiters is
++	 * protected by obj->lock; we re-acquire briefly to walk it.
++	 *
++	 * CRITICAL ordering: this lookup MUST happen BEFORE we wake the
++	 * waiters via try_wake_any_channel_notify / wake_up(recv_wq).
++	 * Once the waiter is signaled, it returns from its wait ioctl and
++	 * removes itself from any_waiters / recv_wq — by the time we'd do
++	 * the boost lookup the queue would be empty.  Mirrors the existing
++	 * recv_wq pattern where wake_up runs AFTER apply_event_pi_boost.
++	 */
+ 	if (new_minimum && args.prio) {
+ 		struct task_struct *target = NULL;
+ 		wait_queue_head_t *wq = &ch->u.channel.recv_wq;
+@@ -1562,6 +1617,20 @@
+ 		}
+ 		spin_unlock_irqrestore(&wq->lock, flags);
+ 
++		if (!target) {
++			struct ntsync_q_entry *qe;
++
++			obj_lock(ch);
++			list_for_each_entry(qe, &ch->any_waiters, node) {
++				if (qe->q && qe->q->task) {
++					target = qe->q->task;
++					get_task_struct(target);
++					break;
++				}
++			}
++			obj_unlock(ch);
++		}
++
+ 		if (target) {
+ 			if (apply_event_pi_boost(ch->dev, target,
+ 						 args.policy, args.prio, new_ep))
+@@ -1570,6 +1639,20 @@
+ 		}
+ 	}
+ 
++	/* NSPA patch 1010: notify aggregate-waiters that depth went non-zero.
++	 * Done AFTER the PI boost lookup above so that the waiter is still
++	 * queued on any_waiters when the boost target is resolved.  No-op
++	 * when no aggregate-waiter is registered (any_waiters empty),
++	 * which is the common case for pre-Phase-3 callers.
++	 *
++	 * Note: depth/cmpxchg consistency is maintained because both
++	 * channel_pending_insert and try_wake_any_channel_notify run under
++	 * obj_lock (separately).  Any concurrent CHANNEL_RECV2 also takes
++	 * obj_lock, so it serializes correctly. */
++	obj_lock(ch);
++	try_wake_any_channel_notify(ch);
++	obj_unlock(ch);
++
+ 	wake_up(&ch->u.channel.recv_wq);
+ 
+ 	/* Sleep until REPLY sets e->replied + wakes e->wq, or signal. */
+@@ -2257,7 +2340,9 @@
+ 		try_wake_any_event(obj);
+ 		break;
+ 	case NTSYNC_TYPE_CHANNEL:
+-		/* NSPA: channels don't participate in WAIT_ANY/WAIT_ALL. */
++		/* NSPA patch 1010: aggregate-wait on a channel notifies but
++		 * does not consume; userspace consumes via CHANNEL_RECV2. */
++		try_wake_any_channel_notify(obj);
+ 		break;
+ 	}
+ }
+@@ -2567,6 +2652,344 @@
+ 	return ret;
+ }
+ 
++/* ============================================================
++ * NSPA patch 1010: NTSYNC_IOC_AGGREGATE_WAIT
++ *
++ * Heterogeneous wait over N ntsync objects + M file descriptors +
++ * optional absolute deadline.  Mirrors ntsync_wait_any's lifecycle
++ * (queue / already-signaled-check / sleep / unqueue) and adds
++ * fd-source registration via vfs_poll.
++ *
++ * NT semantics for object sources are inherited from the existing
++ * try_wake_any_* helpers (mutex acquired, auto-event reset, sem
++ * decremented on signal — same as WaitForMultipleObjects).  Channel
++ * object sources are notify-only; userspace consumes via CHANNEL_RECV2.
++ * Fd sources are pure Linux poll composition, no NT mapping.
++ *
++ * PREEMPT_RT discipline: all kmalloc/kfree happen outside raw locks.
++ * pi_work pool pre-allocated for any mutex sources, drained on exit;
++ * empty pool falls back to silent skip-boost (transient priority
++ * inversion, same as wait_any).  sched_setattr_nocheck is safe under
++ * raw_spinlock_t; wake_up_process likewise.
++ *
++ * Inherits wait_any's narrow signaled-vs-timeout race window between
++ * schedule-return and the unqueue list_del — same trade-off there
++ * applies here.
++ * ============================================================
++ */
++
++/* Per-fd-source tracking.  src_index preserves the user's source-array
++ * order so fired_index reflects user-supplied ordering. */
++struct ntsync_agg_fd {
++	struct file *file;
++	__u32 events;
++	__u32 fired_events;
++	__u32 src_index;
++};
++
++static int ntsync_aggregate_setup(struct ntsync_device *dev,
++				  const struct ntsync_aggregate_wait_args *args,
++				  struct ntsync_q **ret_q,
++				  struct ntsync_agg_fd **ret_fds,
++				  __u32 *ret_nb_obj, __u32 *ret_nb_fd)
++{
++	struct ntsync_aggregate_source srcs[NTSYNC_AGG_MAX];
++	struct ntsync_q *q;
++	struct ntsync_agg_fd *fds = NULL;
++	__u32 nb = args->nb_sources;
++	__u32 nb_obj = 0, nb_fd = 0;
++	__u32 obj_idx = 0, fd_idx = 0;
++	__u32 i, j;
++	int ret;
++
++	if (nb < 1 || nb > NTSYNC_AGG_MAX)
++		return -EINVAL;
++	if (args->flags & ~NTSYNC_AGG_FLAG_REALTIME)
++		return -EINVAL;
++	if (args->__pad)
++		return -EINVAL;
++
++	if (copy_from_user(srcs, u64_to_user_ptr(args->sources),
++			   nb * sizeof(srcs[0])))
++		return -EFAULT;
++
++	/* Validate types/__pad and count obj vs fd sources. */
++	for (i = 0; i < nb; i++) {
++		if (srcs[i].__pad)
++			return -EINVAL;
++		switch (srcs[i].type) {
++		case NTSYNC_AGG_OBJECT:
++			if (srcs[i].events)
++				return -EINVAL;
++			nb_obj++;
++			break;
++		case NTSYNC_AGG_FD:
++			nb_fd++;
++			break;
++		default:
++			return -EINVAL;
++		}
++	}
++
++	q = kmalloc(struct_size(q, entries, nb_obj), GFP_KERNEL);
++	if (!q)
++		return -ENOMEM;
++	q->task = current;
++	q->owner = args->owner;
++	atomic_set(&q->signaled, -1);
++	q->all = false;
++	q->ownerdead = false;
++	q->count = nb_obj;
++
++	if (nb_fd) {
++		fds = kmalloc_array(nb_fd, sizeof(*fds), GFP_KERNEL);
++		if (!fds) {
++			kfree(q);
++			return -ENOMEM;
++		}
++	}
++
++	/* Resolve every source.  entry->index / fds[k].src_index store
++	 * the original user-array index so fired_index is reported in
++	 * the user's source-array convention. */
++	for (i = 0; i < nb; i++) {
++		if (srcs[i].type == NTSYNC_AGG_OBJECT) {
++			struct ntsync_q_entry *entry = &q->entries[obj_idx];
++			struct ntsync_obj *obj = get_obj(dev, srcs[i].fd);
++
++			if (!obj) {
++				ret = -EBADF;
++				goto err;
++			}
++			entry->obj = obj;
++			entry->q = q;
++			entry->index = i;
++			INIT_LIST_HEAD(&entry->node);
++			obj_idx++;
++		} else {
++			struct file *file = fget(srcs[i].fd);
++
++			if (!file) {
++				ret = -EBADF;
++				goto err;
++			}
++			fds[fd_idx].file = file;
++			fds[fd_idx].events = srcs[i].events;
++			fds[fd_idx].fired_events = 0;
++			fds[fd_idx].src_index = i;
++			fd_idx++;
++		}
++	}
++
++	*ret_q = q;
++	*ret_fds = fds;
++	*ret_nb_obj = nb_obj;
++	*ret_nb_fd = nb_fd;
++	return 0;
++
++err:
++	for (j = 0; j < obj_idx; j++)
++		put_obj(q->entries[j].obj);
++	for (j = 0; j < fd_idx; j++)
++		fput(fds[j].file);
++	kfree(fds);
++	kfree(q);
++	return ret;
++}
++
++static int ntsync_aggregate_schedule(struct ntsync_q *q,
++				     struct ntsync_agg_fd *fds, __u32 nb_fd,
++				     const struct ntsync_aggregate_wait_args *args)
++{
++	ktime_t timeout = ns_to_ktime(args->timeout);
++	clockid_t clock = CLOCK_MONOTONIC;
++	struct poll_wqueues pwq;
++	ktime_t *timeout_ptr;
++	bool pwq_ready = false;
++	int ret = 0;
++	__u32 i;
++
++	timeout_ptr = (args->timeout == U64_MAX) ? NULL : &timeout;
++	if (args->flags & NTSYNC_AGG_FLAG_REALTIME)
++		clock = CLOCK_REALTIME;
++
++	/* Register a poll wait against each fd's wait queue once.
++	 * vfs_poll(file, &pwq.pt) appends a poll_table_entry per call;
++	 * poll_freewait drains the whole list on exit.  Same one-poll-
++	 * table-many-fds shape that fs/select.c::do_select uses. */
++	if (nb_fd) {
++		poll_initwait(&pwq);
++		pwq_ready = true;
++		for (i = 0; i < nb_fd; i++)
++			vfs_poll(fds[i].file, &pwq.pt);
++	}
++
++	do {
++		if (signal_pending(current)) {
++			ret = -ERESTARTSYS;
++			break;
++		}
++
++		set_current_state(TASK_INTERRUPTIBLE);
++
++		if (atomic_read(&q->signaled) != -1) {
++			ret = 0;
++			break;
++		}
++
++		for (i = 0; i < nb_fd; i++) {
++			__poll_t mask = vfs_poll(fds[i].file, NULL) &
++					(__poll_t)fds[i].events;
++
++			if (mask) {
++				int signaled = -1;
++
++				if (atomic_try_cmpxchg(&q->signaled, &signaled,
++						       fds[i].src_index))
++					fds[i].fired_events = mask;
++				ret = 0;
++				goto done;
++			}
++		}
++
++		ret = schedule_hrtimeout_range_clock(timeout_ptr, 0,
++						      HRTIMER_MODE_ABS, clock);
++	} while (ret < 0);
++
++done:
++	__set_current_state(TASK_RUNNING);
++
++	if (pwq_ready)
++		poll_freewait(&pwq);
++
++	return ret;
++}
++
++static int ntsync_aggregate_wait(struct ntsync_device *dev, void __user *argp)
++{
++	struct ntsync_aggregate_wait_args args;
++	struct ntsync_pi_work pi_work;
++	struct ntsync_q *q = NULL;
++	struct ntsync_agg_fd *fds = NULL;
++	__u32 nb_obj = 0, nb_fd = 0;
++	__u32 i, fired_events_out = 0;
++	int signaled;
++	bool all;
++	int ret;
++
++	if (copy_from_user(&args, argp, sizeof(args)))
++		return -EFAULT;
++
++	/* Drain pending event-PI boosts from a prior wake.  Symmetric
++	 * with WAIT_ANY/WAIT_ALL — entering a wait means the task is
++	 * done with whatever message(s) prompted the boost. */
++	drain_event_pi_boosts(dev, current);
++
++	ret = ntsync_aggregate_setup(dev, &args, &q, &fds, &nb_obj, &nb_fd);
++	if (ret < 0)
++		return ret;
++
++	ntsync_pi_work_init(&pi_work);
++
++	/* Queue ourselves on each obj's any_waiters.  Aggregate-waiters
++	 * share the WAIT_ANY waiter list, so the existing PI-propagation
++	 * paths (mutex pi_recalc, EVENT_SET_PI consume, channel SEND_PI
++	 * boost via try_wake_any_channel_notify) find us transparently. */
++	for (i = 0; i < nb_obj; i++) {
++		struct ntsync_q_entry *entry = &q->entries[i];
++		struct ntsync_obj *obj = entry->obj;
++
++		if (obj->type == NTSYNC_TYPE_MUTEX &&
++		    list_empty(&pi_work.new_po_pool))
++			ntsync_pi_work_prealloc(&pi_work);
++
++		all = ntsync_lock_obj(dev, obj);
++		ntsync_insert_waiter(entry, &obj->any_waiters);
++		if (obj->type == NTSYNC_TYPE_MUTEX)
++			ntsync_pi_recalc(obj, &pi_work);
++		ntsync_unlock_obj(dev, obj, all);
++	}
++
++	/* Already-signaled check before sleep.  Walks obj sources only;
++	 * fd readiness is checked inside the schedule loop. */
++	for (i = 0; i < nb_obj; i++) {
++		struct ntsync_obj *obj = q->entries[i].obj;
++
++		if (atomic_read(&q->signaled) != -1)
++			break;
++
++		if (obj->type == NTSYNC_TYPE_MUTEX &&
++		    list_empty(&pi_work.new_po_pool))
++			ntsync_pi_work_prealloc(&pi_work);
++
++		all = ntsync_lock_obj(dev, obj);
++		try_wake_any_obj(obj, &pi_work);
++		ntsync_unlock_obj(dev, obj, all);
++	}
++
++	ret = ntsync_aggregate_schedule(q, fds, nb_fd, &args);
++
++	/* Unqueue from each obj's any_waiters.  Always done — regardless
++	 * of fired/timeout/signal. */
++	signaled = atomic_read(&q->signaled);
++	for (i = 0; i < nb_obj; i++) {
++		struct ntsync_q_entry *entry = &q->entries[i];
++		struct ntsync_obj *obj = entry->obj;
++
++		if (obj->type == NTSYNC_TYPE_MUTEX &&
++		    list_empty(&pi_work.new_po_pool))
++			ntsync_pi_work_prealloc(&pi_work);
++
++		all = ntsync_lock_obj(dev, obj);
++		list_del(&entry->node);
++		if (obj->type == NTSYNC_TYPE_MUTEX)
++			ntsync_pi_recalc(obj, &pi_work);
++		ntsync_unlock_obj(dev, obj, all);
++
++		/* Consume EVENT_SET_PI deferred boost if this entry's event
++		 * source fired.  entry->index holds the user-array index;
++		 * signaled holds the same convention. */
++		if ((int)entry->index == signaled && obj->type == NTSYNC_TYPE_EVENT)
++			consume_event_pi_boost(obj);
++
++		put_obj(obj);
++	}
++
++	/* Release fd source refs.  poll_freewait inside schedule has
++	 * already drained the poll_table entries. */
++	for (i = 0; i < nb_fd; i++) {
++		if ((int)fds[i].src_index == signaled)
++			fired_events_out = fds[i].fired_events;
++		fput(fds[i].file);
++	}
++
++	if (signaled != -1) {
++		struct ntsync_aggregate_wait_args __user *user_args = argp;
++
++		/* Even if a signal was caught (ret == -ERESTARTSYS), q->signaled
++		 * being set means a source fired — communicate success.  Same
++		 * convention as wait_any. */
++		ret = q->ownerdead ? -EOWNERDEAD : 0;
++
++		if (put_user((__u32)signaled, &user_args->fired_index))
++			ret = -EFAULT;
++		if (put_user(fired_events_out, &user_args->fired_events))
++			ret = -EFAULT;
++	} else if (!ret) {
++		struct ntsync_aggregate_wait_args __user *user_args = argp;
++
++		if (put_user((__u32)NTSYNC_AGG_TIMEOUT, &user_args->fired_index))
++			ret = -EFAULT;
++		else
++			ret = -ETIMEDOUT;
++	}
++
++	ntsync_pi_work_finish(&pi_work);
++	kfree(q);
++	kfree(fds);
++	return ret;
++}
++
+ static int ntsync_char_open(struct inode *inode, struct file *file)
+ {
+ 	struct ntsync_device *dev;
+@@ -2630,6 +3053,8 @@
+ 		return ntsync_wait_any(dev, argp);
+ 	case NTSYNC_IOC_CREATE_CHANNEL:
+ 		return ntsync_create_channel(dev, argp);
++	case NTSYNC_IOC_AGGREGATE_WAIT:
++		return ntsync_aggregate_wait(dev, argp);
+ 	default:
+ 		return -ENOIOCTLCMD;
+ 	}

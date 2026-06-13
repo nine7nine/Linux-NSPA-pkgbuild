@@ -1,0 +1,164 @@
+--- a/drivers/misc/ntsync.c	2026-04-12 21:29:04.095467451 -0500
++++ b/drivers/misc/ntsync.c	2026-04-12 21:30:34.087180713 -0500
+@@ -13,8 +13,8 @@
+ #include <linux/ktime.h>
+ #include <linux/miscdevice.h>
+ #include <linux/module.h>
+-#include <linux/mutex.h>
+ #include <linux/overflow.h>
++#include <linux/rtmutex.h>
+ #include <linux/sched.h>
+ #include <linux/sched/signal.h>
+ #include <linux/slab.h>
+@@ -43,7 +43,7 @@
+  */
+ 
+ struct ntsync_obj {
+-	spinlock_t lock;
++	raw_spinlock_t lock;
+ 	int dev_locked;
+ 
+ 	enum ntsync_type type;
+@@ -129,7 +129,7 @@
+ 	 * operations, and operations on an object that is involved in a
+ 	 * wait-for-all.
+ 	 */
+-	struct mutex wait_all_lock;
++	struct rt_mutex wait_all_lock;
+ 
+ 	struct file *file;
+ };
+@@ -151,22 +151,22 @@
+ {
+ 	lockdep_assert_held(&dev->wait_all_lock);
+ 	lockdep_assert(obj->dev == dev);
+-	spin_lock(&obj->lock);
++	raw_spin_lock(&obj->lock);
+ 	/*
+ 	 * By setting obj->dev_locked inside obj->lock, it is ensured that
+ 	 * anyone holding obj->lock must see the value.
+ 	 */
+ 	obj->dev_locked = 1;
+-	spin_unlock(&obj->lock);
++	raw_spin_unlock(&obj->lock);
+ }
+ 
+ static void dev_unlock_obj(struct ntsync_device *dev, struct ntsync_obj *obj)
+ {
+ 	lockdep_assert_held(&dev->wait_all_lock);
+ 	lockdep_assert(obj->dev == dev);
+-	spin_lock(&obj->lock);
++	raw_spin_lock(&obj->lock);
+ 	obj->dev_locked = 0;
+-	spin_unlock(&obj->lock);
++	raw_spin_unlock(&obj->lock);
+ }
+ 
+ static void obj_lock(struct ntsync_obj *obj)
+@@ -174,27 +174,27 @@
+ 	struct ntsync_device *dev = obj->dev;
+ 
+ 	for (;;) {
+-		spin_lock(&obj->lock);
++		raw_spin_lock(&obj->lock);
+ 		if (likely(!obj->dev_locked))
+ 			break;
+ 
+-		spin_unlock(&obj->lock);
+-		mutex_lock(&dev->wait_all_lock);
+-		spin_lock(&obj->lock);
++		raw_spin_unlock(&obj->lock);
++		rt_mutex_lock(&dev->wait_all_lock);
++		raw_spin_lock(&obj->lock);
+ 		/*
+ 		 * obj->dev_locked should be set and released under the same
+ 		 * wait_all_lock section, since we now own this lock, it should
+ 		 * be clear.
+ 		 */
+ 		lockdep_assert(!obj->dev_locked);
+-		spin_unlock(&obj->lock);
+-		mutex_unlock(&dev->wait_all_lock);
++		raw_spin_unlock(&obj->lock);
++		rt_mutex_unlock(&dev->wait_all_lock);
+ 	}
+ }
+ 
+ static void obj_unlock(struct ntsync_obj *obj)
+ {
+-	spin_unlock(&obj->lock);
++	raw_spin_unlock(&obj->lock);
+ }
+ 
+ static bool ntsync_lock_obj(struct ntsync_device *dev, struct ntsync_obj *obj)
+@@ -205,7 +205,7 @@
+ 	all = atomic_read(&obj->all_hint);
+ 	if (unlikely(all)) {
+ 		obj_unlock(obj);
+-		mutex_lock(&dev->wait_all_lock);
++		rt_mutex_lock(&dev->wait_all_lock);
+ 		dev_lock_obj(dev, obj);
+ 	}
+ 
+@@ -216,7 +216,7 @@
+ {
+ 	if (all) {
+ 		dev_unlock_obj(dev, obj);
+-		mutex_unlock(&dev->wait_all_lock);
++		rt_mutex_unlock(&dev->wait_all_lock);
+ 	} else {
+ 		obj_unlock(obj);
+ 	}
+@@ -711,7 +711,7 @@
+ 	obj->type = type;
+ 	obj->dev = dev;
+ 	get_file(dev->file);
+-	spin_lock_init(&obj->lock);
++	raw_spin_lock_init(&obj->lock);
+ 	INIT_LIST_HEAD(&obj->any_waiters);
+ 	INIT_LIST_HEAD(&obj->all_waiters);
+ 	atomic_set(&obj->all_hint, 0);
+@@ -1042,7 +1042,7 @@
+ 
+ 	/* queue ourselves */
+ 
+-	mutex_lock(&dev->wait_all_lock);
++	rt_mutex_lock(&dev->wait_all_lock);
+ 
+ 	for (i = 0; i < args.count; i++) {
+ 		struct ntsync_q_entry *entry = &q->entries[i];
+@@ -1070,7 +1070,7 @@
+ 
+ 	try_wake_all(dev, q, NULL);
+ 
+-	mutex_unlock(&dev->wait_all_lock);
++	rt_mutex_unlock(&dev->wait_all_lock);
+ 
+ 	/*
+ 	 * Check if the alert event is signaled, making sure to do so only
+@@ -1093,7 +1093,7 @@
+ 
+ 	/* and finally, unqueue */
+ 
+-	mutex_lock(&dev->wait_all_lock);
++	rt_mutex_lock(&dev->wait_all_lock);
+ 
+ 	for (i = 0; i < args.count; i++) {
+ 		struct ntsync_q_entry *entry = &q->entries[i];
+@@ -1110,7 +1110,7 @@
+ 		put_obj(obj);
+ 	}
+ 
+-	mutex_unlock(&dev->wait_all_lock);
++	rt_mutex_unlock(&dev->wait_all_lock);
+ 
+ 	if (args.alert) {
+ 		struct ntsync_q_entry *entry = &q->entries[args.count];
+@@ -1149,7 +1149,7 @@
+ 	if (!dev)
+ 		return -ENOMEM;
+ 
+-	mutex_init(&dev->wait_all_lock);
++	rt_mutex_init(&dev->wait_all_lock);
+ 
+ 	file->private_data = dev;
+ 	dev->file = file;

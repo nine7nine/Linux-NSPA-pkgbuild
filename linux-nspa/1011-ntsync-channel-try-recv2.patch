@@ -1,0 +1,117 @@
+ntsync 1011: NTSYNC_IOC_CHANNEL_TRY_RECV2 — non-blocking RECV2
+
+Add a non-blocking variant of CHANNEL_RECV2 that returns -EAGAIN
+immediately when the channel's pending queue is empty rather than
+blocking in wait_event_interruptible_exclusive.
+
+Motivation: gamma channel dispatcher burst-drain optimization.
+Today the dispatcher loop is
+
+  AGG_WAIT -> CHANNEL_RECV2 -> dispatch -> CHANNEL_REPLY -> back to AGG_WAIT
+
+3 ioctls per dispatched entry.  Under burst (paint storm, library
+scan, plugin instantiation) the second AGG_WAIT returns immediately
+because channel.depth > 0, but it is still a syscall.  With
+TRY_RECV2 the dispatcher can drain the pending queue in a tight
+loop, returning to AGG_WAIT only when the queue is actually empty:
+
+  AGG_WAIT -> loop { TRY_RECV2; if EAGAIN break; dispatch; REPLY } -> back to AGG_WAIT
+
+For N entries in a burst, syscall count drops from 3N to 1 + 2N —
+saves one AGG_WAIT per entry past the first.
+
+Implementation: refactor ntsync_channel_recv2 to take a `bool nonblock`
+parameter.  When true and pending is empty, kfree(new_ep) and return
+-EAGAIN before entering wait_event_interruptible_exclusive.  Add
+NTSYNC_IOC_CHANNEL_TRY_RECV2 (_IOWR('N', 0x98, ...)) that dispatches
+through the inner function with nonblock=true; existing
+NTSYNC_IOC_CHANNEL_RECV2 dispatches with nonblock=false (unchanged
+semantics).
+
+ABI: purely additive.  Same args struct as RECV2 (no UAPI breakage).
+Pre-1011 kernels return -ENOTTY for the new ioctl; userspace falls
+back to the existing blocking path.
+
+PREEMPT_RT discipline: no new locks, no new allocations on the
+non-block fast path beyond the same kzalloc(new_ep) RECV2 already
+does (kfree'd before -EAGAIN return).  obj_lock window is unchanged
+(non-block branch exits before re-acquiring after the empty check).
+Same wait_wq, same exclusive-wait semantics for the blocking path.
+
+NT semantics: TRY_RECV2 is purely a kernel-level optimization — the
+RECV2-on-fire NT-correct semantics (mutex acquire, auto-event reset,
+etc.) don't apply because channels are notify-only objects already.
+
+---
+---
+--- a/include/uapi/linux/ntsync.h
++++ b/include/uapi/linux/ntsync.h
+@@ -157,6 +157,29 @@
+ #define NTSYNC_IOC_CHANNEL_RECV2	_IOWR('N', 0x96, struct ntsync_channel_recv2_args)
+ 
+ /*
++ * NSPA 1011: NTSYNC_IOC_CHANNEL_TRY_RECV2.
++ *
++ * Identical to NTSYNC_IOC_CHANNEL_RECV2 (same args struct, same OUT
++ * fields) but returns -EAGAIN immediately when the channel's pending
++ * queue is empty — never blocks the caller in
++ * wait_event_interruptible_exclusive.
++ *
++ * Use case: gamma channel dispatcher draining multiple entries per
++ * AGGREGATE_WAIT cycle.  Under burst load (paint storm, library scan,
++ * plugin instantiation) the dispatcher would otherwise pay one full
++ * AGG_WAIT round-trip per entry; with TRY_RECV2 it can drain the
++ * pending queue in a tight loop, returning to AGG_WAIT only when
++ * empty.  Reduces per-entry syscall count from 3 (AGG_WAIT + RECV2 +
++ * REPLY) to 2 (TRY_RECV2 + REPLY) on every entry past the first in
++ * a burst.
++ *
++ * Purely additive: existing NTSYNC_IOC_CHANNEL_RECV2 path is
++ * unchanged.  Pre-1011 kernels return -ENOTTY → userspace falls back
++ * to the blocking RECV2 path.
++ */
++#define NTSYNC_IOC_CHANNEL_TRY_RECV2	_IOWR('N', 0x98, struct ntsync_channel_recv2_args)
++
++/*
+  * NSPA: Heterogeneous aggregate wait — patch 1010.
+  *
+  * Wait atomically on N ntsync objects + M file descriptors + optional
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -1770,7 +1770,7 @@
+  * to keep the diff small and the read order obvious; the extra field copy
+  * is the only behavioural difference.
+  */
+-static int ntsync_channel_recv2(struct ntsync_obj *ch, void __user *argp)
++static int ntsync_channel_recv2(struct ntsync_obj *ch, void __user *argp, bool nonblock)
+ {
+ 	struct ntsync_channel_recv2_args args;
+ 	struct ntsync_channel_entry *e = NULL;
+@@ -1789,6 +1789,16 @@
+ 	obj_lock(ch);
+ 	while (RB_EMPTY_ROOT(&ch->u.channel.pending)) {
+ 		obj_unlock(ch);
++		/* NSPA 1011: TRY_RECV2 (nonblock=true) returns -EAGAIN
++		 * immediately when pending is empty rather than blocking
++		 * the dispatcher in wait_event_interruptible_exclusive.
++		 * Used for the burst-drain optimization — caller can
++		 * tight-loop TRY_RECV2 until -EAGAIN, then go back to
++		 * AGGREGATE_WAIT for the next channel-fired event. */
++		if (nonblock) {
++			kfree(new_ep);
++			return -EAGAIN;
++		}
+ 		/* See exclusive-wait commentary in ntsync_channel_recv. */
+ 		ret = wait_event_interruptible_exclusive(ch->u.channel.recv_wq,
+ 			!RB_EMPTY_ROOT(&ch->u.channel.pending));
+@@ -2059,7 +2069,9 @@
+ 	case NTSYNC_IOC_CHANNEL_DEREGISTER_THREAD:
+ 		return ntsync_channel_deregister_thread(obj, argp);
+ 	case NTSYNC_IOC_CHANNEL_RECV2:
+-		return ntsync_channel_recv2(obj, argp);
++		return ntsync_channel_recv2(obj, argp, false);
++	case NTSYNC_IOC_CHANNEL_TRY_RECV2:
++		return ntsync_channel_recv2(obj, argp, true);
+ 	default:
+ 		return -ENOIOCTLCMD;
+ 	}

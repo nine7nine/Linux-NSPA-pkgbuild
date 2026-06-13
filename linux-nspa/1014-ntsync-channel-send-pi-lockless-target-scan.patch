@@ -1,0 +1,115 @@
+ntsync 1014: lockless list_empty_careful fast-path on SEND_PI boost-target scan
+
+Audio-thread NTSYNC_IOC_CHANNEL_SEND_PI looks up a boost target by
+walking ch->u.channel.recv_wq.head under wq->lock.  In the production
+configuration the receiver is the gamma audio dispatcher, which since
+Phase 3 parks in NTSYNC_IOC_AGGREGATE_WAIT — never in CHANNEL_RECV /
+RECV2.  recv_wq is therefore EMPTY for the dispatcher path, and the
+spin_lock_irqsave / list_for_each_entry / spin_unlock_irqrestore around
+that empty walk is pure overhead on every SEND_PI.
+
+This patch wraps the lock-and-walk in a `list_empty_careful(&wq->head)`
+check.  Empty common case: zero lock acquisitions; non-empty case:
+identical behaviour to before (lock, walk, unlock).
+
+Correctness
+===========
+
+`list_empty_careful` uses `smp_load_acquire(&head->next)` then compares
+against `head->prev`.  This is the standard rmb-fenced lockless empty
+check used throughout the kernel (cf. wait_queue_active patterns).
+
+wq->head mutators (wait_event_interruptible_exclusive,
+prepare_to_wait_exclusive, finish_wait, autoremove_wake_function) all
+take wq->lock when modifying head.  Our observation is therefore backed
+by a stable model: empty/non-empty answers are coherent with respect to
+the lock-protected mutator set.
+
+Best-effort tolerance
+=====================
+
+The boost-target lookup is **already explicitly best-effort** — the
+existing fall-through to ch->any_waiters (NSPA 1010 + Phase 3+
+aggregate-wait support) is the cold-path catch-all.  A racy
+list_empty_careful that observes "empty" while a concurrent waiter is
+mid-insert results in: skip the boost on this SEND_PI, the next SEND_PI
+picks up the now-stable list.  Same race-safety profile as the existing
+fall-through path; same precision-not-correctness regression bound.
+
+The wake_up that follows lookup is unaffected — late waiters still get
+woken on entry-pop notification.
+
+RT-safety
+=========
+
+- Zero new allocations under wq->lock (no allocations under any lock at
+  all in this path).
+- list_empty_careful is two cache-hot loads + a comparison; nanoseconds
+  on the audio thread's SEND_PI critical section.
+- When non-empty, behaviour is identical to before — same lock acquire,
+  same walk, same unlock.
+- No new sleeps, no new atomics, no new barriers beyond
+  smp_load_acquire (which is free on x86_64 — release-acquire ordering
+  is implied by the load).
+
+Independence
+============
+
+This patch is independently revertable from the 1013 dedicated-slab
+caches patch.  They touch different code paths (1013: alloc/free across
+many sites; 1014: one boost-target-lookup site) and serve different
+purposes (1013: cache locality; 1014: lock-acquire elimination).
+
+Validation
+==========
+
+post1014a srcversion F1A9EA24E257A35BB21341D, debug kernel
+6.19.11-rt1-1-nspa-debug (KASAN+KCSAN+lockdep):
+
+  test-mixed-load-stress 300s   5.28M chan SEND/REPLY   0 errors  KASAN clean
+  test-channel-stress 60s 4x4   1.40M SEND/REPLY        0 errors  KASAN clean
+  test-channel-try-recv2 30s 4  62k SEND, 2.68M attempts 0 errors KASAN clean
+
+Perf measurement deferred to prod kernel (debug-kernel KASAN+lockdep
+overhead would mask any signal).
+
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -1644,15 +1644,30 @@
+ 		struct wait_queue_entry *wqe;
+ 		unsigned long flags;
+ 
+-		spin_lock_irqsave(&wq->lock, flags);
+-		list_for_each_entry(wqe, &wq->head, entry) {
+-			if (wqe->private) {
+-				target = wqe->private;
+-				get_task_struct(target);
+-				break;
++		/* NSPA 1014: lockless fast-path.  The Phase-3+ gamma dispatcher
++		 * (the production caller) parks in NTSYNC_IOC_AGGREGATE_WAIT,
++		 * not in CHANNEL_RECV/RECV2 — so recv_wq.head is empty for the
++		 * dispatcher path, which means walking it under wq->lock is
++		 * pure overhead on the audio RT thread's SEND_PI hot path.
++		 * list_empty_careful is the standard rmb-fenced lockless
++		 * empty-check used widely in the kernel for this pattern.
++		 *
++		 * Boost-target selection is best-effort by design (the heuristic
++		 * walks recv_wq first, falls through to any_waiters).  Worst case
++		 * under a racy "looks empty" read: we skip a waiter that was
++		 * concurrently being inserted; the next SEND_PI picks them up.
++		 * Same race-safety profile as the existing fall-through path. */
++		if (!list_empty_careful(&wq->head)) {
++			spin_lock_irqsave(&wq->lock, flags);
++			list_for_each_entry(wqe, &wq->head, entry) {
++				if (wqe->private) {
++					target = wqe->private;
++					get_task_struct(target);
++					break;
++				}
+ 			}
++			spin_unlock_irqrestore(&wq->lock, flags);
+ 		}
+-		spin_unlock_irqrestore(&wq->lock, flags);
+ 
+ 		if (!target) {
+ 			struct ntsync_q_entry *qe;

@@ -1,0 +1,426 @@
+ntsync 1015: dedicated kmem_cache for the per-ioctl wait queue (struct ntsync_q)
+
+Audit of post1014a (srcversion F1A9EA24E257A35BB21341D) found exactly one
+HOT remaining kmalloc class in ntsync.c after 1013 absorbed event_pi /
+channel_entry / pi_owner: the per-ioctl wait queue allocated by setup_wait
+and ntsync_aggregate_setup at the WAIT_ANY / WAIT_ALL / AGGREGATE_WAIT
+entry points.
+
+Site enumeration (post1014a line numbers — source-of-truth snapshot is
+ntsync.c.post1014):
+
+    1974  ntsync_thread_reg     per channel thread-register   COLD  - skip
+    2160  ntsync_obj            per CreateEvent/Mutex/Sem     COOL  - marginal
+  **2383  wait queue q          per WAIT_ANY/WAIT_ALL ioctl   HOT   - target**
+  **2829  wait queue q (agg)    per AGGREGATE_WAIT ioctl      HOT   - target**
+    2840  fds array             per wait-with-FDs (var-count) -     - not eligible
+    3092  ntsync_device         per chardev open              COLD  - skip
+
+Only the two wait-queue allocations are on the audio dispatcher hot path.
+Every block-completion fires WAIT_* ioctls from AudioCalc workers + MidiOut
++ MainThread; each pays a kmalloc-N traversal and shares a cacheline class
+with arbitrary system callers.
+
+Why a dedicated cache extends the same lever as 1013
+====================================================
+
+Same four arguments that motivated 1013, applied to the only remaining
+HOT kmalloc class:
+
+  1. Cacheline isolation.  SLAB_HWCACHE_ALIGN puts each slot on its own
+     cacheline boundary; no false sharing between concurrent waits on
+     different CPUs.
+
+  2. Per-cpu freelist locality.  AudioCalc workers + MidiOut + MainThread
+     all cycle through this allocator constantly; SLUB's per-cpu freelist
+     keeps recently-freed slots warm for the next allocation, instead of
+     intermixing with arbitrary system traffic in kmalloc-N.
+
+  3. Isolation from kmalloc-N callers.  Pre-1015, ntsync_q allocations
+     for ~72-352B share kmalloc-128 / kmalloc-256 / kmalloc-512 with
+     network buffers, fs metadata, and any other 100-300B caller.
+     Coherence traffic from those neighbors hits us as RT jitter.
+
+  4. /proc/slabinfo + /sys/kernel/slab/ntsync_wait_q visibility.  Per-
+     cache object counts, partial-slab usage, cpu_slabs activity all
+     directly observable for future tuning.
+
+Variable-size design
+====================
+
+struct ntsync_q has a flexible-array member; the alloc size is
+struct_size(q, entries, total_count) where total_count ranges from 1
+(typical audio worker) up to NTSYNC_MAX_WAIT_COUNT+1 = 65 (cap on
+NtWaitForMultipleObjects) or NTSYNC_AGG_MAX = 64 (aggregate wait).
+
+Three options were considered (in order of simplicity):
+
+  (a) Single fixed-size cache for "up to 16 entries"; kmalloc fallback
+      for total_count > 16.  Cleanest.
+
+  (b) Two-tier: small (≤16) + large (≤64) caches; kmalloc above.
+      Halves typical-case per-slot waste but doubles cache count.
+
+  (c) Per-cpu pre-allocated buffer pool with sized slots.  More code,
+      marginal extra win.
+
+Shipping (a).  16 entries comfortably covers the typical 1-8 audio wait
+depth; larger waits (rare) keep the existing kmalloc path with no
+regression.  Slot size with SLAB_HWCACHE_ALIGN ≈ 704B on x86_64 (64B
+cacheline rounding of header(32) + 16*entry(40) = 672B).
+
+Allocator routing is recorded in struct ntsync_q::from_cache (set in
+ntsync_alloc_q, read in ntsync_free_q).  Field placed in the existing
+2-byte trailing pad after `ownerdead`, so sizeof(struct ntsync_q) does
+not change.
+
+NULL-safety (1014a lesson)
+==========================
+
+kmem_cache_free is NOT NULL-safe under SLAB_FREELIST_HARDENED (per
+mm/slub.c cache_from_obj derefing virt_to_cache(NULL) → vmemmap[0]+8
+GP-fault — the exact crash 1014a fixed).  ntsync_free_q centralizes
+the NULL guard with an early `if (!q) return;` so every call site is
+trivially safe; no per-site `if (q)` audit needed.
+
+PREEMPT_RT discipline (1006 alloc-hoist invariant)
+==================================================
+
+Both kmem_cache_alloc(..., GFP_KERNEL) and kmalloc(..., GFP_KERNEL) are
+sleep-prone (they may direct-reclaim).  R1 from the ntsync-rt-audit
+forbids sleeping operations under raw_spinlock_t.
+
+Verified at every call site that ntsync_alloc_q runs at function entry,
+before any obj_lock / wait_all_lock / boost_lock is acquired:
+
+  setup_wait              line 2383 — top of function, no locks held
+  ntsync_aggregate_setup  line 2829 — top of function, no locks held
+
+And ntsync_free_q runs after every lock has been released and
+ntsync_pi_work_finish has drained the boost-pool:
+
+  setup_wait err          line 2421 — error cleanup, no locks held
+  ntsync_wait_any         line 2573 — after unqueue + pi_work_finish
+  ntsync_wait_all         line 2746 — after wait_all_lock unlock + pi_work_finish
+  aggregate_setup err 1   line 2842 — fds alloc fail, no locks held
+  aggregate_setup err 2   line 2891 — partial-init fail, no locks held
+  ntsync_aggregate_wait   line 3083 — after unqueue + pi_work_finish
+
+The 1006 alloc-hoist invariant is preserved end-to-end.
+
+UAF / lifecycle (1012 lesson)
+=============================
+
+struct ntsync_q has a task-private lifecycle: it is allocated by the
+syscalling task, populated by the same task, published into wait queues
+under obj_lock, list_del'd under obj_lock during unqueue (mutually
+exclusive with try_wake_any_*), and freed.  No cross-thread free path
+exists.  The 1012 snapshot-vs-refcount lesson does not apply — there is
+no lock-drop window between mutator and freer.
+
+UAPI
+====
+
+struct ntsync_q is a kernel-private struct with no UAPI exposure.
+Adding a `bool from_cache` field does not change any UAPI; ntsync.h is
+unchanged.
+
+Rollout
+=======
+
+Pattern matches 1013: add cache create/destroy to the existing
+ntsync_init / ntsync_exit chain (mirrored unwind labels), ship as a
+self-contained patch on top of post1014a.  Source-of-truth snapshot is
+ntsync.c.post1015 (md5 in update-{prod,debug}-ntsync.sh after this
+patch lands).
+
+Validation
+==========
+
+Per-site audit (the 4-dimension audit established by 1014a):
+  - NULL reachability: 1 alloc-fail return per site, all checked.
+                       ntsync_free_q wraps the NULL guard centrally.
+  - Allocator pairing: every ntsync_alloc_q paired with ntsync_free_q
+                       on every exit path.  No mixed kmalloc/
+                       kmem_cache_free or kmem_cache_alloc/kfree.
+  - Lifecycle:         caches created before misc_register, destroyed
+                       after misc_deregister, mirrored unwind labels.
+                       wait_q cache destroyed first in exit order.
+  - 1014 semantics:    independent — does not touch the lockless
+                       SEND_PI scan path.
+
+Observability:
+  /proc/slabinfo will show `ntsync_wait_q` cache; expect ~1-N active
+  objects matching live in-flight WAIT_* ioctls per process.
+  kmalloc-128 / -256 / -512 should NOT show ntsync_q traffic (proves
+  isolation, mirroring the 1013 evidence pattern).
+
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -55,6 +55,39 @@
+ static struct kmem_cache *ntsync_channel_entry_cache;
+ static struct kmem_cache *ntsync_pi_owner_cache;
+ 
++/*
++ * NSPA 1015: dedicated slab cache for the per-ioctl wait queue (struct
++ * ntsync_q) on the WAIT_ANY / WAIT_ALL / AGGREGATE_WAIT hot path.
++ *
++ * Pre-1015 the wait queue was generic kmalloc(struct_size(...), GFP_KERNEL).
++ * On the audio dispatcher path, every block-completion fires WAIT_* ioctls
++ * from AudioCalc workers + MidiOut + MainThread; each pays a kmalloc-N
++ * traversal and shares a cacheline class with arbitrary system callers.
++ * Following the 1013 lever (event_pi / channel_entry / pi_owner) extends
++ * cacheline isolation + per-cpu freelist locality + slabinfo visibility
++ * to the only remaining HOT kmalloc class in ntsync.c.
++ *
++ * Variable size is the design problem: total_count ranges from 1 (typical
++ * audio worker) up to NTSYNC_MAX_WAIT_COUNT+1 = 65 (cap on
++ * NtWaitForMultipleObjects).  Approach: single fixed-size cache sized to
++ * NTSYNC_Q_CACHE_MAX_ENTRIES = 16, with kmalloc fallback for total_count
++ * > 16.  16 entries comfortably covers the typical 1-8 audio wait depth;
++ * larger waits (rare) keep the existing kmalloc path with no regression.
++ *
++ * Allocator routing is recorded in struct ntsync_q::from_cache (set in
++ * ntsync_alloc_q, read in ntsync_free_q).  ntsync_free_q is NULL-safe
++ * (early return) — kmem_cache_free is NOT NULL-safe under
++ * SLAB_FREELIST_HARDENED (1014a lesson).
++ *
++ * RT discipline: identical to the existing kmalloc/kfree.  Both helpers
++ * are called outside any obj_lock / wait_all_lock / raw_spinlock_t — the
++ * 1006 alloc-hoist invariant is preserved (verified at every call site:
++ * setup_wait + ntsync_aggregate_setup at function entry; ntsync_free_q
++ * after the per-iteration unqueue loop and ntsync_pi_work_finish).
++ */
++#define NTSYNC_Q_CACHE_MAX_ENTRIES 16
++static struct kmem_cache *ntsync_wait_q_cache;
++
+ enum ntsync_type {
+ 	NTSYNC_TYPE_SEM,
+ 	NTSYNC_TYPE_MUTEX,
+@@ -178,6 +211,14 @@
+ 
+ 	bool all;
+ 	bool ownerdead;
++	/*
++	 * NSPA 1015: which allocator produced this q.  Set by
++	 * ntsync_alloc_q (true → ntsync_wait_q_cache, false → kmalloc
++	 * fallback for >NTSYNC_Q_CACHE_MAX_ENTRIES); read by
++	 * ntsync_free_q.  Lives in the existing 2-byte trailing pad
++	 * after `ownerdead` so sizeof(struct ntsync_q) is unchanged.
++	 */
++	bool from_cache;
+ 	__u32 count;
+ 	struct ntsync_q_entry entries[];
+ };
+@@ -2352,6 +2393,63 @@
+ }
+ 
+ /*
++ * NSPA 1015: allocate a struct ntsync_q with `total_count` flexible-array
++ * entries.  Routes to ntsync_wait_q_cache when total_count fits the cache
++ * slot (≤ NTSYNC_Q_CACHE_MAX_ENTRIES); otherwise falls back to kmalloc.
++ *
++ * Caller must subsequently initialize every field.  q->from_cache is set
++ * here so ntsync_free_q can route correctly even for the early-error path
++ * where partial entries[] population has not yet happened (the only
++ * fields this allocator touches are from_cache; the rest are caller's
++ * responsibility, identical to the prior kmalloc-then-init pattern).
++ *
++ * GFP_KERNEL is preserved.  Both kmem_cache_alloc and kmalloc are
++ * sleep-prone (they may reclaim) and must not be called under raw
++ * spinlocks — the 1006 alloc-hoist invariant.  Every caller of
++ * ntsync_alloc_q is at function entry, before any obj_lock /
++ * wait_all_lock acquisition.
++ */
++static struct ntsync_q *ntsync_alloc_q(__u32 total_count)
++{
++	struct ntsync_q *q;
++
++	if (total_count <= NTSYNC_Q_CACHE_MAX_ENTRIES) {
++		q = kmem_cache_alloc(ntsync_wait_q_cache, GFP_KERNEL);
++		if (q)
++			q->from_cache = true;
++	} else {
++		q = kmalloc_flex(*q, entries, total_count);
++		if (q)
++			q->from_cache = false;
++	}
++	return q;
++}
++
++/*
++ * NSPA 1015: free a struct ntsync_q allocated by ntsync_alloc_q.
++ *
++ * NULL-safe by design (early return) — kmem_cache_free is NOT NULL-safe
++ * under SLAB_FREELIST_HARDENED (1014a lesson; see kernel mm/slub.c
++ * cache_from_obj derefing virt_to_cache(NULL) → vmemmap[0]+8 GP-fault).
++ * The 1014a fix ships explicit `if (ptr)` guards at every direct
++ * kmem_cache_free site; this wrapper centralizes the same guarantee for
++ * the WAIT_* / AGGREGATE_WAIT hot path so call-site audit stays trivial.
++ *
++ * RT discipline: every call site is after the per-iteration unqueue
++ * loop and ntsync_pi_work_finish — i.e., after every obj_lock,
++ * wait_all_lock, and pi_work allocation has been released/drained.
++ */
++static void ntsync_free_q(struct ntsync_q *q)
++{
++	if (!q)
++		return;
++	if (q->from_cache)
++		kmem_cache_free(ntsync_wait_q_cache, q);
++	else
++		kfree(q);
++}
++
++/*
+  * Allocate and initialize the ntsync_q structure, but do not queue us yet.
+  */
+ static int setup_wait(struct ntsync_device *dev,
+@@ -2380,7 +2478,7 @@
+ 	if (args->alert)
+ 		fds[count] = args->alert;
+ 
+-	q = kmalloc_flex(*q, entries, total_count);
++	q = ntsync_alloc_q(total_count);
+ 	if (!q)
+ 		return -ENOMEM;
+ 	q->task = current;
+@@ -2418,7 +2516,7 @@
+ err:
+ 	for (j = 0; j < i; j++)
+ 		put_obj(q->entries[j].obj);
+-	kfree(q);
++	ntsync_free_q(q);
+ 	return -EINVAL;
+ }
+ 
+@@ -2570,7 +2668,7 @@
+ 	}
+ 
+ 	ntsync_pi_work_finish(&pi_work);
+-	kfree(q);
++	ntsync_free_q(q);
+ 	return ret;
+ }
+ 
+@@ -2743,7 +2841,7 @@
+ 	}
+ 
+ 	ntsync_pi_work_finish(&pi_work);
+-	kfree(q);
++	ntsync_free_q(q);
+ 	return ret;
+ }
+ 
+@@ -2826,7 +2924,7 @@
+ 		}
+ 	}
+ 
+-	q = kmalloc(struct_size(q, entries, nb_obj), GFP_KERNEL);
++	q = ntsync_alloc_q(nb_obj);
+ 	if (!q)
+ 		return -ENOMEM;
+ 	q->task = current;
+@@ -2839,7 +2937,7 @@
+ 	if (nb_fd) {
+ 		fds = kmalloc_array(nb_fd, sizeof(*fds), GFP_KERNEL);
+ 		if (!fds) {
+-			kfree(q);
++			ntsync_free_q(q);
+ 			return -ENOMEM;
+ 		}
+ 	}
+@@ -2888,7 +2986,7 @@
+ 	for (j = 0; j < fd_idx; j++)
+ 		fput(fds[j].file);
+ 	kfree(fds);
+-	kfree(q);
++	ntsync_free_q(q);
+ 	return ret;
+ }
+ 
+@@ -3080,7 +3178,7 @@
+ 	}
+ 
+ 	ntsync_pi_work_finish(&pi_work);
+-	kfree(q);
++	ntsync_free_q(q);
+ 	kfree(fds);
+ 	return ret;
+ }
+@@ -3176,13 +3274,13 @@
+ 
+ 	ntsync_event_pi_cache = kmem_cache_create("ntsync_event_pi",
+ 						  sizeof(struct ntsync_event_pi),
+-						  0, SLAB_HWCACHE_ALIGN, NULL);
++						  0, SLAB_HWCACHE_ALIGN | SLAB_NO_MERGE, NULL);
+ 	if (!ntsync_event_pi_cache)
+ 		return -ENOMEM;
+ 
+ 	ntsync_channel_entry_cache = kmem_cache_create("ntsync_channel_entry",
+ 						       sizeof(struct ntsync_channel_entry),
+-						       0, SLAB_HWCACHE_ALIGN, NULL);
++						       0, SLAB_HWCACHE_ALIGN | SLAB_NO_MERGE, NULL);
+ 	if (!ntsync_channel_entry_cache) {
+ 		ret = -ENOMEM;
+ 		goto err_chan;
+@@ -3190,12 +3288,31 @@
+ 
+ 	ntsync_pi_owner_cache = kmem_cache_create("ntsync_pi_owner",
+ 						  sizeof(struct ntsync_pi_owner),
+-						  0, SLAB_HWCACHE_ALIGN, NULL);
++						  0, SLAB_HWCACHE_ALIGN | SLAB_NO_MERGE, NULL);
+ 	if (!ntsync_pi_owner_cache) {
+ 		ret = -ENOMEM;
+ 		goto err_po;
+ 	}
+ 
++	/*
++	 * NSPA 1015: wait-queue cache.  Slot is sized exactly to a
++	 * NTSYNC_Q_CACHE_MAX_ENTRIES-deep ntsync_q (header + 16 entries),
++	 * computed at compile time via struct_size_t (overflow-safe form
++	 * of struct_size for constant counts).  SLAB_HWCACHE_ALIGN gives
++	 * cacheline-aligned slots → no false sharing between concurrent
++	 * waits on different CPUs.  Created last so the unwind path
++	 * destroys it before the misc_register-undo branch.
++	 */
++	ntsync_wait_q_cache = kmem_cache_create("ntsync_wait_q",
++						struct_size_t(struct ntsync_q,
++							      entries,
++							      NTSYNC_Q_CACHE_MAX_ENTRIES),
++						0, SLAB_HWCACHE_ALIGN | SLAB_NO_MERGE, NULL);
++	if (!ntsync_wait_q_cache) {
++		ret = -ENOMEM;
++		goto err_wait_q;
++	}
++
+ 	ret = misc_register(&ntsync_misc);
+ 	if (ret)
+ 		goto err_misc;
+@@ -3203,6 +3320,8 @@
+ 	return 0;
+ 
+ err_misc:
++	kmem_cache_destroy(ntsync_wait_q_cache);
++err_wait_q:
+ 	kmem_cache_destroy(ntsync_pi_owner_cache);
+ err_po:
+ 	kmem_cache_destroy(ntsync_channel_entry_cache);
+@@ -3216,8 +3335,16 @@
+ {
+ 	/* misc_deregister drains all open device fds; ntsync_free_obj runs
+ 	 * for every still-live object and returns its slab to its cache.
+-	 * After deregister, no callers can reach the caches. */
++	 * After deregister, no callers can reach the caches.
++	 *
++	 * NSPA 1015: wait_q cache destroyed in the same window — every
++	 * struct ntsync_q is per-ioctl and freed before the ioctl returns,
++	 * so no live wait_q allocations exist at exit time (the WAIT_*
++	 * ioctls hold an fd reference via fdget; misc_deregister waits for
++	 * those to drain).  Destroyed before pi_owner_cache to mirror
++	 * init-order unwind. */
+ 	misc_deregister(&ntsync_misc);
++	kmem_cache_destroy(ntsync_wait_q_cache);
+ 	kmem_cache_destroy(ntsync_pi_owner_cache);
+ 	kmem_cache_destroy(ntsync_channel_entry_cache);
+ 	kmem_cache_destroy(ntsync_event_pi_cache);

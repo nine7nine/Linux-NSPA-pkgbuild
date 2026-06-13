@@ -1,0 +1,153 @@
+ntsync 1009: refcount on channel_entry — close REPLY/cleanup UAF
+
+KASAN caught a slab-use-after-free on ntsync_channel_entry under
+test-channel-stress 4x4 with thread-registration churn.  REPLY's
+wake_up_all on e->wq runs outside obj_lock (must — wq's internal
+lock is spinlock_t, becomes rt_mutex on PREEMPT_RT, can't nest under
+raw_spin obj_lock).  That creates a window where SEND_PI's cleanup
+sees replied=true, list_dels e, kfrees e — all between REPLY's
+obj_unlock and REPLY's wake_up_all reaching the freed wait queue.
+
+Fix: refcount_t on channel_entry.  SEND_PI initializes to 1 after
+successful queue insertion (sleeper holds 1).  REPLY does
+refcount_inc under obj_lock before unlock, then wake_up_all, then
+refcount_dec_and_test+kfree-if-last.  SEND_PI cleanup does
+refcount_dec_and_test+kfree-if-last.  Whichever decrement reaches 0
+frees.
+
+Validation:
+  - test-channel-stress 30s/4x4: 819,803 SEND_PI = 819,803 REPLY
+    (perfect match), 974K register ops, 0 syscall errors,
+    0 KASAN/KCSAN splats, refcnt=0 post-stress.
+  - test-event-set-pi 20/20 PASS, test-channel-recv-exclusive 20/20
+    PASS (no regression on Bugs 2/3).
+  - test-event-set-pi-stress 60s/8x8: 2.7M signaler + 3.5M waiter,
+    drain OK, 0 splats.
+
+Same bug class the rolled-back legacy 1008/1009 patches were
+targeting; this is the minimal correct version without the audit-
+derived 1010/1011 noise.
+
+@@ -1406,6 +1406,14 @@
+ 	bool                replied;
+ 	wait_queue_head_t   wq;
+ 	__u64               thread_token;  /* NSPA: stamped at SEND_PI from registration */
++	/* NSPA: refcount.  Initialized to 1 by SEND_PI after successful
++	 * queue insertion (the sleeping sender holds 1).  REPLY takes a
++	 * second ref under obj_lock before unlocking, so that wake_up_all
++	 * (which must run outside obj_lock on PREEMPT_RT — wq's internal
++	 * lock would otherwise nest a sleeping spin-lock inside our
++	 * raw_spin) cannot race with SEND_PI's cleanup-side kfree.
++	 * Whoever's dec_and_test reaches 0 frees. */
++	refcount_t          refcnt;
+ };
+ 
+ /* NSPA: hash key.  obj_lock must be held by caller. */
+@@ -1517,6 +1525,7 @@
+ 	e->state       = NTSYNC_CH_PENDING;
+ 	e->replied     = false;
+ 	init_waitqueue_head(&e->wq);
++	refcount_set(&e->refcnt, 1);  /* sleeper holds 1; REPLY will inc */
+ 
+ 	obj_lock(ch);
+ 	if (ch->u.channel.depth >= ch->u.channel.max_depth) {
+@@ -1595,7 +1604,11 @@
+ 
+ 	if (new_ep)
+ 		kfree(new_ep);
+-	kfree(e);
++	/* NSPA: drop the sleeper's ref.  REPLY may still hold a ref to keep
++	 * the entry alive for its wake_up_all; whoever's dec_and_test
++	 * reaches 0 frees. */
++	if (refcount_dec_and_test(&e->refcnt))
++		kfree(e);
+ 	return ret;
+ }
+ 
+@@ -1763,6 +1776,12 @@
+ 		return -ENOENT;
+ 	}
+ 	e->replied = true;
++	/* NSPA: take a ref so the entry stays alive across our wake_up_all
++	 * even if the sender's cleanup races to kfree(e) after seeing
++	 * replied=true.  wake_up_all needs to remain outside obj_lock
++	 * because wq's internal lock is spinlock_t (rt_mutex on PREEMPT_RT)
++	 * and would otherwise nest a sleeping lock under our raw_spin. */
++	refcount_inc(&e->refcnt);
+ 	obj_unlock(ch);
+ 
+ 	wake_up_all(&e->wq);
+@@ -1770,6 +1789,10 @@
+ 	/* Drain our boost — handler is done. */
+ 	drain_event_pi_boosts(ch->dev, current);
+ 
++	/* Drop our ref.  If sender already left and dec'd, we free. */
++	if (refcount_dec_and_test(&e->refcnt))
++		kfree(e);
++
+ 	return 0;
+ }
+ 
+---
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -1406,6 +1406,14 @@
+ 	bool                replied;
+ 	wait_queue_head_t   wq;
+ 	__u64               thread_token;  /* NSPA: stamped at SEND_PI from registration */
++	/* NSPA: refcount.  Initialized to 1 by SEND_PI after successful
++	 * queue insertion (the sleeping sender holds 1).  REPLY takes a
++	 * second ref under obj_lock before unlocking, so that wake_up_all
++	 * (which must run outside obj_lock on PREEMPT_RT — wq's internal
++	 * lock would otherwise nest a sleeping spin-lock inside our
++	 * raw_spin) cannot race with SEND_PI's cleanup-side kfree.
++	 * Whoever's dec_and_test reaches 0 frees. */
++	refcount_t          refcnt;
+ };
+ 
+ /* NSPA: hash key.  obj_lock must be held by caller. */
+@@ -1517,6 +1525,7 @@
+ 	e->state       = NTSYNC_CH_PENDING;
+ 	e->replied     = false;
+ 	init_waitqueue_head(&e->wq);
++	refcount_set(&e->refcnt, 1);  /* sleeper holds 1; REPLY will inc */
+ 
+ 	obj_lock(ch);
+ 	if (ch->u.channel.depth >= ch->u.channel.max_depth) {
+@@ -1595,7 +1604,11 @@
+ 
+ 	if (new_ep)
+ 		kfree(new_ep);
+-	kfree(e);
++	/* NSPA: drop the sleeper's ref.  REPLY may still hold a ref to keep
++	 * the entry alive for its wake_up_all; whoever's dec_and_test
++	 * reaches 0 frees. */
++	if (refcount_dec_and_test(&e->refcnt))
++		kfree(e);
+ 	return ret;
+ }
+ 
+@@ -1763,6 +1776,12 @@
+ 		return -ENOENT;
+ 	}
+ 	e->replied = true;
++	/* NSPA: take a ref so the entry stays alive across our wake_up_all
++	 * even if the sender's cleanup races to kfree(e) after seeing
++	 * replied=true.  wake_up_all needs to remain outside obj_lock
++	 * because wq's internal lock is spinlock_t (rt_mutex on PREEMPT_RT)
++	 * and would otherwise nest a sleeping lock under our raw_spin. */
++	refcount_inc(&e->refcnt);
+ 	obj_unlock(ch);
+ 
+ 	wake_up_all(&e->wq);
+@@ -1770,6 +1789,10 @@
+ 	/* Drain our boost — handler is done. */
+ 	drain_event_pi_boosts(ch->dev, current);
+ 
++	/* Drop our ref.  If sender already left and dec'd, we free. */
++	if (refcount_dec_and_test(&e->refcnt))
++		kfree(e);
++
+ 	return 0;
+ }
+ 

@@ -1,0 +1,151 @@
+ntsync 1012: snapshot e fields under obj_lock in CHANNEL_RECV / RECV2
+
+Cross-thread slab-use-after-free in ntsync_channel_recv (and the
+near-duplicate ntsync_channel_recv2) caught by KASAN under
+test-mixed-load-stress 2026-05-04:
+
+  BUG: KASAN: slab-use-after-free in ntsync_obj_ioctl+0x4e88/0x5ac0
+  Read of size 4 at addr ffff8882f2b2d638 by task test-mixed-load/29803
+  ...
+  Allocated by task 29798: ntsync_obj_ioctl+0x20c8 (kzalloc in SEND_PI)
+  Freed     by task 29798: ntsync_obj_ioctl+0x3e28 (kfree in SEND_PI cleanup)
+
+Race shape:
+
+  T-A (SEND_PI):                    T-B (RECV / RECV2):
+    kzalloc(e), refcount=1
+    obj_lock; insert e; obj_unlock
+    wait_event_interruptible (parks
+        on e->wq waiting e->replied)
+                                    obj_lock
+                                    e = pop pending
+                                    e->state = DISPATCHED
+                                    list_add_tail(&e->list, dispatched)
+                                    depth--
+                                    obj_unlock                <-- RACE OPEN
+    SIGUSR1 arrives (test shutdown
+        calls pthread_kill on the
+        sender);  wait wakes via
+        signal_pending; ret =
+        -ERESTARTSYS
+    obj_lock
+    state == DISPATCHED:
+        list_del(&e->list)
+    obj_unlock
+    refcount_dec_and_test → 0
+    kfree(e)                        apply_event_pi_boost(... e->policy,
+                                                        e->prio, ...)  ← UAF
+                                    args.* = e->id ... e->prio          ← UAF
+
+The 1009 refcount fix coordinated SEND_PI sleeper vs. REPLY's
+wake_up_all so REPLY's late wq access stays valid.  It did not cover
+the receiver, which never takes a refcount on e — the receiver pops
+e and then reads e->fields outside obj_lock.  When the sender is
+interrupted in this window the sender frees e before the receiver
+finishes reading.
+
+Fix: snapshot every field the receiver reads (entry_id, payload_off,
+reply_off, sender_tid, prio for both RECV and RECV2; thread_token in
+RECV2; policy + prio for the boost call) into local variables BEFORE
+dropping obj_lock.  After unlock the receiver only touches the
+snapshots — never e — so the sender's free is harmless.
+
+Chosen over taking a refcount on the receiver because:
+  - snapshot adds ~7 cache-hot struct loads (e was just touched by
+    pop + list_add_tail) on the gamma audio dispatcher's hot path
+  - refcount_inc + refcount_dec_and_test would add 2 atomics per RECV
+    forever; the dispatcher runs at audio rate, this matters
+  - snapshot is the smaller diff and matches NSPA's existing pattern
+    of preferring local-stack snapshots over per-call-site refcounts
+    when the pointer doesn't escape the function
+
+apply_event_pi_boost continues to run outside obj_lock (it can sleep
+under PREEMPT_RT) — it just operates on the snapshotted policy/prio
+values now.
+
+Signed-off-by: NSPA-Claude <claude@nspa.local>
+--- a/drivers/misc/ntsync.c	2026-04-30 21:05:58.851093317 -0500
++++ b/drivers/misc/ntsync.c	2026-05-04 20:50:33.116062909 -0500
+@@ -1740,21 +1740,37 @@
+ 	e->state = NTSYNC_CH_DISPATCHED;
+ 	list_add_tail(&e->list, &ch->u.channel.dispatched);
+ 	ch->u.channel.depth--;
+-	obj_unlock(ch);
+-
+-	/* Auto-boost: lift us to the popped entry's priority for the
+-	 * handler duration.  Released at next RECV (drain at top). */
+-	if (e->prio) {
+-		if (apply_event_pi_boost(ch->dev, current,
+-					 e->policy, e->prio, new_ep))
+-			new_ep = NULL;
+-	}
+ 
++	/* NSPA 1012: snapshot e's fields BEFORE dropping obj_lock.  After
++	 * unlock the SEND_PI sleeper can be interrupted (signal_pending),
++	 * detach itself via list_del under obj_lock, drop its refcount and
++	 * kfree(e) — all before we get back to read e->prio / e->id below.
++	 * The receiver doesn't hold a refcount on e, so any read of e after
++	 * obj_unlock is a slab-UAF window.  The KASAN finding 2026-05-04
++	 * (test-mixed-load-stress, T29798 sender alloc+free, T29803 recv
++	 * read at e->prio) hit exactly this race during signal-driven test
++	 * shutdown.  Mirror fix in ntsync_channel_recv2 below. */
+ 	args.entry_id    = e->id;
+ 	args.payload_off = e->payload_off;
+ 	args.reply_off   = e->reply_off;
+ 	args.sender_tid  = e->sender_tid;
+ 	args.prio        = e->prio;
++	{
++		/* apply_event_pi_boost may sleep under PREEMPT_RT, so it must
++		 * run outside obj_lock.  Snapshot the boost params first. */
++		__u32 boost_policy = e->policy;
++		__u32 boost_prio   = e->prio;
++		obj_unlock(ch);
++
++		/* Auto-boost: lift us to the popped entry's priority for the
++		 * handler duration.  Released at next RECV (drain at top). */
++		if (boost_prio) {
++			if (apply_event_pi_boost(ch->dev, current,
++						 boost_policy, boost_prio, new_ep))
++				new_ep = NULL;
++		}
++	}
++
+ 	if (copy_to_user(argp, &args, sizeof(args)))
+ 		ret = -EFAULT;
+ 
+@@ -1820,20 +1836,28 @@
+ 	 * a thread that died and deregistered between SEND_PI and RECV2
+ 	 * yields token=0 → userspace fallback to get_thread_from_id. */
+ 	e->thread_token = channel_lookup_token(ch, e->sender_tid);
+-	obj_unlock(ch);
+-
+-	if (e->prio) {
+-		if (apply_event_pi_boost(ch->dev, current,
+-					 e->policy, e->prio, new_ep))
+-			new_ep = NULL;
+-	}
+ 
++	/* NSPA 1012: snapshot e's fields BEFORE obj_unlock — see commentary
++	 * in ntsync_channel_recv above.  Same SEND_PI-cleanup-vs-receiver
++	 * race window applies here. */
+ 	args.entry_id     = e->id;
+ 	args.payload_off  = e->payload_off;
+ 	args.reply_off    = e->reply_off;
+ 	args.sender_tid   = e->sender_tid;
+ 	args.prio         = e->prio;
+ 	args.thread_token = e->thread_token;
++	{
++		__u32 boost_policy = e->policy;
++		__u32 boost_prio   = e->prio;
++		obj_unlock(ch);
++
++		if (boost_prio) {
++			if (apply_event_pi_boost(ch->dev, current,
++						 boost_policy, boost_prio, new_ep))
++				new_ep = NULL;
++		}
++	}
++
+ 	if (copy_to_user(argp, &args, sizeof(args)))
+ 		ret = -EFAULT;
+ 

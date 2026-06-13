@@ -1,0 +1,1782 @@
+ntsync 1004 (combined 1004-1006): channel + thread token + RT alloc hoist
+
+Combined patch — 1004 (channel ioctl family), 1005 (thread token
+pass-through), and 1006 (slab alloc/free hoist out of raw_spinlock_t)
+fold into a single chunk because they were iterated in-place against
+ntsync.c.fixwork without intermediate snapshots.
+
+1004: NTSYNC_TYPE_CHANNEL — bounded mailbox with kernel-side priority
+queue and atomic priority inheritance.  Replaces Wine-NSPA's user-space
+futex + manual sched_setscheduler shm-IPC fast path between client and
+wineserver.
+
+1005: thread-token pass-through for channel RECV2.  Eliminates the
+userspace get_thread_from_id() lookup in the gamma dispatcher's hot
+loop (~10% dispatcher CPU per 2026-04-26 perf).  Wineserver registers
+(tid, token) per channel via a new ioctl; kernel returns the token
+directly from RECV2.
+
+1006: hoist all slab alloc/free out of raw_spinlock_t.  PREEMPT_RT
+slab fast path uses local_lock_t which is spinlock_t (sleeping on RT),
+so kzalloc()/kfree() are unsafe under raw_spinlock_t.  Six sites in
+this driver violated that rule.
+
+Regenerated 2026-05-04 from snapshot delta ntsync-p3.c → ntsync.c.post1006
+(+ pristine ntsync.h → ntsync.h.post1006) to replace the original
+1004/1005/1006 .patch files which had drifted from the iterated source.
+Functionally identical; verified byte-identical post-1006 sources
+(see project_ntsync_patches_drifted_from_fixwork.md).
+
+---
+--- a/include/uapi/linux/ntsync.h
++++ b/include/uapi/linux/ntsync.h
+@@ -35,9 +35,12 @@
+ 	__u32 flags;
+ 	__u32 owner;
+ 	__u32 alert;
+-	__u32 pad;
++	__u32 uring_fd;
+ };
+ 
++/* Sentinel value written to args.index when uring_fd fires. */
++#define NTSYNC_INDEX_URING_READY	0xFFFFFFFEu
++
+ #define NTSYNC_MAX_WAIT_COUNT 64
+ 
+ #define NTSYNC_IOC_CREATE_SEM		_IOW ('N', 0x80, struct ntsync_sem_args)
+@@ -56,4 +59,101 @@
+ #define NTSYNC_IOC_MUTEX_READ		_IOR ('N', 0x8c, struct ntsync_mutex_args)
+ #define NTSYNC_IOC_EVENT_READ		_IOR ('N', 0x8d, struct ntsync_event_args)
+ 
++/*
++ * NSPA: PI-aware event signal.
++ *
++ * Like NTSYNC_IOC_EVENT_SET but atomically applies a priority boost
++ * (via sched_setattr_nocheck, PREEMPT_RT-safe) to the first waiter
++ * currently blocked on this event.  Used by cross-thread SendMessage
++ * bypass to propagate sender RT priority to the message handler.
++ *
++ * Boost is auto-released at the target's next ntsync_wait_* entry.
++ * Multiple EVENT_SET_PI calls against the same target stack the
++ * boost-count; a single drain on wait re-entry clears them.
++ */
++struct ntsync_event_set_pi_args {
++	__u32 flags;    /* reserved, must be 0 */
++	__u32 policy;   /* SCHED_FIFO or SCHED_RR */
++	__u32 prio;     /* sched_priority 1..99 */
++	__u32 __pad;
++};
++
++#define NTSYNC_IOC_EVENT_SET_PI		_IOW ('N', 0x8e, struct ntsync_event_set_pi_args)
++
++/*
++ * NSPA: Kernel-mediated request/reply channel.
++ *
++ * A channel is a bounded mailbox with a kernel-side priority queue.
++ * Senders post requests with a priority and block until a reply arrives.
++ * A receiver pops the highest-priority pending request, dispatches it
++ * in user space, and signals completion via REPLY.  Priority inheritance
++ * is atomic: SEND boosts the blocked receiver to the sender's priority,
++ * and RECV further auto-boosts the receiver to the popped request's
++ * priority for the duration of the handler.  Drain happens at REPLY and
++ * at the next RECV (mirroring EVENT_SET_PI's drain-on-wait pattern).
++ *
++ * Replaces the user-space futex + manual sched_setscheduler request_shm
++ * IPC used by Wine-NSPA's wineserver fast path.  One channel per
++ * wineserver-client process.  Payload offsets are opaque to the kernel —
++ * conventionally indices into a per-process shared-memory region the
++ * client and server both map.
++ *
++ * State machine per entry:
++ *   PENDING   — in the priority tree, sender blocked on entry->wq
++ *   DISPATCHED — popped by RECV, sender still blocked
++ *   REPLIED   — REPLY signalled; sender woken; entry freed by sender
++ */
++struct ntsync_channel_create_args {
++	__u32 max_depth;     /* bounded queue size, 1..NTSYNC_CHANNEL_MAX_DEPTH */
++	__u32 __pad;
++};
++
++struct ntsync_channel_send_args {
++	__u32 policy;        /* SCHED_FIFO/RR; 0 = no PI */
++	__u32 prio;          /* sched_priority 1..99; 0 = no PI */
++	__u64 payload_off;   /* opaque cookie copied to RECV */
++	__u64 reply_off;     /* opaque cookie copied to RECV */
++};
++
++struct ntsync_channel_recv_args {
++	__u64 entry_id;      /* OUT: pass to REPLY */
++	__u64 payload_off;   /* OUT: from sender */
++	__u64 reply_off;     /* OUT: from sender */
++	__u32 sender_tid;    /* OUT: linux TID for diagnostics */
++	__u32 prio;          /* OUT: priority of popped entry */
++};
++
++/*
++ * NSPA: thread-token pass-through.  Wineserver registers per-thread
++ * tokens via REGISTER_THREAD; the kernel stamps the token onto each
++ * channel entry at SEND_PI and returns it via RECV2.  Eliminates the
++ * userspace get_thread_from_id() lookup from the dispatcher hot loop.
++ */
++struct ntsync_channel_register_thread_args {
++	__u32 tid;           /* IN: linux task PID (tgid-namespaced) */
++	__u32 __pad;
++	__u64 token;         /* IN: opaque cookie returned at RECV2 */
++};
++
++struct ntsync_channel_recv2_args {
++	__u64 entry_id;      /* OUT: pass to REPLY */
++	__u64 payload_off;   /* OUT: from sender */
++	__u64 reply_off;     /* OUT: from sender */
++	__u32 sender_tid;    /* OUT: linux TID for diagnostics */
++	__u32 prio;          /* OUT: priority of popped entry */
++	__u64 thread_token;  /* OUT: registered token (0 if unregistered) */
++};
++
++#define NTSYNC_CHANNEL_MAX_DEPTH	1024
++
++#define NTSYNC_IOC_CREATE_CHANNEL	_IOWR('N', 0x90, struct ntsync_channel_create_args)
++#define NTSYNC_IOC_CHANNEL_SEND_PI	_IOWR('N', 0x91, struct ntsync_channel_send_args)
++#define NTSYNC_IOC_CHANNEL_RECV		_IOWR('N', 0x92, struct ntsync_channel_recv_args)
++#define NTSYNC_IOC_CHANNEL_REPLY	_IOW ('N', 0x93, __u64)
++#define NTSYNC_IOC_CHANNEL_REGISTER_THREAD \
++				_IOW ('N', 0x94, struct ntsync_channel_register_thread_args)
++#define NTSYNC_IOC_CHANNEL_DEREGISTER_THREAD \
++				_IOW ('N', 0x95, __u32)
++#define NTSYNC_IOC_CHANNEL_RECV2	_IOWR('N', 0x96, struct ntsync_channel_recv2_args)
++
+ #endif
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -14,7 +14,11 @@
+ #include <linux/miscdevice.h>
+ #include <linux/module.h>
+ #include <linux/overflow.h>
++#include <linux/poll.h>
++#include <linux/rbtree.h>
++#include <linux/hashtable.h>
+ #include <linux/rtmutex.h>
++#include <linux/wait.h>
+ #include <linux/sched.h>
+ #include <linux/sched/signal.h>
+ #include <uapi/linux/sched/types.h>
+@@ -28,6 +32,7 @@
+ 	NTSYNC_TYPE_SEM,
+ 	NTSYNC_TYPE_MUTEX,
+ 	NTSYNC_TYPE_EVENT,
++	NTSYNC_TYPE_CHANNEL, /* NSPA: kernel-mediated request/reply mailbox */
+ };
+ 
+ /*
+@@ -70,6 +75,20 @@
+ 			bool manual;
+ 			bool signaled;
+ 		} event;
++		/* NSPA: kernel-mediated request/reply mailbox. */
++		struct {
++			struct rb_root pending;     /* PENDING entries by (prio DESC, seq ASC) */
++			struct list_head dispatched;/* DISPATCHED entries (linked for REPLY lookup) */
++			atomic64_t next_id;         /* monotonic for entry ids */
++			atomic64_t next_seq;        /* monotonic for tie-break */
++			__u32 depth;                /* current queue depth (PENDING) */
++			__u32 max_depth;
++			wait_queue_head_t recv_wq;  /* blocked receivers */
++			/* NSPA: per-channel (tid -> token) registry, protected
++			 * by the same obj_lock the channel state uses.  Used to
++			 * stamp thread_token onto entries at SEND_PI. */
++			struct hlist_head thread_regs[64];
++		} channel;
+ 	} u;
+ 
+ 	/*
+@@ -138,6 +157,112 @@
+ 	int boost_count;	/* number of mutex objects boosting this task */
+ };
+ 
++/*
++ * NSPA: RT-safe context for PI-boost adjustments.
++ *
++ * On PREEMPT_RT, slab alloc/free takes a sleeping lock (local_lock_t is
++ * spinlock_t on RT, and SLUB's per-CPU fast path calls migrate_disable
++ * + spin_lock).  kzalloc()/kfree() therefore CANNOT be called under
++ * raw_spinlock_t — neither obj->lock nor dev->boost_lock.
++ *
++ * Each ioctl entry that may invoke pi_recalc / pi_drop declares one of
++ * these on stack, pre-allocates new_po entries BEFORE taking any raw
++ * lock, and calls _finish() AFTER releasing all raw locks.
++ *
++ * Lifecycle of a pi_owner via this struct:
++ *   - kzalloc -> list_add to new_po_pool                   (caller, no lock)
++ *   - consumed: list_del from pool, list_add to dev list   (pi_recalc, raw)
++ *   - removed: list_move from dev list to to_free_list     (pi_recalc/_drop, raw)
++ *   - kfree from new_po_pool + to_free_list                (caller, no lock)
++ *
++ * Empty pool is a non-fatal fallback: pi_recalc skips the boost,
++ * matching the prior GFP_ATOMIC behaviour (transient priority
++ * inversion until the next op).
++ */
++struct ntsync_pi_work {
++	struct list_head new_po_pool;     /* pre-allocated; consumed on demand */
++	struct list_head to_free_list;    /* removed entries to free post-unlock */
++};
++
++static inline void ntsync_pi_work_init(struct ntsync_pi_work *w)
++{
++	INIT_LIST_HEAD(&w->new_po_pool);
++	INIT_LIST_HEAD(&w->to_free_list);
++}
++
++/*
++ * Pre-allocate one pi_owner entry into the pool.  Allocation failure
++ * is non-fatal — pi_recalc skips the boost when the pool is empty.
++ * Call OUTSIDE any raw_spinlock_t.
++ */
++static inline void ntsync_pi_work_prealloc(struct ntsync_pi_work *w)
++{
++	struct ntsync_pi_owner *po = kzalloc(sizeof(*po), GFP_KERNEL);
++
++	if (po) {
++		INIT_LIST_HEAD(&po->node);
++		list_add(&po->node, &w->new_po_pool);
++	}
++}
++
++/*
++ * Consume one pre-allocated entry from the pool.  Caller is under the
++ * raw_spinlock_t that protects dev->boosted_owners.  Returns NULL if
++ * the pool is empty (caller falls back to skipping the boost).
++ */
++static struct ntsync_pi_owner *
++ntsync_pi_work_take_new(struct ntsync_pi_work *w)
++{
++	struct ntsync_pi_owner *po;
++
++	if (list_empty(&w->new_po_pool))
++		return NULL;
++	po = list_first_entry(&w->new_po_pool, struct ntsync_pi_owner, node);
++	list_del(&po->node);
++	return po;
++}
++
++/*
++ * Free unused pre-allocated entries and entries removed from
++ * dev->boosted_owners by pi_drop/pi_recalc.  MUST be called outside
++ * any raw_spinlock_t.
++ */
++static inline void ntsync_pi_work_finish(struct ntsync_pi_work *w)
++{
++	struct ntsync_pi_owner *po, *tmp;
++
++	list_for_each_entry_safe(po, tmp, &w->new_po_pool, node) {
++		list_del(&po->node);
++		kfree(po);
++	}
++	list_for_each_entry_safe(po, tmp, &w->to_free_list, node) {
++		list_del(&po->node);
++		kfree(po);
++	}
++}
++
++/*
++ * NSPA: Per-task pending PI boost from EVENT_SET_PI signals.
++ *
++ * When a sender calls NTSYNC_IOC_EVENT_SET_PI with a boost prio,
++ * the target (event waiter) gets its scheduling attrs raised.
++ * A pi_event entry records the original attrs and a stackable
++ * boost_count (multiple SET_PI calls accumulate).
++ *
++ * Release happens at the target's next ntsync_wait_* entry, or
++ * on device close as a leak-cleanup.
++ *
++ * Holds its own task_struct reference: get_task_struct on add,
++ * put_task_struct on remove.  Protected by dev->boost_lock (raw).
++ */
++struct ntsync_event_pi {
++	struct list_head node;
++	struct task_struct *task;
++	struct sched_attr orig_attr;
++	int orig_normal_prio;
++	int boost_count;	/* number of outstanding EVENT_SET_PI boosts */
++};
++
+ struct ntsync_device {
+ 	/*
+ 	 * Wait-all operations must atomically grab all objects, and be totally
+@@ -156,6 +281,9 @@
+ 	/* NSPA: PI boost owner tracking — protected by boost_lock */
+ 	raw_spinlock_t boost_lock;
+ 	struct list_head boosted_owners;
++
++	/* NSPA: EVENT_SET_PI pending-boost tracking — also under boost_lock */
++	struct list_head event_pi_tasks;
+ };
+ 
+ /*
+@@ -279,7 +407,7 @@
+  * and last boost, the task is conservatively over-boosted (safe — it runs
+  * at too-high priority, never too-low).
+  */
+-static void ntsync_pi_recalc(struct ntsync_obj *obj)
++static void ntsync_pi_recalc(struct ntsync_obj *obj, struct ntsync_pi_work *w)
+ {
+ 	struct task_struct *owner = obj->u.mutex.owner_task;
+ 	struct ntsync_device *dev = obj->dev;
+@@ -294,7 +422,8 @@
+ 
+ 	ntsync_assert_held(obj);
+ 
+-	/* Find highest-priority waiter across both wait lists */
++	/* Find highest-priority waiter across both wait lists.  Caller
++	 * already holds obj->lock (or wait_all_lock + dev_locked). */
+ 	list_for_each_entry(entry, &obj->any_waiters, node) {
+ 		if (entry->obj == obj && entry->q->task->prio < highest_prio)
+ 			highest_prio = entry->q->task->prio;
+@@ -317,7 +446,10 @@
+ 	if (needs_boost && !was_boosted) {
+ 		/* This object is newly contributing a boost */
+ 		if (!po) {
+-			po = kzalloc(sizeof(*po), GFP_ATOMIC);
++			/* Need a fresh tracking entry; consume from caller's
++			 * pool.  Empty pool → silently skip boost (transient
++			 * priority inversion until next op). */
++			po = ntsync_pi_work_take_new(w);
+ 			if (unlikely(!po))
+ 				goto out;
+ 			po->task = owner;
+@@ -354,8 +486,9 @@
+ 			if (po->boost_count <= 0) {
+ 				/* Last boost removed — restore original */
+ 				sched_setattr_nocheck(owner, &po->orig_attr);
+-				list_del(&po->node);
+-				kfree(po);
++				/* Defer kfree past raw_spin_unlock (PREEMPT_RT
++				 * slab fast path uses sleeping locks). */
++				list_move(&po->node, &w->to_free_list);
+ 			}
+ 			/* boost_count > 0: another mutex still boosting,
+ 			 * leave the conservative over-boost in place. */
+@@ -367,9 +500,11 @@
+ 
+ /*
+  * NSPA: Drop any PI boost on a mutex and release the owner_task reference.
+- * Called when a mutex is fully released or destroyed.
++ * Called when a mutex is fully released or destroyed.  Any pi_owner
++ * removed from dev->boosted_owners is deferred to w->to_free_list;
++ * caller MUST kfree (via ntsync_pi_work_finish) outside all raw locks.
+  */
+-static void ntsync_pi_drop(struct ntsync_obj *obj)
++static void ntsync_pi_drop(struct ntsync_obj *obj, struct ntsync_pi_work *w)
+ {
+ 	struct ntsync_device *dev = obj->dev;
+ 	struct ntsync_pi_owner *po;
+@@ -385,8 +520,8 @@
+ 			if (po->boost_count <= 0) {
+ 				sched_setattr_nocheck(obj->u.mutex.owner_task,
+ 						      &po->orig_attr);
+-				list_del(&po->node);
+-				kfree(po);
++				/* Defer kfree past raw_spin_unlock. */
++				list_move(&po->node, &w->to_free_list);
+ 			}
+ 		}
+ 		raw_spin_unlock(&dev->boost_lock);
+@@ -400,12 +535,139 @@
+  * NSPA: Set a new owner_task for a mutex (with PI recalculation).
+  */
+ static void ntsync_pi_set_owner(struct ntsync_obj *obj,
+-				struct task_struct *new_owner)
++				struct task_struct *new_owner,
++				struct ntsync_pi_work *w)
+ {
+ 	if (new_owner) {
+ 		get_task_struct(new_owner);
+ 		obj->u.mutex.owner_task = new_owner;
+-		ntsync_pi_recalc(obj);
++		ntsync_pi_recalc(obj, w);
++	}
++}
++
++/*
++ * NSPA: Find the per-task event-PI tracking entry.
++ * Must be called with dev->boost_lock held.
++ */
++static struct ntsync_event_pi *find_event_pi(struct ntsync_device *dev,
++					     struct task_struct *task)
++{
++	struct ntsync_event_pi *ep;
++
++	list_for_each_entry(ep, &dev->event_pi_tasks, node) {
++		if (ep->task == task)
++			return ep;
++	}
++	return NULL;
++}
++
++/*
++ * NSPA: Apply an event PI boost to @target from a sender.
++ *
++ * PREEMPT_RT semantics:
++ *  - @new_ep is pre-allocated by caller with GFP_KERNEL (may sleep),
++ *    before any raw_spin_lock.  kzalloc under raw_spin_lock would
++ *    deadlock on RT because slab uses rt_spin_lock internally.
++ *  - sched_setattr_nocheck is safe under raw_spin_lock (it takes
++ *    rq->lock which is also raw).  Same pattern used by PI v2's
++ *    ntsync_pi_recalc.
++ *
++ * Boost stacking: multiple EVENT_SET_PI calls against the same target
++ * increment boost_count.  The boost stays applied (conservative over-
++ * boost is safe — runs at too-high prio, never too-low).  A single
++ * drain_event_pi_boosts clears all at once when target re-enters wait.
++ *
++ * Returns true if @new_ep was consumed (caller must NOT free).
++ */
++static bool apply_event_pi_boost(struct ntsync_device *dev,
++				 struct task_struct *target,
++				 u32 policy, u32 prio,
++				 struct ntsync_event_pi *new_ep)
++{
++	struct ntsync_event_pi *ep;
++	struct sched_attr boost;
++	int boost_prio_internal;
++	bool consumed = false;
++
++	/* Convert sender's rt_priority (1..99) to kernel's internal
++	 * prio-value (lower number = higher priority).  Matches the
++	 * conversion used by ntsync_pi_recalc. */
++	boost_prio_internal = MAX_RT_PRIO - 1 - prio;
++
++	raw_spin_lock(&dev->boost_lock);
++
++	ep = find_event_pi(dev, target);
++	if (!ep) {
++		/* First boost against this target — need tracking entry */
++		if (unlikely(!new_ep))
++			goto out;
++		get_task_struct(target); /* entry holds its own ref */
++		new_ep->task = target;
++		new_ep->orig_attr = (struct sched_attr){
++			.size = sizeof(struct sched_attr),
++			.sched_policy = target->policy,
++			.sched_priority = target->rt_priority,
++			.sched_nice = PRIO_TO_NICE(target->static_prio),
++		};
++		new_ep->orig_normal_prio = target->normal_prio;
++		new_ep->boost_count = 0;
++		list_add(&new_ep->node, &dev->event_pi_tasks);
++		ep = new_ep;
++		consumed = true;
++	}
++	ep->boost_count++;
++
++	/* Apply the boost only if it's genuinely higher than current.
++	 * Never lower (safe conservative over-boost if another mutex
++	 * or event is already boosting this task). */
++	if (boost_prio_internal < target->prio) {
++		boost = (struct sched_attr){
++			.size = sizeof(struct sched_attr),
++			.sched_policy = policy,
++			.sched_priority = prio,
++		};
++		sched_setattr_nocheck(target, &boost);
++	}
++
++out:
++	raw_spin_unlock(&dev->boost_lock);
++	return consumed;
++}
++
++/*
++ * NSPA: Drain any pending event-PI boosts for @task.
++ *
++ * Called at the top of ntsync_wait_any/wait_all: re-entering a wait
++ * implies the task is done processing any messages that triggered
++ * boosts.  Restores original scheduling attrs and frees the entry.
++ *
++ * A single call drains ALL accumulated boosts in one restore, which
++ * matches the semantic intent ("I'm done with the batch").
++ */
++static void drain_event_pi_boosts(struct ntsync_device *dev,
++				  struct task_struct *task)
++{
++	struct ntsync_event_pi *ep;
++	struct sched_attr restore;
++	struct task_struct *ref_to_put = NULL;
++
++	raw_spin_lock(&dev->boost_lock);
++	ep = find_event_pi(dev, task);
++	if (ep) {
++		restore = ep->orig_attr;
++		list_del(&ep->node);
++		ref_to_put = ep->task;
++		/* Apply restore while still holding boost_lock to serialize
++		 * against any concurrent apply_event_pi_boost that might see
++		 * the list briefly empty.  Same lock, so new boost against
++		 * this task cannot race with our restore here. */
++		sched_setattr_nocheck(task, &restore);
++	}
++	raw_spin_unlock(&dev->boost_lock);
++
++	if (ref_to_put) {
++		put_task_struct(ref_to_put);
++		kfree(ep);
+ 	}
+ }
+ 
+@@ -447,6 +709,10 @@
+ 		return obj->u.mutex.count < UINT_MAX;
+ 	case NTSYNC_TYPE_EVENT:
+ 		return obj->u.event.signaled;
++	case NTSYNC_TYPE_CHANNEL:
++		/* NSPA: channels are not waited on via WAIT_ANY/WAIT_ALL.
++		 * They use CHANNEL_RECV / CHANNEL_SEND_PI exclusively. */
++		return false;
+ 	}
+ 
+ 	WARN(1, "bad object type %#x\n", obj->type);
+@@ -457,9 +723,14 @@
+  * "locked_obj" is an optional pointer to an object which is already locked and
+  * should not be locked again. This is necessary so that changing an object's
+  * state and waking it can be a single atomic operation.
++ *
++ * @w: pi_work pool/cleanup; required for any q that may include mutex
++ *     entries.  Caller must call ntsync_pi_work_finish(w) outside all
++ *     raw locks.
+  */
+ static void try_wake_all(struct ntsync_device *dev, struct ntsync_q *q,
+-			 struct ntsync_obj *locked_obj)
++			 struct ntsync_obj *locked_obj,
++			 struct ntsync_pi_work *w)
+ {
+ 	__u32 count = q->count;
+ 	bool can_wake = true;
+@@ -497,13 +768,17 @@
+ 				obj->u.mutex.count++;
+ 				obj->u.mutex.owner = q->owner;
+ 				/* NSPA: transfer PI ownership in wait-all path */
+-				ntsync_pi_drop(obj);
+-				ntsync_pi_set_owner(obj, q->task);
++				ntsync_pi_drop(obj, w);
++				ntsync_pi_set_owner(obj, q->task, w);
+ 				break;
+ 			case NTSYNC_TYPE_EVENT:
+ 				if (!obj->u.event.manual)
+ 					obj->u.event.signaled = false;
+ 				break;
++			case NTSYNC_TYPE_CHANNEL:
++				/* NSPA: channels never reach this path; is_signaled
++				 * always returns false for them. */
++				break;
+ 			}
+ 		}
+ 		wake_up_process(q->task);
+@@ -515,7 +790,8 @@
+ 	}
+ }
+ 
+-static void try_wake_all_obj(struct ntsync_device *dev, struct ntsync_obj *obj)
++static void try_wake_all_obj(struct ntsync_device *dev, struct ntsync_obj *obj,
++			     struct ntsync_pi_work *w)
+ {
+ 	struct ntsync_q_entry *entry;
+ 
+@@ -523,7 +799,7 @@
+ 	lockdep_assert(obj->dev_locked);
+ 
+ 	list_for_each_entry(entry, &obj->all_waiters, node)
+-		try_wake_all(dev, entry->q, obj);
++		try_wake_all(dev, entry->q, obj, w);
+ }
+ 
+ static void try_wake_any_sem(struct ntsync_obj *sem)
+@@ -547,7 +823,8 @@
+ 	}
+ }
+ 
+-static void try_wake_any_mutex(struct ntsync_obj *mutex)
++static void try_wake_any_mutex(struct ntsync_obj *mutex,
++			       struct ntsync_pi_work *w)
+ {
+ 	struct ntsync_q_entry *entry;
+ 
+@@ -570,8 +847,8 @@
+ 			mutex->u.mutex.count++;
+ 			mutex->u.mutex.owner = q->owner;
+ 			/* NSPA: transfer PI ownership to acquiring task */
+-			ntsync_pi_drop(mutex);
+-			ntsync_pi_set_owner(mutex, q->task);
++			ntsync_pi_drop(mutex, w);
++			ntsync_pi_set_owner(mutex, q->task, w);
+ 			wake_up_process(q->task);
+ 		}
+ 	}
+@@ -620,6 +897,7 @@
+ static int ntsync_sem_release(struct ntsync_obj *sem, void __user *argp)
+ {
+ 	struct ntsync_device *dev = sem->dev;
++	struct ntsync_pi_work pi_work;
+ 	__u32 __user *user_args = argp;
+ 	__u32 prev_count;
+ 	__u32 args;
+@@ -632,18 +910,24 @@
+ 	if (sem->type != NTSYNC_TYPE_SEM)
+ 		return -EINVAL;
+ 
++	/* Wakes can transition mutexes via try_wake_all_obj path. */
++	ntsync_pi_work_init(&pi_work);
++	ntsync_pi_work_prealloc(&pi_work);
++
+ 	all = ntsync_lock_obj(dev, sem);
+ 
+ 	prev_count = sem->u.sem.count;
+ 	ret = release_sem_state(sem, args);
+ 	if (!ret) {
+ 		if (all)
+-			try_wake_all_obj(dev, sem);
++			try_wake_all_obj(dev, sem, &pi_work);
+ 		try_wake_any_sem(sem);
+ 	}
+ 
+ 	ntsync_unlock_obj(dev, sem, all);
+ 
++	ntsync_pi_work_finish(&pi_work);
++
+ 	if (!ret && put_user(prev_count, user_args))
+ 		ret = -EFAULT;
+ 
+@@ -670,6 +954,7 @@
+ {
+ 	struct ntsync_mutex_args __user *user_args = argp;
+ 	struct ntsync_device *dev = mutex->dev;
++	struct ntsync_pi_work pi_work;
+ 	struct ntsync_mutex_args args;
+ 	__u32 prev_count;
+ 	bool all;
+@@ -683,6 +968,11 @@
+ 	if (mutex->type != NTSYNC_TYPE_MUTEX)
+ 		return -EINVAL;
+ 
++	/* Pre-alloc one entry for the new-owner boost; pool grows on
++	 * demand inside try_wake_all_obj if multi-mutex waiters wake. */
++	ntsync_pi_work_init(&pi_work);
++	ntsync_pi_work_prealloc(&pi_work);
++
+ 	all = ntsync_lock_obj(dev, mutex);
+ 
+ 	/*
+@@ -704,15 +994,17 @@
+ 		 * set the new owner_task via ntsync_pi_set_owner.
+ 		 */
+ 		if (!mutex->u.mutex.owner)
+-			ntsync_pi_drop(mutex);
++			ntsync_pi_drop(mutex, &pi_work);
+ 
+ 		if (all)
+-			try_wake_all_obj(dev, mutex);
+-		try_wake_any_mutex(mutex);
++			try_wake_all_obj(dev, mutex, &pi_work);
++		try_wake_any_mutex(mutex, &pi_work);
+ 	}
+ 
+ 	ntsync_unlock_obj(dev, mutex, all);
+ 
++	ntsync_pi_work_finish(&pi_work);
++
+ 	if (!ret && put_user(prev_count, &user_args->count))
+ 		ret = -EFAULT;
+ 
+@@ -739,6 +1031,7 @@
+ static int ntsync_mutex_kill(struct ntsync_obj *mutex, void __user *argp)
+ {
+ 	struct ntsync_device *dev = mutex->dev;
++	struct ntsync_pi_work pi_work;
+ 	__u32 owner;
+ 	bool all;
+ 	int ret;
+@@ -751,50 +1044,151 @@
+ 	if (mutex->type != NTSYNC_TYPE_MUTEX)
+ 		return -EINVAL;
+ 
++	ntsync_pi_work_init(&pi_work);
++	ntsync_pi_work_prealloc(&pi_work);
++
+ 	all = ntsync_lock_obj(dev, mutex);
+ 
+ 	ret = kill_mutex_state(mutex, owner);
+ 	if (!ret) {
+ 		/* NSPA: owner is dead, drop any PI boost */
+-		ntsync_pi_drop(mutex);
++		ntsync_pi_drop(mutex, &pi_work);
+ 
+ 		if (all)
+-			try_wake_all_obj(dev, mutex);
+-		try_wake_any_mutex(mutex);
++			try_wake_all_obj(dev, mutex, &pi_work);
++		try_wake_any_mutex(mutex, &pi_work);
+ 	}
+ 
+ 	ntsync_unlock_obj(dev, mutex, all);
+ 
++	ntsync_pi_work_finish(&pi_work);
++
+ 	return ret;
+ }
+ 
+ static int ntsync_event_set(struct ntsync_obj *event, void __user *argp, bool pulse)
+ {
+ 	struct ntsync_device *dev = event->dev;
++	struct ntsync_pi_work pi_work;
+ 	__u32 prev_state;
+ 	bool all;
+ 
+ 	if (event->type != NTSYNC_TYPE_EVENT)
+ 		return -EINVAL;
+ 
++	ntsync_pi_work_init(&pi_work);
++	ntsync_pi_work_prealloc(&pi_work);
++
+ 	all = ntsync_lock_obj(dev, event);
+ 
+ 	prev_state = event->u.event.signaled;
+ 	event->u.event.signaled = true;
+ 	if (all)
+-		try_wake_all_obj(dev, event);
++		try_wake_all_obj(dev, event, &pi_work);
+ 	try_wake_any_event(event);
+ 	if (pulse)
+ 		event->u.event.signaled = false;
+ 
+ 	ntsync_unlock_obj(dev, event, all);
+ 
++	ntsync_pi_work_finish(&pi_work);
++
+ 	if (put_user(prev_state, (__u32 __user *)argp))
+ 		return -EFAULT;
+ 
+ 	return 0;
+ }
+ 
++/*
++ * NSPA: Set an event and atomically apply a PI boost to the first waiter.
++ *
++ * Used for cross-thread SendMessage bypass: the sender (e.g. an
++ * RT AudioCalc thread) signals the receiver's queue event with its
++ * own priority intent.  The kernel wakes the receiver at the boosted
++ * priority; the boost auto-releases on the receiver's next wait entry.
++ *
++ * If no waiter is currently blocked, behaves exactly like EVENT_SET —
++ * the signal is latched and a future wait_any returns immediately.
++ * No boost can be applied in that case (no target); the sender's
++ * intent is "boost whoever handles my message *now*".
++ *
++ * PREEMPT_RT notes:
++ *  - kzalloc done BEFORE obj lock (GFP_KERNEL, may sleep).
++ *  - sched_setattr_nocheck called under boost_lock (raw_spin) per
++ *    established PI v2 pattern.
++ *  - target get_task_struct taken under obj->lock to prevent UAF
++ *    between wake and boost application.
++ */
++static int ntsync_event_set_pi(struct ntsync_obj *event, void __user *argp)
++{
++	struct ntsync_event_set_pi_args args;
++	struct ntsync_device *dev = event->dev;
++	struct ntsync_event_pi *new_ep = NULL;
++	struct ntsync_pi_work pi_work;
++	struct task_struct *target = NULL;
++	bool consumed = false;
++	bool all;
++
++	if (event->type != NTSYNC_TYPE_EVENT)
++		return -EINVAL;
++
++	if (copy_from_user(&args, argp, sizeof(args)))
++		return -EFAULT;
++
++	if (args.flags)
++		return -EINVAL;
++	if (args.policy != SCHED_FIFO && args.policy != SCHED_RR)
++		return -EINVAL;
++	if (args.prio < 1 || args.prio > MAX_RT_PRIO - 1)
++		return -EINVAL;
++
++	/* Pre-allocate tracking entry outside any locks.  May be unused
++	 * if target already has an entry; freed at the tail. */
++	new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++
++	ntsync_pi_work_init(&pi_work);
++	ntsync_pi_work_prealloc(&pi_work);
++
++	all = ntsync_lock_obj(dev, event);
++
++	/* Signal identical to EVENT_SET — set, try wake-all, try wake-any. */
++	event->u.event.signaled = true;
++
++	/* Capture the first waiter while under obj->lock so the reference
++	 * is safe even after try_wake_any_event rearranges the queue.
++	 * Priority-ordered queue (Patch 1002) means list head is the
++	 * highest-priority waiter — the one that will actually wake. */
++	if (!list_empty(&event->any_waiters)) {
++		struct ntsync_q_entry *entry;
++
++		entry = list_first_entry(&event->any_waiters,
++					 struct ntsync_q_entry, node);
++		target = entry->q->task;
++		get_task_struct(target);
++	}
++
++	if (all)
++		try_wake_all_obj(dev, event, &pi_work);
++	try_wake_any_event(event);
++
++	ntsync_unlock_obj(dev, event, all);
++
++	ntsync_pi_work_finish(&pi_work);
++
++	/* Apply the boost outside obj->lock; helper takes boost_lock. */
++	if (target) {
++		consumed = apply_event_pi_boost(dev, target,
++						args.policy, args.prio,
++						new_ep);
++		put_task_struct(target);
++	}
++
++	if (!consumed)
++		kfree(new_ep);
++
++	return 0;
++}
++
+ static int ntsync_event_reset(struct ntsync_obj *event, void __user *argp)
+ {
+ 	struct ntsync_device *dev = event->dev;
+@@ -885,11 +1279,556 @@
+ 	return 0;
+ }
+ 
++/*
++ * NSPA: kernel-mediated request/reply channel.
++ *
++ * Per-entry state for ntsync_channel.  Allocated by SEND, freed by SEND
++ * after the sender wakes (either replied normally or interrupted).
++ *
++ * RT-safety:
++ *  - All slab allocations (entry, boost record) are pre-allocated with
++ *    GFP_KERNEL BEFORE acquiring obj_lock (raw_spinlock).  Slab on
++ *    PREEMPT_RT uses rt_spin_lock internally; cannot kzalloc under raw.
++ *  - obj_lock sections are bounded: rb_insert/rb_erase/list_add are O(log
++ *    depth) at most; max_depth capped at NTSYNC_CHANNEL_MAX_DEPTH (1024).
++ *  - sched_setattr_nocheck is invoked from apply_event_pi_boost, which
++ *    holds dev->boost_lock (raw_spinlock).  Same pattern as the existing
++ *    EVENT_SET_PI / mutex-PI paths — known RT-safe.
++ *  - schedule() is only called outside any raw_spinlock, after
++ *    prepare_to_wait sets TASK_INTERRUPTIBLE.
++ *  - wq->lock peek for PI target: short critical section, get_task_struct
++ *    inside the lock so the target stays valid for apply_event_pi_boost
++ *    after release.
++ *
++ * NT semantics:
++ *  - Channel is a transport, not a protocol.  Caller (wineserver) still
++ *    drives request/reply contracts; the kernel only multiplexes and
++ *    priority-orders, never reorders within a single sender (each sender
++ *    blocks for reply, so per-thread ordering is preserved).
++ *  - Cross-thread ordering was never guaranteed under the existing per-
++ *    thread dispatcher pthread shape; priority ordering is strictly
++ *    stronger semantically (no thread can starve while a higher-prio
++ *    thread is waiting).
++ *  - Memory ordering: kernel ioctl syscalls are full barriers on entry
++ *    and exit; payload visibility from sender to receiver and reply
++ *    visibility from receiver to sender are naturally serialised.
++ */
++static struct ntsync_obj *ntsync_alloc_obj(struct ntsync_device *dev,
++					   enum ntsync_type type);
++static int ntsync_obj_get_fd(struct ntsync_obj *obj);
++static void ntsync_free_obj(struct ntsync_obj *obj);
++
++enum ntsync_channel_state {
++	NTSYNC_CH_PENDING,    /* in u.channel.pending rbtree */
++	NTSYNC_CH_DISPATCHED, /* in u.channel.dispatched list */
++};
++
++/* NSPA: per-channel thread registration entry (tid -> token mapping). */
++struct ntsync_thread_reg {
++	struct hlist_node hnode;
++	u32 tid;
++	u64 token;
++};
++
++struct ntsync_channel_entry {
++	struct rb_node      rb;       /* node in u.channel.pending (PENDING only) */
++	struct list_head    list;     /* node in u.channel.dispatched (DISPATCHED only) */
++	__u64               id;
++	__u64               seq;
++	__u32               prio;
++	__u32               policy;
++	__u64               payload_off;
++	__u64               reply_off;
++	__u32               sender_tid;
++	enum ntsync_channel_state state;
++	bool                replied;
++	wait_queue_head_t   wq;
++	__u64               thread_token;  /* NSPA: stamped at SEND_PI from registration */
++};
++
++/* NSPA: hash key.  obj_lock must be held by caller. */
++static u64 channel_lookup_token(struct ntsync_obj *ch, u32 tid)
++{
++	struct ntsync_thread_reg *reg;
++	u32 bucket = tid & 63;
++
++	hlist_for_each_entry(reg, &ch->u.channel.thread_regs[bucket], hnode) {
++		if (reg->tid == tid)
++			return reg->token;
++	}
++	return 0;
++}
++
++/* NSPA: drop all registrations.  Called once from ntsync_free_obj at the
++ * end of the channel's life; no concurrent access possible at that point. */
++static void channel_drain_thread_regs(struct ntsync_obj *ch)
++{
++	struct ntsync_thread_reg *reg;
++	struct hlist_node *tmp;
++	int i;
++
++	for (i = 0; i < 64; i++) {
++		hlist_for_each_entry_safe(reg, tmp, &ch->u.channel.thread_regs[i], hnode) {
++			hlist_del(&reg->hnode);
++			kfree(reg);
++		}
++	}
++}
++
++/* Insert into pending rbtree by (prio DESC, seq ASC).  Returns true
++ * iff entry is the new tree minimum (i.e. would be popped next). */
++static bool channel_pending_insert(struct ntsync_obj *ch,
++				   struct ntsync_channel_entry *e)
++{
++	struct rb_node **link = &ch->u.channel.pending.rb_node, *parent = NULL;
++	bool leftmost = true;
++
++	while (*link) {
++		struct ntsync_channel_entry *cur =
++			rb_entry(*link, struct ntsync_channel_entry, rb);
++		parent = *link;
++		if (e->prio > cur->prio ||
++		    (e->prio == cur->prio && e->seq < cur->seq)) {
++			link = &(*link)->rb_left;
++		} else {
++			link = &(*link)->rb_right;
++			leftmost = false;
++		}
++	}
++	rb_link_node(&e->rb, parent, link);
++	rb_insert_color(&e->rb, &ch->u.channel.pending);
++	return leftmost;
++}
++
++static struct ntsync_channel_entry *channel_pending_pop(struct ntsync_obj *ch)
++{
++	struct rb_node *first = rb_first(&ch->u.channel.pending);
++	struct ntsync_channel_entry *e;
++
++	if (!first)
++		return NULL;
++	e = rb_entry(first, struct ntsync_channel_entry, rb);
++	rb_erase(first, &ch->u.channel.pending);
++	return e;
++}
++
++/*
++ * SEND_PI: enqueue request, optionally boost a blocked recv'er to
++ * the sender's priority, then sleep until REPLY (or signal).
++ */
++static int ntsync_channel_send_pi(struct ntsync_obj *ch, void __user *argp)
++{
++	struct ntsync_channel_send_args args;
++	struct ntsync_channel_entry *e;
++	struct ntsync_event_pi *new_ep = NULL;
++	bool new_minimum;
++	int ret = 0;
++
++	if (ch->type != NTSYNC_TYPE_CHANNEL)
++		return -EINVAL;
++	if (copy_from_user(&args, argp, sizeof(args)))
++		return -EFAULT;
++	if (args.prio > 99)
++		return -EINVAL;
++	if (args.prio &&
++	    args.policy != SCHED_FIFO && args.policy != SCHED_RR)
++		return -EINVAL;
++
++	e = kzalloc(sizeof(*e), GFP_KERNEL);
++	if (!e)
++		return -ENOMEM;
++	if (args.prio) {
++		new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++		if (!new_ep) {
++			kfree(e);
++			return -ENOMEM;
++		}
++	}
++
++	e->id          = atomic64_inc_return(&ch->u.channel.next_id);
++	e->seq         = atomic64_inc_return(&ch->u.channel.next_seq);
++	e->prio        = args.prio;
++	e->policy      = args.policy;
++	e->payload_off = args.payload_off;
++	e->reply_off   = args.reply_off;
++	e->sender_tid  = task_pid_vnr(current);
++	e->state       = NTSYNC_CH_PENDING;
++	e->replied     = false;
++	init_waitqueue_head(&e->wq);
++
++	obj_lock(ch);
++	if (ch->u.channel.depth >= ch->u.channel.max_depth) {
++		obj_unlock(ch);
++		kfree(new_ep);
++		kfree(e);
++		return -EAGAIN;
++	}
++	/* NSPA: e->thread_token stays 0 here; populated at RECV2 time from
++	 * the current registration (not at SEND_PI snapshot).  This keeps
++	 * the audio-thread SEND_PI critical section minimal and closes the
++	 * tid-recycling UAF window where a stale snapshotted token could
++	 * point to a freed thread struct after the sender dies. */
++	new_minimum = channel_pending_insert(ch, e);
++	ch->u.channel.depth++;
++	obj_unlock(ch);
++
++	/* If we became the new minimum and a recv'er is blocked, boost it.
++	 * Same pattern as EVENT_SET_PI: pre-allocated tracking entry,
++	 * apply_event_pi_boost handles list maintenance under boost_lock. */
++	if (new_minimum && args.prio) {
++		struct task_struct *target = NULL;
++		wait_queue_head_t *wq = &ch->u.channel.recv_wq;
++		struct wait_queue_entry *wqe;
++		unsigned long flags;
++
++		spin_lock_irqsave(&wq->lock, flags);
++		list_for_each_entry(wqe, &wq->head, entry) {
++			if (wqe->private) {
++				target = wqe->private;
++				get_task_struct(target);
++				break;
++			}
++		}
++		spin_unlock_irqrestore(&wq->lock, flags);
++
++		if (target) {
++			if (apply_event_pi_boost(ch->dev, target,
++						 args.policy, args.prio, new_ep))
++				new_ep = NULL;  /* consumed */
++			put_task_struct(target);
++		}
++	}
++
++	wake_up(&ch->u.channel.recv_wq);
++
++	/* Sleep until REPLY sets e->replied + wakes e->wq, or signal. */
++	{
++		DEFINE_WAIT(wait);
++		for (;;) {
++			prepare_to_wait(&e->wq, &wait, TASK_INTERRUPTIBLE);
++			obj_lock(ch);
++			if (e->replied) {
++				obj_unlock(ch);
++				break;
++			}
++			obj_unlock(ch);
++			if (signal_pending(current)) {
++				ret = -ERESTARTSYS;
++				break;
++			}
++			schedule();
++		}
++		finish_wait(&e->wq, &wait);
++	}
++
++	/* Cleanup: detach from whichever list/tree we're on. */
++	obj_lock(ch);
++	if (e->state == NTSYNC_CH_PENDING) {
++		rb_erase(&e->rb, &ch->u.channel.pending);
++		ch->u.channel.depth--;
++	} else /* DISPATCHED */ {
++		list_del(&e->list);
++	}
++	obj_unlock(ch);
++
++	if (new_ep)
++		kfree(new_ep);
++	kfree(e);
++	return ret;
++}
++
++/*
++ * RECV: drain prior boost, block until pending non-empty, pop highest-
++ * priority entry, mark DISPATCHED, boost ourselves to the popped entry's
++ * priority for the duration of the handler.
++ */
++static int ntsync_channel_recv(struct ntsync_obj *ch, void __user *argp)
++{
++	struct ntsync_channel_recv_args args;
++	struct ntsync_channel_entry *e = NULL;
++	struct ntsync_event_pi *new_ep = NULL;
++	int ret = 0;
++
++	if (ch->type != NTSYNC_TYPE_CHANNEL)
++		return -EINVAL;
++
++	/* Drain any boost left over from a prior RECV cycle. */
++	drain_event_pi_boosts(ch->dev, current);
++
++	/* Pre-allocate boost tracking before taking obj_lock (slab on RT). */
++	new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++	if (!new_ep)
++		return -ENOMEM;
++
++	obj_lock(ch);
++	while (RB_EMPTY_ROOT(&ch->u.channel.pending)) {
++		obj_unlock(ch);
++		ret = wait_event_interruptible(ch->u.channel.recv_wq,
++			!RB_EMPTY_ROOT(&ch->u.channel.pending));
++		if (ret < 0) {
++			kfree(new_ep);
++			return ret;
++		}
++		obj_lock(ch);
++	}
++
++	e = channel_pending_pop(ch);
++	e->state = NTSYNC_CH_DISPATCHED;
++	list_add_tail(&e->list, &ch->u.channel.dispatched);
++	ch->u.channel.depth--;
++	obj_unlock(ch);
++
++	/* Auto-boost: lift us to the popped entry's priority for the
++	 * handler duration.  Released at next RECV (drain at top). */
++	if (e->prio) {
++		if (apply_event_pi_boost(ch->dev, current,
++					 e->policy, e->prio, new_ep))
++			new_ep = NULL;
++	}
++
++	args.entry_id    = e->id;
++	args.payload_off = e->payload_off;
++	args.reply_off   = e->reply_off;
++	args.sender_tid  = e->sender_tid;
++	args.prio        = e->prio;
++	if (copy_to_user(argp, &args, sizeof(args)))
++		ret = -EFAULT;
++
++	if (new_ep)
++		kfree(new_ep);
++	return ret;
++}
++
++/*
++ * RECV2: like RECV but returns thread_token in extended args.  See the
++ * NSPA thread-token pass-through commentary in include/uapi/linux/ntsync.h.
++ * Implementation is intentionally a near-duplicate of ntsync_channel_recv
++ * to keep the diff small and the read order obvious; the extra field copy
++ * is the only behavioural difference.
++ */
++static int ntsync_channel_recv2(struct ntsync_obj *ch, void __user *argp)
++{
++	struct ntsync_channel_recv2_args args;
++	struct ntsync_channel_entry *e = NULL;
++	struct ntsync_event_pi *new_ep = NULL;
++	int ret = 0;
++
++	if (ch->type != NTSYNC_TYPE_CHANNEL)
++		return -EINVAL;
++
++	drain_event_pi_boosts(ch->dev, current);
++
++	new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++	if (!new_ep)
++		return -ENOMEM;
++
++	obj_lock(ch);
++	while (RB_EMPTY_ROOT(&ch->u.channel.pending)) {
++		obj_unlock(ch);
++		ret = wait_event_interruptible(ch->u.channel.recv_wq,
++			!RB_EMPTY_ROOT(&ch->u.channel.pending));
++		if (ret < 0) {
++			kfree(new_ep);
++			return ret;
++		}
++		obj_lock(ch);
++	}
++
++	e = channel_pending_pop(ch);
++	e->state = NTSYNC_CH_DISPATCHED;
++	list_add_tail(&e->list, &ch->u.channel.dispatched);
++	ch->u.channel.depth--;
++	/* NSPA: lookup the registered token here under obj_lock.  Moved
++	 * from SEND_PI to keep the audio-thread send-side critical section
++	 * minimal — the dispatcher pthread eats the lookup time instead.
++	 * Reflects current registration (not stale SEND_PI snapshot), so
++	 * a thread that died and deregistered between SEND_PI and RECV2
++	 * yields token=0 → userspace fallback to get_thread_from_id. */
++	e->thread_token = channel_lookup_token(ch, e->sender_tid);
++	obj_unlock(ch);
++
++	if (e->prio) {
++		if (apply_event_pi_boost(ch->dev, current,
++					 e->policy, e->prio, new_ep))
++			new_ep = NULL;
++	}
++
++	args.entry_id     = e->id;
++	args.payload_off  = e->payload_off;
++	args.reply_off    = e->reply_off;
++	args.sender_tid   = e->sender_tid;
++	args.prio         = e->prio;
++	args.thread_token = e->thread_token;
++	if (copy_to_user(argp, &args, sizeof(args)))
++		ret = -EFAULT;
++
++	if (new_ep)
++		kfree(new_ep);
++	return ret;
++}
++
++/*
++ * REPLY: locate the dispatched entry by id, mark replied, wake sender.
++ * Drains the recv'er's PI boost (we're the recv'er; we just finished
++ * handling).
++ */
++static int ntsync_channel_reply(struct ntsync_obj *ch, void __user *argp)
++{
++	__u64 entry_id;
++	struct ntsync_channel_entry *e = NULL, *cur;
++
++	if (ch->type != NTSYNC_TYPE_CHANNEL)
++		return -EINVAL;
++	if (copy_from_user(&entry_id, argp, sizeof(entry_id)))
++		return -EFAULT;
++
++	obj_lock(ch);
++	list_for_each_entry(cur, &ch->u.channel.dispatched, list) {
++		if (cur->id == entry_id) {
++			e = cur;
++			break;
++		}
++	}
++	if (!e || e->replied) {
++		obj_unlock(ch);
++		return -ENOENT;
++	}
++	e->replied = true;
++	obj_unlock(ch);
++
++	wake_up_all(&e->wq);
++
++	/* Drain our boost — handler is done. */
++	drain_event_pi_boosts(ch->dev, current);
++
++	return 0;
++}
++
++/*
++ * NSPA: register or replace the (tid -> token) mapping for this channel.
++ * Caller (wineserver) is the channel's controlling process; the kernel
++ * does not validate sender TIDs against registered ones — registration
++ * is purely a wineserver-driven plumbing convenience.
++ */
++static int ntsync_channel_register_thread(struct ntsync_obj *ch, void __user *argp)
++{
++	struct ntsync_channel_register_thread_args args;
++	struct ntsync_thread_reg *reg, *cur;
++	struct ntsync_thread_reg *victim = NULL;
++	struct hlist_node *tmp;
++	u32 bucket;
++
++	if (ch->type != NTSYNC_TYPE_CHANNEL)
++		return -EINVAL;
++	if (copy_from_user(&args, argp, sizeof(args)))
++		return -EFAULT;
++	if (args.tid == 0)
++		return -EINVAL;
++
++	reg = kzalloc(sizeof(*reg), GFP_KERNEL);
++	if (!reg)
++		return -ENOMEM;
++	reg->tid   = args.tid;
++	reg->token = args.token;
++	bucket = args.tid & 63;
++
++	obj_lock(ch);
++	hlist_for_each_entry_safe(cur, tmp, &ch->u.channel.thread_regs[bucket], hnode) {
++		if (cur->tid == args.tid) {
++			hlist_del(&cur->hnode);
++			/* Defer kfree past obj_unlock — slab on PREEMPT_RT
++			 * uses sleeping locks; cannot kfree under raw. */
++			victim = cur;
++			break;
++		}
++	}
++	hlist_add_head(&reg->hnode, &ch->u.channel.thread_regs[bucket]);
++	obj_unlock(ch);
++
++	kfree(victim);  /* NULL-safe */
++	return 0;
++}
++
++static int ntsync_channel_deregister_thread(struct ntsync_obj *ch, void __user *argp)
++{
++	struct ntsync_thread_reg *cur, *victim = NULL;
++	struct hlist_node *tmp;
++	u32 tid, bucket;
++
++	if (ch->type != NTSYNC_TYPE_CHANNEL)
++		return -EINVAL;
++	if (copy_from_user(&tid, argp, sizeof(tid)))
++		return -EFAULT;
++	bucket = tid & 63;
++
++	obj_lock(ch);
++	hlist_for_each_entry_safe(cur, tmp, &ch->u.channel.thread_regs[bucket], hnode) {
++		if (cur->tid == tid) {
++			hlist_del(&cur->hnode);
++			/* Defer kfree past obj_unlock (PREEMPT_RT). */
++			victim = cur;
++			break;
++		}
++	}
++	obj_unlock(ch);
++
++	kfree(victim);  /* NULL-safe */
++	return 0;
++}
++
++static int ntsync_create_channel(struct ntsync_device *dev, void __user *argp)
++{
++	struct ntsync_channel_create_args args;
++	struct ntsync_obj *ch;
++	int fd;
++
++	if (copy_from_user(&args, argp, sizeof(args)))
++		return -EFAULT;
++	if (!args.max_depth || args.max_depth > NTSYNC_CHANNEL_MAX_DEPTH)
++		return -EINVAL;
++
++	ch = ntsync_alloc_obj(dev, NTSYNC_TYPE_CHANNEL);
++	if (!ch)
++		return -ENOMEM;
++	ch->u.channel.pending    = RB_ROOT;
++	INIT_LIST_HEAD(&ch->u.channel.dispatched);
++	atomic64_set(&ch->u.channel.next_id, 0);
++	atomic64_set(&ch->u.channel.next_seq, 0);
++	ch->u.channel.depth      = 0;
++	ch->u.channel.max_depth  = args.max_depth;
++	init_waitqueue_head(&ch->u.channel.recv_wq);
++	{
++		int i;
++		for (i = 0; i < 64; i++)
++			INIT_HLIST_HEAD(&ch->u.channel.thread_regs[i]);
++	}
++
++	fd = ntsync_obj_get_fd(ch);
++	if (fd < 0)
++		ntsync_free_obj(ch);
++	return fd;
++}
++
+ static void ntsync_free_obj(struct ntsync_obj *obj)
+ {
+ 	/* NSPA: clean up PI state for mutex objects */
+-	if (obj->type == NTSYNC_TYPE_MUTEX)
+-		ntsync_pi_drop(obj);
++	if (obj->type == NTSYNC_TYPE_MUTEX) {
++		struct ntsync_pi_work pi_work;
++
++		ntsync_pi_work_init(&pi_work);
++		ntsync_pi_drop(obj, &pi_work);
++		ntsync_pi_work_finish(&pi_work);
++	}
++
++	/* NSPA: channels should be empty by the time we're freed.  Pending
++	 * and dispatched senders hold the file open via ioctl ref, so we
++	 * cannot reach this path with active entries.  WARN if we do. */
++	if (obj->type == NTSYNC_TYPE_CHANNEL) {
++		WARN_ON(!RB_EMPTY_ROOT(&obj->u.channel.pending));
++		WARN_ON(!list_empty(&obj->u.channel.dispatched));
++		/* NSPA: drop any leftover (tid, token) registrations. */
++		channel_drain_thread_regs(obj);
++	}
+ 
+ 	fput(obj->dev->file);
+ 	kfree(obj);
+@@ -926,6 +1865,20 @@
+ 		return ntsync_event_set(obj, argp, true);
+ 	case NTSYNC_IOC_EVENT_READ:
+ 		return ntsync_event_read(obj, argp);
++	case NTSYNC_IOC_EVENT_SET_PI:
++		return ntsync_event_set_pi(obj, argp);
++	case NTSYNC_IOC_CHANNEL_SEND_PI:
++		return ntsync_channel_send_pi(obj, argp);
++	case NTSYNC_IOC_CHANNEL_RECV:
++		return ntsync_channel_recv(obj, argp);
++	case NTSYNC_IOC_CHANNEL_REPLY:
++		return ntsync_channel_reply(obj, argp);
++	case NTSYNC_IOC_CHANNEL_REGISTER_THREAD:
++		return ntsync_channel_register_thread(obj, argp);
++	case NTSYNC_IOC_CHANNEL_DEREGISTER_THREAD:
++		return ntsync_channel_deregister_thread(obj, argp);
++	case NTSYNC_IOC_CHANNEL_RECV2:
++		return ntsync_channel_recv2(obj, argp);
+ 	default:
+ 		return -ENOIOCTLCMD;
+ 	}
+@@ -1063,10 +2016,12 @@
+ 	fput(obj->file);
+ }
+ 
+-static int ntsync_schedule(const struct ntsync_q *q, const struct ntsync_wait_args *args)
++static int ntsync_schedule(struct ntsync_q *q, const struct ntsync_wait_args *args,
++			   struct file *uring_file)
+ {
+ 	ktime_t timeout = ns_to_ktime(args->timeout);
+ 	clockid_t clock = CLOCK_MONOTONIC;
++	struct poll_wqueues uring_pwq;
+ 	ktime_t *timeout_ptr;
+ 	int ret = 0;
+ 
+@@ -1075,6 +2030,15 @@
+ 	if (args->flags & NTSYNC_WAIT_REALTIME)
+ 		clock = CLOCK_REALTIME;
+ 
++	/* If the caller provided an io_uring eventfd, register on its wait
++	 * queue via poll_table so we wake when CQEs are posted.  The file's
++	 * poll method (eventfd_poll) adds us to its internal wqh.  This is
++	 * the standard kernel pattern for waiting on arbitrary fds. */
++	if (uring_file) {
++		poll_initwait(&uring_pwq);
++		vfs_poll(uring_file, &uring_pwq.pt);
++	}
++
+ 	do {
+ 		if (signal_pending(current)) {
+ 			ret = -ERESTARTSYS;
+@@ -1086,10 +2050,28 @@
+ 			ret = 0;
+ 			break;
+ 		}
++
++		/* Check if io_uring eventfd is readable (CQE available). */
++		if (uring_file) {
++			__poll_t mask = vfs_poll(uring_file, NULL);
++
++			if (mask & EPOLLIN) {
++				int signaled = -1;
++
++				atomic_try_cmpxchg(&q->signaled, &signaled,
++						   NTSYNC_INDEX_URING_READY);
++				ret = 0;
++				break;
++			}
++		}
++
+ 		ret = schedule_hrtimeout_range_clock(timeout_ptr, 0, HRTIMER_MODE_ABS, clock);
+ 	} while (ret < 0);
+ 	__set_current_state(TASK_RUNNING);
+ 
++	if (uring_file)
++		poll_freewait(&uring_pwq);
++
+ 	return ret;
+ }
+ 
+@@ -1107,7 +2089,7 @@
+ 	__u32 total_count;
+ 	__u32 i, j;
+ 
+-	if (args->pad || (args->flags & ~NTSYNC_WAIT_REALTIME))
++	if (args->flags & ~NTSYNC_WAIT_REALTIME)
+ 		return -EINVAL;
+ 
+ 	if (size >= sizeof(fds))
+@@ -1164,24 +2146,29 @@
+ 	return -EINVAL;
+ }
+ 
+-static void try_wake_any_obj(struct ntsync_obj *obj)
++static void try_wake_any_obj(struct ntsync_obj *obj, struct ntsync_pi_work *w)
+ {
+ 	switch (obj->type) {
+ 	case NTSYNC_TYPE_SEM:
+ 		try_wake_any_sem(obj);
+ 		break;
+ 	case NTSYNC_TYPE_MUTEX:
+-		try_wake_any_mutex(obj);
++		try_wake_any_mutex(obj, w);
+ 		break;
+ 	case NTSYNC_TYPE_EVENT:
+ 		try_wake_any_event(obj);
+ 		break;
++	case NTSYNC_TYPE_CHANNEL:
++		/* NSPA: channels don't participate in WAIT_ANY/WAIT_ALL. */
++		break;
+ 	}
+ }
+ 
+ static int ntsync_wait_any(struct ntsync_device *dev, void __user *argp)
+ {
++	struct file *uring_file = NULL;
+ 	struct ntsync_wait_args args;
++	struct ntsync_pi_work pi_work;
+ 	__u32 i, total_count;
+ 	struct ntsync_q *q;
+ 	int signaled;
+@@ -1191,6 +2178,11 @@
+ 	if (copy_from_user(&args, argp, sizeof(args)))
+ 		return -EFAULT;
+ 
++	/* NSPA: drain any pending event-PI boosts from the previous wake.
++	 * Re-entering a wait means the task is done processing whatever
++	 * message(s) prompted the boost.  Restores original sched attrs. */
++	drain_event_pi_boosts(dev, current);
++
+ 	ret = setup_wait(dev, &args, false, &q);
+ 	if (ret < 0)
+ 		return ret;
+@@ -1199,17 +2191,24 @@
+ 	if (args.alert)
+ 		total_count++;
+ 
++	ntsync_pi_work_init(&pi_work);
++
+ 	/* queue ourselves */
+ 
+ 	for (i = 0; i < total_count; i++) {
+ 		struct ntsync_q_entry *entry = &q->entries[i];
+ 		struct ntsync_obj *obj = entry->obj;
+ 
++		/* Top up pre-alloc pool before locking (RT-safe alloc). */
++		if (obj->type == NTSYNC_TYPE_MUTEX &&
++		    list_empty(&pi_work.new_po_pool))
++			ntsync_pi_work_prealloc(&pi_work);
++
+ 		all = ntsync_lock_obj(dev, obj);
+ 		ntsync_insert_waiter(entry, &obj->any_waiters);
+ 		/* NSPA: boost mutex owner if this waiter has higher priority */
+ 		if (obj->type == NTSYNC_TYPE_MUTEX)
+-			ntsync_pi_recalc(obj);
++			ntsync_pi_recalc(obj, &pi_work);
+ 		ntsync_unlock_obj(dev, obj, all);
+ 	}
+ 
+@@ -1227,26 +2226,47 @@
+ 		if (atomic_read(&q->signaled) != -1)
+ 			break;
+ 
++		if (obj->type == NTSYNC_TYPE_MUTEX &&
++		    list_empty(&pi_work.new_po_pool))
++			ntsync_pi_work_prealloc(&pi_work);
++
+ 		all = ntsync_lock_obj(dev, obj);
+-		try_wake_any_obj(obj);
++		try_wake_any_obj(obj, &pi_work);
+ 		ntsync_unlock_obj(dev, obj, all);
+ 	}
+ 
++	/* resolve uring_fd if provided */
++
++	if (args.uring_fd) {
++		uring_file = fget(args.uring_fd);
++		if (!uring_file) {
++			ret = -EBADF;
++			goto unqueue;
++		}
++	}
++
+ 	/* sleep */
+ 
+-	ret = ntsync_schedule(q, &args);
++	ret = ntsync_schedule(q, &args, uring_file);
+ 
+-	/* and finally, unqueue */
++	if (uring_file)
++		fput(uring_file);
+ 
++	/* and finally, unqueue */
++unqueue:
+ 	for (i = 0; i < total_count; i++) {
+ 		struct ntsync_q_entry *entry = &q->entries[i];
+ 		struct ntsync_obj *obj = entry->obj;
+ 
++		if (obj->type == NTSYNC_TYPE_MUTEX &&
++		    list_empty(&pi_work.new_po_pool))
++			ntsync_pi_work_prealloc(&pi_work);
++
+ 		all = ntsync_lock_obj(dev, obj);
+ 		list_del(&entry->node);
+ 		/* NSPA: recalc PI boost — this waiter is leaving the queue */
+ 		if (obj->type == NTSYNC_TYPE_MUTEX)
+-			ntsync_pi_recalc(obj);
++			ntsync_pi_recalc(obj, &pi_work);
+ 		ntsync_unlock_obj(dev, obj, all);
+ 
+ 		put_obj(obj);
+@@ -1265,14 +2285,18 @@
+ 		ret = -ETIMEDOUT;
+ 	}
+ 
++	ntsync_pi_work_finish(&pi_work);
+ 	kfree(q);
+ 	return ret;
+ }
+ 
+ static int ntsync_wait_all(struct ntsync_device *dev, void __user *argp)
+ {
++	struct file *uring_file = NULL;
+ 	struct ntsync_wait_args args;
++	struct ntsync_pi_work pi_work;
+ 	struct ntsync_q *q;
++	__u32 mutex_count = 0;
+ 	int signaled;
+ 	__u32 i;
+ 	int ret;
+@@ -1280,10 +2304,26 @@
+ 	if (copy_from_user(&args, argp, sizeof(args)))
+ 		return -EFAULT;
+ 
++	/* NSPA: drain any pending event-PI boosts from the previous wake. */
++	drain_event_pi_boosts(dev, current);
++
+ 	ret = setup_wait(dev, &args, true, &q);
+ 	if (ret < 0)
+ 		return ret;
+ 
++	ntsync_pi_work_init(&pi_work);
++
++	/* Pre-allocate one entry per mutex obj.  try_wake_all may consume
++	 * up to one per mutex when transitioning ownership; queue/unqueue
++	 * top up on demand.  Allocation failure → silent skip-boost
++	 * fallback (transient priority inversion). */
++	for (i = 0; i < args.count; i++) {
++		if (q->entries[i].obj->type == NTSYNC_TYPE_MUTEX)
++			mutex_count++;
++	}
++	for (i = 0; i < mutex_count; i++)
++		ntsync_pi_work_prealloc(&pi_work);
++
+ 	/* queue ourselves */
+ 
+ 	rt_mutex_lock(&dev->wait_all_lock);
+@@ -1305,7 +2345,7 @@
+ 		 * dev_lock_obj is needed so ntsync_assert_held passes. */
+ 		if (obj->type == NTSYNC_TYPE_MUTEX) {
+ 			dev_lock_obj(dev, obj);
+-			ntsync_pi_recalc(obj);
++			ntsync_pi_recalc(obj, &pi_work);
+ 			dev_unlock_obj(dev, obj);
+ 		}
+ 	}
+@@ -1320,7 +2360,7 @@
+ 
+ 	/* check if we are already signaled */
+ 
+-	try_wake_all(dev, q, NULL);
++	try_wake_all(dev, q, NULL, &pi_work);
+ 
+ 	rt_mutex_unlock(&dev->wait_all_lock);
+ 
+@@ -1334,17 +2374,30 @@
+ 
+ 		if (atomic_read(&q->signaled) == -1) {
+ 			bool all = ntsync_lock_obj(dev, obj);
+-			try_wake_any_obj(obj);
++			try_wake_any_obj(obj, &pi_work);
+ 			ntsync_unlock_obj(dev, obj, all);
+ 		}
+ 	}
+ 
++	/* resolve uring_fd if provided */
++
++	if (args.uring_fd) {
++		uring_file = fget(args.uring_fd);
++		if (!uring_file) {
++			ret = -EBADF;
++			goto unqueue_all;
++		}
++	}
++
+ 	/* sleep */
+ 
+-	ret = ntsync_schedule(q, &args);
++	ret = ntsync_schedule(q, &args, uring_file);
+ 
+-	/* and finally, unqueue */
++	if (uring_file)
++		fput(uring_file);
+ 
++	/* and finally, unqueue */
++unqueue_all:
+ 	rt_mutex_lock(&dev->wait_all_lock);
+ 
+ 	for (i = 0; i < args.count; i++) {
+@@ -1359,8 +2412,10 @@
+ 
+ 		/* NSPA: recalc PI — this waiter is leaving the wait-all queue */
+ 		if (obj->type == NTSYNC_TYPE_MUTEX) {
++			if (list_empty(&pi_work.new_po_pool))
++				ntsync_pi_work_prealloc(&pi_work);
+ 			dev_lock_obj(dev, obj);
+-			ntsync_pi_recalc(obj);
++			ntsync_pi_recalc(obj, &pi_work);
+ 			dev_unlock_obj(dev, obj);
+ 		}
+ 
+@@ -1396,6 +2451,7 @@
+ 		ret = -ETIMEDOUT;
+ 	}
+ 
++	ntsync_pi_work_finish(&pi_work);
+ 	kfree(q);
+ 	return ret;
+ }
+@@ -1411,6 +2467,7 @@
+ 	rt_mutex_init(&dev->wait_all_lock);
+ 	raw_spin_lock_init(&dev->boost_lock);
+ 	INIT_LIST_HEAD(&dev->boosted_owners);
++	INIT_LIST_HEAD(&dev->event_pi_tasks);
+ 
+ 	file->private_data = dev;
+ 	dev->file = file;
+@@ -1420,15 +2477,24 @@
+ static int ntsync_char_release(struct inode *inode, struct file *file)
+ {
+ 	struct ntsync_device *dev = file->private_data;
+-	struct ntsync_pi_owner *po, *tmp;
++	struct ntsync_pi_owner *po, *po_tmp;
++	struct ntsync_event_pi *ep, *ep_tmp;
+ 
+ 	/* Clean up any leaked PI boost state (shouldn't happen normally) */
+-	list_for_each_entry_safe(po, tmp, &dev->boosted_owners, node) {
++	list_for_each_entry_safe(po, po_tmp, &dev->boosted_owners, node) {
+ 		sched_setattr_nocheck(po->task, &po->orig_attr);
+ 		list_del(&po->node);
+ 		kfree(po);
+ 	}
+ 
++	/* NSPA: clean up any leaked event-PI boosts and release task refs */
++	list_for_each_entry_safe(ep, ep_tmp, &dev->event_pi_tasks, node) {
++		sched_setattr_nocheck(ep->task, &ep->orig_attr);
++		list_del(&ep->node);
++		put_task_struct(ep->task);
++		kfree(ep);
++	}
++
+ 	kfree(dev);
+ 
+ 	return 0;
+@@ -1451,6 +2517,8 @@
+ 		return ntsync_wait_all(dev, argp);
+ 	case NTSYNC_IOC_WAIT_ANY:
+ 		return ntsync_wait_any(dev, argp);
++	case NTSYNC_IOC_CREATE_CHANNEL:
++		return ntsync_create_channel(dev, argp);
+ 	default:
+ 		return -ENOIOCTLCMD;
+ 	}

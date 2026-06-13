@@ -1,0 +1,416 @@
+ntsync 1013: dedicated kmem_cache for ntsync_event_pi / ntsync_channel_entry / ntsync_pi_owner
+
+Replace generic kzalloc / kfree with per-struct dedicated kmem_cache for
+the three structs allocated on the gamma audio dispatcher hot path:
+
+  - ntsync_event_pi      ~96B  (allocated up to 2x per SEND_PI + 1x per
+                                RECV/RECV2/TRY_RECV2 + 1x per EVENT_SET_PI;
+                                was kmalloc-128 generic)
+  - ntsync_channel_entry ~128-256B (1x per SEND_PI; was kmalloc-256)
+  - ntsync_pi_owner      (allocated by ntsync_pi_work_prealloc on every
+                          mutex-path wait/wake; was kmalloc-N generic)
+
+Dedicated caches give us tighter cache-line packing (SLAB_HWCACHE_ALIGN),
+better per-cpu freelist locality (the gamma dispatcher cycles through
+the same cache constantly rather than sharing kmalloc-128 with system-
+wide xattr / dentry / fd / network buffer callers), and visibility in
+/proc/slabinfo for future tuning.
+
+GFP_KERNEL semantics preserved — these allocations stay outside the
+raw_spin obj_lock per the existing PREEMPT_RT discipline (cf. the
+ntsync_pi_work_prealloc + obj_lock pattern that was already established
+for kfree-under-raw-spinlock avoidance).
+
+NULL-safety asymmetry vs kfree
+==============================
+
+kmem_cache_free(s, x) is NOT NULL-safe.  Per mm/slub.c:6900:
+
+  void kmem_cache_free(struct kmem_cache *s, void *x)
+  {
+      s = cache_from_obj(s, x);  // derefs x via virt_to_cache(x) when
+                                 // SLAB_FREELIST_HARDENED is enabled
+      if (!s) return;
+      ...
+  }
+
+  static inline struct kmem_cache *cache_from_obj(struct kmem_cache *s,
+                                                  void *x)
+  {
+      if (!IS_ENABLED(CONFIG_SLAB_FREELIST_HARDENED) &&
+          !kmem_cache_debug_flags(s, SLAB_CONSISTENCY_CHECKS))
+          return s;
+      cachep = virt_to_cache(x);  // ← faults on NULL: virt_to_folio(NULL)
+                                  //   = vmemmap[0] = 0xffffebde00000000
+                                  //   (x86_64) → reads slab->slab_cache
+                                  //   at offset 8 → faults at
+                                  //   0xffffebde00000008
+      ...
+  }
+
+Contrast: kfree(x) has an explicit `if (unlikely(ZERO_OR_NULL_PTR(x)))
+return;` early-out.
+
+Every conversion site in this patch where the freed pointer can legally
+be NULL is therefore explicitly guarded by `if (ptr)`.  The audit covers:
+
+  - Pointer-from-list-iteration sites (loop variables, non-NULL by
+    construction): unguarded, OK.
+  - Pointer-from-allocation sites (k*alloc + NULL-check earlier in the
+    function, then later free on error path): unguarded, OK.
+  - Pointer-from-struct-field sites (where the field is NULL whenever
+    no pending state is staged): EXPLICITLY GUARDED.
+  - Refcount-protected free sites (only freed when refcount hits 0,
+    and refcount=1 was set at allocation): unguarded, OK.
+
+The struct-field NULL case bit us on first deployment (post1014, srcversion
+6586C76CC11DB19652A19A5, crashed at 22:12:34 boot -1 2026-05-04 with
+exactly the kmem_cache_free+0x5c vmemmap[0]+8 fault described above).
+The fix landed before this patch was finalized — site is the
+`obj->u.event.pending_pi.new_ep` free in ntsync_free_obj, which is NULL
+in the common case where an event dies without an unconsumed SET_PI
+staging.
+
+Validation
+==========
+
+post1014a srcversion F1A9EA24E257A35BB21341D, debug kernel
+6.19.11-rt1-1-nspa-debug (KASAN+KCSAN+lockdep+SLAB_FREELIST_HARDENED):
+
+  test-mixed-load-stress 300s   5.28M chan SEND/REPLY   0 errors  KASAN clean
+  test-channel-stress 60s 4x4   1.40M SEND/REPLY        0 errors  KASAN clean
+  test-channel-try-recv2 30s 4  62k SEND, 2.68M attempts 0 errors KASAN clean
+
+~14M total ntsync ops on post1014a, zero kernel splats — including the
+exact code path (ntsync_free_obj of a pending_pi-clean event) that fired
+the original crash.
+
+--- a/drivers/misc/ntsync.c
++++ b/drivers/misc/ntsync.c
+@@ -28,6 +28,33 @@
+ 
+ #define NTSYNC_NAME	"ntsync"
+ 
++/*
++ * NSPA 1013: dedicated slab caches for the structs allocated on the
++ * gamma audio dispatcher hot path.
++ *
++ *   - ntsync_event_pi         — allocated up to 2x per SEND_PI + 1x per
++ *                               RECV/RECV2/TRY_RECV2 + 1x per EVENT_SET_PI.
++ *                               Was kmalloc-128 (rounded up from ~96B).
++ *   - ntsync_channel_entry    — allocated 1x per SEND_PI.  Was kmalloc-256.
++ *   - ntsync_pi_owner         — allocated by ntsync_pi_work_prealloc on
++ *                               every mutex-path wait/wake.  Was kmalloc-N.
++ *
++ * Dedicated caches give us tighter cache-line packing (SLAB_HWCACHE_ALIGN),
++ * better per-cpu freelist locality (the gamma dispatcher cycles through
++ * the same cache constantly), and visibility in /proc/slabinfo for
++ * future tuning.  GFP_KERNEL semantics are preserved — these allocations
++ * are still done outside the raw_spin obj_lock per the existing
++ * PREEMPT_RT discipline.
++ *
++ * Forward-declared here (struct kmem_cache * is a complete type via the
++ * pointer); the struct sizes only need to be known in ntsync_init at the
++ * bottom of the file where kmem_cache_create is called.  Pointers usable
++ * from every site below (first use in ntsync_pi_work_prealloc at line ~214).
++ */
++static struct kmem_cache *ntsync_event_pi_cache;
++static struct kmem_cache *ntsync_channel_entry_cache;
++static struct kmem_cache *ntsync_pi_owner_cache;
++
+ enum ntsync_type {
+ 	NTSYNC_TYPE_SEM,
+ 	NTSYNC_TYPE_MUTEX,
+@@ -211,7 +238,8 @@
+  */
+ static inline void ntsync_pi_work_prealloc(struct ntsync_pi_work *w)
+ {
+-	struct ntsync_pi_owner *po = kzalloc(sizeof(*po), GFP_KERNEL);
++	struct ntsync_pi_owner *po = kmem_cache_zalloc(ntsync_pi_owner_cache,
++						       GFP_KERNEL);
+ 
+ 	if (po) {
+ 		INIT_LIST_HEAD(&po->node);
+@@ -247,11 +275,11 @@
+ 
+ 	list_for_each_entry_safe(po, tmp, &w->new_po_pool, node) {
+ 		list_del(&po->node);
+-		kfree(po);
++		kmem_cache_free(ntsync_pi_owner_cache, po);
+ 	}
+ 	list_for_each_entry_safe(po, tmp, &w->to_free_list, node) {
+ 		list_del(&po->node);
+-		kfree(po);
++		kmem_cache_free(ntsync_pi_owner_cache, po);
+ 	}
+ }
+ 
+@@ -681,7 +709,7 @@
+ 
+ 	if (ref_to_put) {
+ 		put_task_struct(ref_to_put);
+-		kfree(ep);
++		kmem_cache_free(ntsync_event_pi_cache, ep);
+ 	}
+ }
+ 
+@@ -1186,7 +1214,7 @@
+ 	if (valid) {
+ 		if (!apply_event_pi_boost(event->dev, current,
+ 					  policy, prio, new_ep))
+-			kfree(new_ep);
++			kmem_cache_free(ntsync_event_pi_cache, new_ep);
+ 	}
+ }
+ 
+@@ -1246,7 +1274,7 @@
+ 	if (args.prio < 1 || args.prio > MAX_RT_PRIO - 1)
+ 		return -EINVAL;
+ 
+-	new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++	new_ep = kmem_cache_zalloc(ntsync_event_pi_cache, GFP_KERNEL);
+ 	if (!new_ep)
+ 		return -ENOMEM;
+ 
+@@ -1272,8 +1300,11 @@
+ 
+ 	ntsync_pi_work_finish(&pi_work);
+ 
+-	/* Free overwritten prior staging outside lock (slab on RT). */
+-	kfree(prior_new_ep);
++	/* Free overwritten prior staging outside lock (slab on RT).  prior_new_ep
++	 * is NULL on first SET_PI before any staging exists; kmem_cache_free is
++	 * not NULL-safe (unlike kfree). */
++	if (prior_new_ep)
++		kmem_cache_free(ntsync_event_pi_cache, prior_new_ep);
+ 
+ 	return 0;
+ }
+@@ -1300,7 +1331,10 @@
+ 
+ 	ntsync_unlock_obj(dev, event, all);
+ 
+-	kfree(prior_new_ep);
++	/* prior_new_ep may be NULL when no SET_PI was pending; kmem_cache_free
++	 * is not NULL-safe. */
++	if (prior_new_ep)
++		kmem_cache_free(ntsync_event_pi_cache, prior_new_ep);
+ 
+ 	if (put_user(prev_state, (__u32 __user *)argp))
+ 		return -EFAULT;
+@@ -1539,13 +1573,13 @@
+ 	    args.policy != SCHED_FIFO && args.policy != SCHED_RR)
+ 		return -EINVAL;
+ 
+-	e = kzalloc(sizeof(*e), GFP_KERNEL);
++	e = kmem_cache_zalloc(ntsync_channel_entry_cache, GFP_KERNEL);
+ 	if (!e)
+ 		return -ENOMEM;
+ 	if (args.prio) {
+-		new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++		new_ep = kmem_cache_zalloc(ntsync_event_pi_cache, GFP_KERNEL);
+ 		if (!new_ep) {
+-			kfree(e);
++			kmem_cache_free(ntsync_channel_entry_cache, e);
+ 			return -ENOMEM;
+ 		}
+ 	}
+@@ -1565,8 +1599,11 @@
+ 	obj_lock(ch);
+ 	if (ch->u.channel.depth >= ch->u.channel.max_depth) {
+ 		obj_unlock(ch);
+-		kfree(new_ep);
+-		kfree(e);
++		/* new_ep is only allocated when args.prio != 0; kmem_cache_free
++		 * does NOT NULL-check (unlike kfree).  Guard explicitly. */
++		if (new_ep)
++			kmem_cache_free(ntsync_event_pi_cache, new_ep);
++		kmem_cache_free(ntsync_channel_entry_cache, e);
+ 		return -EAGAIN;
+ 	}
+ 	/* NSPA: e->thread_token stays 0 here; populated at RECV2 time from
+@@ -1686,12 +1723,12 @@
+ 	obj_unlock(ch);
+ 
+ 	if (new_ep)
+-		kfree(new_ep);
++		kmem_cache_free(ntsync_event_pi_cache, new_ep);
+ 	/* NSPA: drop the sleeper's ref.  REPLY may still hold a ref to keep
+ 	 * the entry alive for its wake_up_all; whoever's dec_and_test
+ 	 * reaches 0 frees. */
+ 	if (refcount_dec_and_test(&e->refcnt))
+-		kfree(e);
++		kmem_cache_free(ntsync_channel_entry_cache, e);
+ 	return ret;
+ }
+ 
+@@ -1714,7 +1751,7 @@
+ 	drain_event_pi_boosts(ch->dev, current);
+ 
+ 	/* Pre-allocate boost tracking before taking obj_lock (slab on RT). */
+-	new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++	new_ep = kmem_cache_zalloc(ntsync_event_pi_cache, GFP_KERNEL);
+ 	if (!new_ep)
+ 		return -ENOMEM;
+ 
+@@ -1730,7 +1767,7 @@
+ 		ret = wait_event_interruptible_exclusive(ch->u.channel.recv_wq,
+ 			!RB_EMPTY_ROOT(&ch->u.channel.pending));
+ 		if (ret < 0) {
+-			kfree(new_ep);
++			kmem_cache_free(ntsync_event_pi_cache, new_ep);
+ 			return ret;
+ 		}
+ 		obj_lock(ch);
+@@ -1775,7 +1812,7 @@
+ 		ret = -EFAULT;
+ 
+ 	if (new_ep)
+-		kfree(new_ep);
++		kmem_cache_free(ntsync_event_pi_cache, new_ep);
+ 	return ret;
+ }
+ 
+@@ -1798,7 +1835,7 @@
+ 
+ 	drain_event_pi_boosts(ch->dev, current);
+ 
+-	new_ep = kzalloc(sizeof(*new_ep), GFP_KERNEL);
++	new_ep = kmem_cache_zalloc(ntsync_event_pi_cache, GFP_KERNEL);
+ 	if (!new_ep)
+ 		return -ENOMEM;
+ 
+@@ -1812,14 +1849,14 @@
+ 		 * tight-loop TRY_RECV2 until -EAGAIN, then go back to
+ 		 * AGGREGATE_WAIT for the next channel-fired event. */
+ 		if (nonblock) {
+-			kfree(new_ep);
++			kmem_cache_free(ntsync_event_pi_cache, new_ep);
+ 			return -EAGAIN;
+ 		}
+ 		/* See exclusive-wait commentary in ntsync_channel_recv. */
+ 		ret = wait_event_interruptible_exclusive(ch->u.channel.recv_wq,
+ 			!RB_EMPTY_ROOT(&ch->u.channel.pending));
+ 		if (ret < 0) {
+-			kfree(new_ep);
++			kmem_cache_free(ntsync_event_pi_cache, new_ep);
+ 			return ret;
+ 		}
+ 		obj_lock(ch);
+@@ -1862,7 +1899,7 @@
+ 		ret = -EFAULT;
+ 
+ 	if (new_ep)
+-		kfree(new_ep);
++		kmem_cache_free(ntsync_event_pi_cache, new_ep);
+ 	return ret;
+ }
+ 
+@@ -1908,7 +1945,7 @@
+ 
+ 	/* Drop our ref.  If sender already left and dec'd, we free. */
+ 	if (refcount_dec_and_test(&e->refcnt))
+-		kfree(e);
++		kmem_cache_free(ntsync_channel_entry_cache, e);
+ 
+ 	return 0;
+ }
+@@ -2031,9 +2068,16 @@
+ 
+ 	/* NSPA: free any unconsumed EVENT_SET_PI staging — the signal was
+ 	 * either consumed (clears it), reset (clears it), or the event
+-	 * died unconsumed (this path). */
+-	if (obj->type == NTSYNC_TYPE_EVENT)
+-		kfree(obj->u.event.pending_pi.new_ep);
++	 * died unconsumed (this path).
++	 *
++	 * NSPA 1013: pending_pi.new_ep is NULL whenever no SET_PI is currently
++	 * staged (the common case for event lifetimes that end without a
++	 * pending boost).  kmem_cache_free does NOT NULL-check (cache_from_obj
++	 * → virt_to_folio(NULL) faults under SLAB_FREELIST_HARDENED — the
++	 * exact crash 2026-05-04 22:12:34 boot -1).  Guard explicitly. */
++	if (obj->type == NTSYNC_TYPE_EVENT && obj->u.event.pending_pi.new_ep)
++		kmem_cache_free(ntsync_event_pi_cache,
++				obj->u.event.pending_pi.new_ep);
+ 
+ 	/* NSPA: channels should be empty by the time we're freed.  Pending
+ 	 * and dispatched senders hold the file open via ioctl ref, so we
+@@ -3054,7 +3098,7 @@
+ 	list_for_each_entry_safe(po, po_tmp, &dev->boosted_owners, node) {
+ 		sched_setattr_nocheck(po->task, &po->orig_attr);
+ 		list_del(&po->node);
+-		kfree(po);
++		kmem_cache_free(ntsync_pi_owner_cache, po);
+ 	}
+ 
+ 	/* NSPA: clean up any leaked event-PI boosts and release task refs */
+@@ -3062,7 +3106,7 @@
+ 		sched_setattr_nocheck(ep->task, &ep->orig_attr);
+ 		list_del(&ep->node);
+ 		put_task_struct(ep->task);
+-		kfree(ep);
++		kmem_cache_free(ntsync_event_pi_cache, ep);
+ 	}
+ 
+ 	kfree(dev);
+@@ -3111,7 +3155,59 @@
+ 	.mode		= 0666,
+ };
+ 
+-module_misc_device(ntsync_misc);
++static int __init ntsync_init(void)
++{
++	int ret;
++
++	ntsync_event_pi_cache = kmem_cache_create("ntsync_event_pi",
++						  sizeof(struct ntsync_event_pi),
++						  0, SLAB_HWCACHE_ALIGN, NULL);
++	if (!ntsync_event_pi_cache)
++		return -ENOMEM;
++
++	ntsync_channel_entry_cache = kmem_cache_create("ntsync_channel_entry",
++						       sizeof(struct ntsync_channel_entry),
++						       0, SLAB_HWCACHE_ALIGN, NULL);
++	if (!ntsync_channel_entry_cache) {
++		ret = -ENOMEM;
++		goto err_chan;
++	}
++
++	ntsync_pi_owner_cache = kmem_cache_create("ntsync_pi_owner",
++						  sizeof(struct ntsync_pi_owner),
++						  0, SLAB_HWCACHE_ALIGN, NULL);
++	if (!ntsync_pi_owner_cache) {
++		ret = -ENOMEM;
++		goto err_po;
++	}
++
++	ret = misc_register(&ntsync_misc);
++	if (ret)
++		goto err_misc;
++
++	return 0;
++
++err_misc:
++	kmem_cache_destroy(ntsync_pi_owner_cache);
++err_po:
++	kmem_cache_destroy(ntsync_channel_entry_cache);
++err_chan:
++	kmem_cache_destroy(ntsync_event_pi_cache);
++	return ret;
++}
++module_init(ntsync_init);
++
++static void __exit ntsync_exit(void)
++{
++	/* misc_deregister drains all open device fds; ntsync_free_obj runs
++	 * for every still-live object and returns its slab to its cache.
++	 * After deregister, no callers can reach the caches. */
++	misc_deregister(&ntsync_misc);
++	kmem_cache_destroy(ntsync_pi_owner_cache);
++	kmem_cache_destroy(ntsync_channel_entry_cache);
++	kmem_cache_destroy(ntsync_event_pi_cache);
++}
++module_exit(ntsync_exit);
+ 
+ MODULE_AUTHOR("Elizabeth Figura <zfigura@codeweavers.com>");
+ MODULE_DESCRIPTION("Kernel driver for NT synchronization primitives");

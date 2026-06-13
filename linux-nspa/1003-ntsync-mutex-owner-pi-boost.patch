@@ -1,0 +1,381 @@
+--- a/drivers/misc/ntsync.c	2026-04-15 11:21:50.414764445 -0500
++++ b/drivers/misc/ntsync.c	2026-04-15 11:13:07.323966175 -0500
+@@ -17,6 +17,7 @@
+ #include <linux/rtmutex.h>
+ #include <linux/sched.h>
+ #include <linux/sched/signal.h>
++#include <uapi/linux/sched/types.h>
+ #include <linux/slab.h>
+ #include <linux/spinlock.h>
+ #include <uapi/linux/ntsync.h>
+@@ -61,6 +62,9 @@
+ 			__u32 count;
+ 			pid_t owner;
+ 			bool ownerdead;
++			/* NSPA: PI boost support for PREEMPT_RT */
++			struct task_struct *owner_task;
++			bool pi_boosted; /* this object is contributing to owner's boost */
+ 		} mutex;
+ 		struct {
+ 			bool manual;
+@@ -118,6 +122,22 @@
+ 	struct ntsync_q_entry entries[];
+ };
+ 
++/*
++ * NSPA: Per-task PI boost tracking.
++ *
++ * When multiple ntsync mutexes boost the same owner task, we must save
++ * the original scheduling attributes exactly once (first boost) and
++ * restore only when ALL boosts are removed.  This structure is allocated
++ * per boosted owner and tracked on the device's boosted_owners list.
++ */
++struct ntsync_pi_owner {
++	struct list_head node;
++	struct task_struct *task;
++	struct sched_attr orig_attr;
++	int orig_normal_prio;	/* task->normal_prio before first boost */
++	int boost_count;	/* number of mutex objects boosting this task */
++};
++
+ struct ntsync_device {
+ 	/*
+ 	 * Wait-all operations must atomically grab all objects, and be totally
+@@ -132,6 +152,10 @@
+ 	struct rt_mutex wait_all_lock;
+ 
+ 	struct file *file;
++
++	/* NSPA: PI boost owner tracking — protected by boost_lock */
++	raw_spinlock_t boost_lock;
++	struct list_head boosted_owners;
+ };
+ 
+ /*
+@@ -219,6 +243,172 @@
+ 	list_add_tail(&new_entry->node, head);
+ }
+ 
++#define ntsync_assert_held(obj) \
++	lockdep_assert((lockdep_is_held(&(obj)->lock) != LOCK_STATE_NOT_HELD) || \
++		       ((lockdep_is_held(&(obj)->dev->wait_all_lock) != LOCK_STATE_NOT_HELD) && \
++			(obj)->dev_locked))
++
++/*
++ * NSPA: Find the per-task PI tracking entry for a given owner.
++ * Must be called with dev->boost_lock held.
++ */
++static struct ntsync_pi_owner *find_pi_owner(struct ntsync_device *dev,
++					     struct task_struct *task)
++{
++	struct ntsync_pi_owner *po;
++
++	list_for_each_entry(po, &dev->boosted_owners, node) {
++		if (po->task == task)
++			return po;
++	}
++	return NULL;
++}
++
++/*
++ * NSPA: Recalculate PI boost for a mutex owner based on current waiters.
++ *
++ * Scans BOTH any_waiters and all_waiters (covering wait-any and wait-all)
++ * to find the highest-priority waiter.  Compares against the owner's
++ * ORIGINAL (pre-boost) priority via the per-task pi_owner tracking,
++ * avoiding the stale-normal_prio bug where sched_setattr_nocheck changes
++ * normal_prio after boost.
++ *
++ * Multi-object safety: when a task holds multiple mutexes being boosted,
++ * per-task boost_count ensures the original scheduling is saved once and
++ * restored only when ALL boosts are removed.  Between removal of the first
++ * and last boost, the task is conservatively over-boosted (safe — it runs
++ * at too-high priority, never too-low).
++ */
++static void ntsync_pi_recalc(struct ntsync_obj *obj)
++{
++	struct task_struct *owner = obj->u.mutex.owner_task;
++	struct ntsync_device *dev = obj->dev;
++	struct ntsync_pi_owner *po;
++	struct ntsync_q_entry *entry;
++	int highest_prio = MAX_PRIO;
++	int base_prio;
++	bool was_boosted, needs_boost;
++
++	if (!owner)
++		return;
++
++	ntsync_assert_held(obj);
++
++	/* Find highest-priority waiter across both wait lists */
++	list_for_each_entry(entry, &obj->any_waiters, node) {
++		if (entry->obj == obj && entry->q->task->prio < highest_prio)
++			highest_prio = entry->q->task->prio;
++	}
++	list_for_each_entry(entry, &obj->all_waiters, node) {
++		if (entry->obj == obj && entry->q->task->prio < highest_prio)
++			highest_prio = entry->q->task->prio;
++	}
++
++	raw_spin_lock(&dev->boost_lock);
++
++	po = find_pi_owner(dev, owner);
++
++	/* Compare against the ORIGINAL priority, not current (which may
++	 * already be boosted by this or another mutex). */
++	base_prio = po ? po->orig_normal_prio : owner->normal_prio;
++	needs_boost = (highest_prio < base_prio);
++	was_boosted = obj->u.mutex.pi_boosted;
++
++	if (needs_boost && !was_boosted) {
++		/* This object is newly contributing a boost */
++		if (!po) {
++			po = kzalloc(sizeof(*po), GFP_ATOMIC);
++			if (unlikely(!po))
++				goto out;
++			po->task = owner;
++			po->orig_attr = (struct sched_attr){
++				.size = sizeof(struct sched_attr),
++				.sched_policy = owner->policy,
++				.sched_priority = owner->rt_priority,
++				.sched_nice = PRIO_TO_NICE(owner->static_prio),
++			};
++			po->orig_normal_prio = owner->normal_prio;
++			po->boost_count = 0;
++			list_add(&po->node, &dev->boosted_owners);
++		}
++		po->boost_count++;
++		obj->u.mutex.pi_boosted = true;
++	}
++
++	if (needs_boost) {
++		/* Apply or raise the boost.  Never lower while other objects
++		 * are still boosting (safe conservative over-boost). */
++		if (highest_prio < owner->prio) {
++			struct sched_attr boost = {
++				.size = sizeof(struct sched_attr),
++				.sched_policy = SCHED_FIFO,
++				.sched_priority = MAX_RT_PRIO - 1 - highest_prio,
++			};
++			sched_setattr_nocheck(owner, &boost);
++		}
++	} else if (was_boosted) {
++		/* This object no longer contributes a boost */
++		obj->u.mutex.pi_boosted = false;
++		if (po) {
++			po->boost_count--;
++			if (po->boost_count <= 0) {
++				/* Last boost removed — restore original */
++				sched_setattr_nocheck(owner, &po->orig_attr);
++				list_del(&po->node);
++				kfree(po);
++			}
++			/* boost_count > 0: another mutex still boosting,
++			 * leave the conservative over-boost in place. */
++		}
++	}
++out:
++	raw_spin_unlock(&dev->boost_lock);
++}
++
++/*
++ * NSPA: Drop any PI boost on a mutex and release the owner_task reference.
++ * Called when a mutex is fully released or destroyed.
++ */
++static void ntsync_pi_drop(struct ntsync_obj *obj)
++{
++	struct ntsync_device *dev = obj->dev;
++	struct ntsync_pi_owner *po;
++
++	if (!obj->u.mutex.owner_task)
++		return;
++
++	if (obj->u.mutex.pi_boosted) {
++		raw_spin_lock(&dev->boost_lock);
++		po = find_pi_owner(dev, obj->u.mutex.owner_task);
++		if (po) {
++			po->boost_count--;
++			if (po->boost_count <= 0) {
++				sched_setattr_nocheck(obj->u.mutex.owner_task,
++						      &po->orig_attr);
++				list_del(&po->node);
++				kfree(po);
++			}
++		}
++		raw_spin_unlock(&dev->boost_lock);
++		obj->u.mutex.pi_boosted = false;
++	}
++	put_task_struct(obj->u.mutex.owner_task);
++	obj->u.mutex.owner_task = NULL;
++}
++
++/*
++ * NSPA: Set a new owner_task for a mutex (with PI recalculation).
++ */
++static void ntsync_pi_set_owner(struct ntsync_obj *obj,
++				struct task_struct *new_owner)
++{
++	if (new_owner) {
++		get_task_struct(new_owner);
++		obj->u.mutex.owner_task = new_owner;
++		ntsync_pi_recalc(obj);
++	}
++}
++
+ static bool ntsync_lock_obj(struct ntsync_device *dev, struct ntsync_obj *obj)
+ {
+ 	bool all;
+@@ -244,11 +434,6 @@
+ 	}
+ }
+ 
+-#define ntsync_assert_held(obj) \
+-	lockdep_assert((lockdep_is_held(&(obj)->lock) != LOCK_STATE_NOT_HELD) || \
+-		       ((lockdep_is_held(&(obj)->dev->wait_all_lock) != LOCK_STATE_NOT_HELD) && \
+-			(obj)->dev_locked))
+-
+ static bool is_signaled(struct ntsync_obj *obj, __u32 owner)
+ {
+ 	ntsync_assert_held(obj);
+@@ -311,6 +496,9 @@
+ 				obj->u.mutex.ownerdead = false;
+ 				obj->u.mutex.count++;
+ 				obj->u.mutex.owner = q->owner;
++				/* NSPA: transfer PI ownership in wait-all path */
++				ntsync_pi_drop(obj);
++				ntsync_pi_set_owner(obj, q->task);
+ 				break;
+ 			case NTSYNC_TYPE_EVENT:
+ 				if (!obj->u.event.manual)
+@@ -381,6 +569,9 @@
+ 			mutex->u.mutex.ownerdead = false;
+ 			mutex->u.mutex.count++;
+ 			mutex->u.mutex.owner = q->owner;
++			/* NSPA: transfer PI ownership to acquiring task */
++			ntsync_pi_drop(mutex);
++			ntsync_pi_set_owner(mutex, q->task);
+ 			wake_up_process(q->task);
+ 		}
+ 	}
+@@ -494,9 +685,27 @@
+ 
+ 	all = ntsync_lock_obj(dev, mutex);
+ 
++	/*
++	 * NSPA: Lazily set owner_task on first client-side unlock.
++	 * Creation happens in wineserver context where current != the
++	 * Win32 owner, so owner_task starts NULL and is resolved here.
++	 */
++	if (!mutex->u.mutex.owner_task && mutex->u.mutex.owner) {
++		get_task_struct(current);
++		mutex->u.mutex.owner_task = current;
++	}
++
+ 	prev_count = mutex->u.mutex.count;
+ 	ret = unlock_mutex_state(mutex, &args);
+ 	if (!ret) {
++		/*
++		 * NSPA: If fully released (count == 0), drop PI boost
++		 * before waking the next owner. try_wake_any_mutex will
++		 * set the new owner_task via ntsync_pi_set_owner.
++		 */
++		if (!mutex->u.mutex.owner)
++			ntsync_pi_drop(mutex);
++
+ 		if (all)
+ 			try_wake_all_obj(dev, mutex);
+ 		try_wake_any_mutex(mutex);
+@@ -546,6 +755,9 @@
+ 
+ 	ret = kill_mutex_state(mutex, owner);
+ 	if (!ret) {
++		/* NSPA: owner is dead, drop any PI boost */
++		ntsync_pi_drop(mutex);
++
+ 		if (all)
+ 			try_wake_all_obj(dev, mutex);
+ 		try_wake_any_mutex(mutex);
+@@ -675,6 +887,10 @@
+ 
+ static void ntsync_free_obj(struct ntsync_obj *obj)
+ {
++	/* NSPA: clean up PI state for mutex objects */
++	if (obj->type == NTSYNC_TYPE_MUTEX)
++		ntsync_pi_drop(obj);
++
+ 	fput(obj->dev->file);
+ 	kfree(obj);
+ }
+@@ -991,6 +1207,9 @@
+ 
+ 		all = ntsync_lock_obj(dev, obj);
+ 		ntsync_insert_waiter(entry, &obj->any_waiters);
++		/* NSPA: boost mutex owner if this waiter has higher priority */
++		if (obj->type == NTSYNC_TYPE_MUTEX)
++			ntsync_pi_recalc(obj);
+ 		ntsync_unlock_obj(dev, obj, all);
+ 	}
+ 
+@@ -1025,6 +1244,9 @@
+ 
+ 		all = ntsync_lock_obj(dev, obj);
+ 		list_del(&entry->node);
++		/* NSPA: recalc PI boost — this waiter is leaving the queue */
++		if (obj->type == NTSYNC_TYPE_MUTEX)
++			ntsync_pi_recalc(obj);
+ 		ntsync_unlock_obj(dev, obj, all);
+ 
+ 		put_obj(obj);
+@@ -1078,6 +1300,14 @@
+ 		 * here.
+ 		 */
+ 		list_add_tail(&entry->node, &obj->all_waiters);
++
++		/* NSPA: boost mutex owner for wait-all waiters.
++		 * dev_lock_obj is needed so ntsync_assert_held passes. */
++		if (obj->type == NTSYNC_TYPE_MUTEX) {
++			dev_lock_obj(dev, obj);
++			ntsync_pi_recalc(obj);
++			dev_unlock_obj(dev, obj);
++		}
+ 	}
+ 	if (args.alert) {
+ 		struct ntsync_q_entry *entry = &q->entries[args.count];
+@@ -1127,6 +1357,13 @@
+ 		 */
+ 		list_del(&entry->node);
+ 
++		/* NSPA: recalc PI — this waiter is leaving the wait-all queue */
++		if (obj->type == NTSYNC_TYPE_MUTEX) {
++			dev_lock_obj(dev, obj);
++			ntsync_pi_recalc(obj);
++			dev_unlock_obj(dev, obj);
++		}
++
+ 		atomic_dec(&obj->all_hint);
+ 
+ 		put_obj(obj);
+@@ -1172,6 +1409,8 @@
+ 		return -ENOMEM;
+ 
+ 	rt_mutex_init(&dev->wait_all_lock);
++	raw_spin_lock_init(&dev->boost_lock);
++	INIT_LIST_HEAD(&dev->boosted_owners);
+ 
+ 	file->private_data = dev;
+ 	dev->file = file;
+@@ -1181,6 +1420,14 @@
+ static int ntsync_char_release(struct inode *inode, struct file *file)
+ {
+ 	struct ntsync_device *dev = file->private_data;
++	struct ntsync_pi_owner *po, *tmp;
++
++	/* Clean up any leaked PI boost state (shouldn't happen normally) */
++	list_for_each_entry_safe(po, tmp, &dev->boosted_owners, node) {
++		sched_setattr_nocheck(po->task, &po->orig_attr);
++		list_del(&po->node);
++		kfree(po);
++	}
+ 
+ 	kfree(dev);
+ 

@@ -57,7 +57,7 @@
  			return -ENOMEM;
  	} else {
  		num_out_bus_fmts = 1;
--		out_bus_fmts = kmalloc(sizeof(*out_bus_fmts), GFP_KERNEL);
+-		out_bus_fmts = kmalloc_obj(*out_bus_fmts);
 -		if (!out_bus_fmts)
 -			return -ENOMEM;
 +		out_bus_fmts = &out_bus_fmts_onstack;
@@ -119,4 +119,3 @@
  		kfree(buf);
  	return len;
  }
-

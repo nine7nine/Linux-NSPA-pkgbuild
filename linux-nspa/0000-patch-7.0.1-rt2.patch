@@ -1,8 +1,8 @@
 diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
-index fa83c040ee2d4..547df4161e0dd 100644
+index ec33376f8e2ba..71fc5dd4123f3 100644
 --- a/arch/arm/Kconfig
 +++ b/arch/arm/Kconfig
-@@ -41,6 +41,7 @@ config ARM
+@@ -42,6 +42,7 @@ config ARM
  	select ARCH_SUPPORTS_CFI
  	select ARCH_SUPPORTS_HUGETLBFS if ARM_LPAE
  	select ARCH_SUPPORTS_PER_VMA_LOCK
@@ -33,18 +33,18 @@ index ed4330cc3f4e6..3f1c73269c126 100644
  
  	return 0;
 diff --git a/arch/powerpc/Kconfig b/arch/powerpc/Kconfig
-index 9537a61ebae02..08c7f3dd26557 100644
+index 10240cb809043..badda74be774d 100644
 --- a/arch/powerpc/Kconfig
 +++ b/arch/powerpc/Kconfig
-@@ -172,6 +172,7 @@ config PPC
- 	select ARCH_STACKWALK
+@@ -173,6 +173,7 @@ config PPC
  	select ARCH_SUPPORTS_ATOMIC_RMW
  	select ARCH_SUPPORTS_DEBUG_PAGEALLOC	if PPC_BOOK3S || PPC_8xx
+ 	select ARCH_SUPPORTS_PAGE_TABLE_CHECK	if !HUGETLB_PAGE
 +	select ARCH_SUPPORTS_RT			if HAVE_POSIX_CPU_TIMERS_TASK_WORK
  	select ARCH_SUPPORTS_SCHED_MC		if SMP
  	select ARCH_SUPPORTS_SCHED_SMT		if PPC64 && SMP
  	select SCHED_MC				if ARCH_SUPPORTS_SCHED_MC
-@@ -278,6 +279,7 @@ config PPC
+@@ -279,6 +280,7 @@ config PPC
  	select HAVE_PERF_EVENTS_NMI		if PPC64
  	select HAVE_PERF_REGS
  	select HAVE_PERF_USER_STACK_DUMP
@@ -72,10 +72,10 @@ index 283c346478565..4727f40052ddd 100644
  #ifdef CONFIG_PPC64
  	get_paca()->canary = canary;
 diff --git a/arch/powerpc/kvm/Kconfig b/arch/powerpc/kvm/Kconfig
-index c9a2d50ff1b0e..5c6f385db6b78 100644
+index 9a0d1c1aca6c8..268aa1a5a2f41 100644
 --- a/arch/powerpc/kvm/Kconfig
 +++ b/arch/powerpc/kvm/Kconfig
-@@ -233,6 +233,7 @@ config KVM_E500MC
+@@ -229,6 +229,7 @@ config KVM_E500MC
  config KVM_MPIC
  	bool "KVM in-kernel MPIC emulation"
  	depends on KVM && PPC_E500
@@ -84,7 +84,7 @@ index c9a2d50ff1b0e..5c6f385db6b78 100644
  	select HAVE_KVM_IRQ_ROUTING
  	select HAVE_KVM_MSI
 diff --git a/arch/powerpc/platforms/pseries/Kconfig b/arch/powerpc/platforms/pseries/Kconfig
-index 3e042218d6cd8..68285dc51b632 100644
+index f7052b131a4c5..6e605e7a01e79 100644
 --- a/arch/powerpc/platforms/pseries/Kconfig
 +++ b/arch/powerpc/platforms/pseries/Kconfig
 @@ -2,6 +2,7 @@
@@ -96,7 +96,7 @@ index 3e042218d6cd8..68285dc51b632 100644
  	select MPIC
  	select OF_DYNAMIC
 diff --git a/arch/powerpc/platforms/pseries/iommu.c b/arch/powerpc/platforms/pseries/iommu.c
-index eec333dd2e598..0b952ad638f9c 100644
+index 3e1f915fe4f66..cce787a4eeb0a 100644
 --- a/arch/powerpc/platforms/pseries/iommu.c
 +++ b/arch/powerpc/platforms/pseries/iommu.c
 @@ -26,6 +26,7 @@
@@ -203,10 +203,10 @@ index 5e939004b6463..40a9234e6e5dc 100644
  	select INTERVAL_TREE
  	# we need shmfs for the swappable backing store, and in particular
 diff --git a/drivers/gpu/drm/i915/display/intel_crtc.c b/drivers/gpu/drm/i915/display/intel_crtc.c
-index 9d2a23c96c61b..7dc56bad1fa1e 100644
+index 53378d2dcbec8..3c89b94528636 100644
 --- a/drivers/gpu/drm/i915/display/intel_crtc.c
 +++ b/drivers/gpu/drm/i915/display/intel_crtc.c
-@@ -571,7 +571,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
+@@ -587,7 +587,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
  	 */
  	intel_psr_wait_for_idle_locked(new_crtc_state);
  
@@ -216,7 +216,7 @@ index 9d2a23c96c61b..7dc56bad1fa1e 100644
  
  	crtc->debug.min_vbl = evade.min;
  	crtc->debug.max_vbl = evade.max;
-@@ -589,7 +590,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
+@@ -605,7 +606,8 @@ void intel_pipe_update_start(struct intel_atomic_state *state,
  	return;
  
  irq_disable:
@@ -226,7 +226,7 @@ index 9d2a23c96c61b..7dc56bad1fa1e 100644
  }
  
  #if IS_ENABLED(CONFIG_DRM_I915_DEBUG_VBLANK_EVADE)
-@@ -735,7 +737,8 @@ void intel_pipe_update_end(struct intel_atomic_state *state,
+@@ -750,7 +752,8 @@ void intel_pipe_update_end(struct intel_atomic_state *state,
  	if (!state->base.legacy_cursor_update)
  		intel_vrr_send_push(NULL, new_crtc_state);
  
@@ -234,10 +234,10 @@ index 9d2a23c96c61b..7dc56bad1fa1e 100644
 +	if (!IS_ENABLED(CONFIG_PREEMPT_RT))
 +		local_irq_enable();
  
- 	if (intel_vgpu_active(dev_priv))
+ 	if (intel_parent_vgpu_active(display))
  		goto out;
 diff --git a/drivers/gpu/drm/i915/display/intel_cursor.c b/drivers/gpu/drm/i915/display/intel_cursor.c
-index a10b2425b94d2..80af16016d5f6 100644
+index 2c5d917fbd7e9..3477b2cebbe3a 100644
 --- a/drivers/gpu/drm/i915/display/intel_cursor.c
 +++ b/drivers/gpu/drm/i915/display/intel_cursor.c
 @@ -919,13 +919,15 @@ intel_legacy_cursor_update(struct drm_plane *_plane,
@@ -284,31 +284,32 @@ index 27ebc32cb61a5..a519d94700c36 100644
  #include <linux/string_helpers.h>
  #include <linux/types.h>
 diff --git a/drivers/gpu/drm/i915/display/intel_vblank.c b/drivers/gpu/drm/i915/display/intel_vblank.c
-index 671f357c65638..43df58fd85535 100644
+index 1b7cfe226ff8f..a540615ba4315 100644
 --- a/drivers/gpu/drm/i915/display/intel_vblank.c
 +++ b/drivers/gpu/drm/i915/display/intel_vblank.c
-@@ -317,6 +317,20 @@ static void intel_vblank_section_exit(struct intel_display *display)
- 	struct drm_i915_private *i915 = to_i915(display->drm);
- 	spin_unlock(&i915->uncore.lock);
+@@ -316,6 +316,21 @@ static void intel_vblank_section_exit(struct intel_display *display)
+ 	struct intel_uncore *uncore = to_intel_uncore(display->drm);
+ 	spin_unlock(&uncore->lock);
  }
 +
 +static void intel_vblank_section_enter_irqf(struct intel_display *display, unsigned long *flags)
-+	__acquires(i915->uncore.lock)
++__acquires(i915->uncore.lock)
 +{
-+	struct drm_i915_private *i915 = to_i915(display->drm);
-+	spin_lock_irqsave(&i915->uncore.lock, *flags);
++	struct intel_uncore *uncore = to_intel_uncore(display->drm);
++	spin_lock_irqsave(&uncore->lock, *flags);
 +}
 +
 +static void intel_vblank_section_exit_irqf(struct intel_display *display, unsigned long flags)
-+	__releases(i915->uncore.lock)
++__releases(i915->uncore.lock)
 +{
-+	struct drm_i915_private *i915 = to_i915(display->drm);
-+	spin_unlock_irqrestore(&i915->uncore.lock, flags);
++	struct intel_uncore *uncore = to_intel_uncore(display->drm);
++	spin_unlock_irqrestore(&uncore->lock, flags);
 +}
++
  #else
  static void intel_vblank_section_enter(struct intel_display *display)
  {
-@@ -325,6 +339,17 @@ static void intel_vblank_section_enter(struct intel_display *display)
+@@ -324,6 +339,17 @@ static void intel_vblank_section_enter(struct intel_display *display)
  static void intel_vblank_section_exit(struct intel_display *display)
  {
  }
@@ -326,7 +327,7 @@ index 671f357c65638..43df58fd85535 100644
  #endif
  
  static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
-@@ -361,10 +386,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
+@@ -360,10 +386,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
  	 * timing critical raw register reads, potentially with
  	 * preemption disabled, so the following code must not block.
  	 */
@@ -340,7 +341,7 @@ index 671f357c65638..43df58fd85535 100644
  
  	/* Get optional system timestamp before query. */
  	if (stime)
-@@ -428,10 +453,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
+@@ -427,10 +453,10 @@ static bool i915_get_crtc_scanoutpos(struct drm_crtc *_crtc,
  	if (etime)
  		*etime = ktime_get();
  
@@ -354,7 +355,7 @@ index 671f357c65638..43df58fd85535 100644
  
  	/*
  	 * While in vblank, position will be negative
-@@ -469,13 +494,11 @@ int intel_get_crtc_scanline(struct intel_crtc *crtc)
+@@ -468,13 +494,11 @@ int intel_get_crtc_scanline(struct intel_crtc *crtc)
  	unsigned long irqflags;
  	int position;
  
@@ -370,7 +371,7 @@ index 671f357c65638..43df58fd85535 100644
  
  	return position;
  }
-@@ -740,11 +763,13 @@ int intel_vblank_evade(struct intel_vblank_evade_ctx *evade)
+@@ -764,11 +788,13 @@ int intel_vblank_evade(struct intel_vblank_evade_ctx *evade)
  			break;
  		}
  
@@ -387,10 +388,10 @@ index 671f357c65638..43df58fd85535 100644
  
  	finish_wait(wq, &wait);
 diff --git a/drivers/gpu/drm/i915/gt/intel_engine_cs.c b/drivers/gpu/drm/i915/gt/intel_engine_cs.c
-index b721bbd233567..f5a6143ea8a24 100644
+index 54c9571327e72..97bc49fcb5e05 100644
 --- a/drivers/gpu/drm/i915/gt/intel_engine_cs.c
 +++ b/drivers/gpu/drm/i915/gt/intel_engine_cs.c
-@@ -1609,7 +1609,7 @@ u64 intel_engine_get_last_batch_head(const struct intel_engine_cs *engine)
+@@ -1607,7 +1607,7 @@ u64 intel_engine_get_last_batch_head(const struct intel_engine_cs *engine)
  
  static unsigned long stop_timeout(const struct intel_engine_cs *engine)
  {
@@ -400,7 +401,7 @@ index b721bbd233567..f5a6143ea8a24 100644
  
  	/*
 diff --git a/drivers/gpu/drm/i915/gt/intel_execlists_submission.c b/drivers/gpu/drm/i915/gt/intel_execlists_submission.c
-index 3df683b0402ad..948975e72d295 100644
+index cafe0b8e6bdd0..55f94c5feaa3b 100644
 --- a/drivers/gpu/drm/i915/gt/intel_execlists_submission.c
 +++ b/drivers/gpu/drm/i915/gt/intel_execlists_submission.c
 @@ -1300,7 +1300,7 @@ static void execlists_dequeue(struct intel_engine_cs *engine)
@@ -476,7 +477,7 @@ index 053780f562c1a..b25fa8f4dc4bd 100644
  	/*
  	 * FIXME: Have caller pass in if we are in an atomic context to avoid
 diff --git a/drivers/gpu/drm/i915/i915_request.c b/drivers/gpu/drm/i915/i915_request.c
-index 4399941236cbf..d82105408bd8f 100644
+index d2c7b1090df08..f66f8efc70629 100644
 --- a/drivers/gpu/drm/i915/i915_request.c
 +++ b/drivers/gpu/drm/i915/i915_request.c
 @@ -610,7 +610,6 @@ bool __i915_request_submit(struct i915_request *request)
@@ -525,8 +526,23 @@ index f13ff71edf2db..3c67e267fb602 100644
  #include "i915_reg_defs.h"
  
  #include <linux/types.h>
+diff --git a/drivers/tty/serial/8250/8250.h b/drivers/tty/serial/8250/8250.h
+index 77fe0588fd6bd..c6e7885be3bac 100644
+--- a/drivers/tty/serial/8250/8250.h
++++ b/drivers/tty/serial/8250/8250.h
+@@ -177,7 +177,9 @@ static unsigned int __maybe_unused serial_icr_read(struct uart_8250_port *up,
+ 
+ void serial8250_clear_fifos(struct uart_8250_port *p);
+ void serial8250_clear_and_reinit_fifos(struct uart_8250_port *p);
+-void serial8250_fifo_wait_for_lsr_thre(struct uart_8250_port *up, unsigned int count);
++void serial8250_fifo_wait_for_lsr_thre(struct uart_8250_port *up,
++				       struct nbcon_write_context *wctxt,
++				       unsigned int count);
+ 
+ void serial8250_rpm_get(struct uart_8250_port *p);
+ void serial8250_rpm_put(struct uart_8250_port *p);
 diff --git a/drivers/tty/serial/8250/8250_core.c b/drivers/tty/serial/8250/8250_core.c
-index 0e81f78c6063f..bf0a5683378f3 100644
+index d2e2c5dfef995..2780d089354f8 100644
 --- a/drivers/tty/serial/8250/8250_core.c
 +++ b/drivers/tty/serial/8250/8250_core.c
 @@ -390,12 +390,34 @@ void __init serial8250_register_ports(struct uart_driver *drv, struct device *de
@@ -585,10 +601,24 @@ index 0e81f78c6063f..bf0a5683378f3 100644
  	.index		= -1,
  	.data		= &serial8250_reg,
  };
+diff --git a/drivers/tty/serial/8250/8250_dw.c b/drivers/tty/serial/8250/8250_dw.c
+index 94beadb4024df..4ec55ac9ed51f 100644
+--- a/drivers/tty/serial/8250/8250_dw.c
++++ b/drivers/tty/serial/8250/8250_dw.c
+@@ -182,7 +182,7 @@ static int dw8250_idle_enter(struct uart_port *p)
+ 	 *
+ 	 * FIXME: frame_time delay is too long with very low baudrates.
+ 	 */
+-	serial8250_fifo_wait_for_lsr_thre(up, p->fifosize);
++	serial8250_fifo_wait_for_lsr_thre(up, NULL, p->fifosize);
+ 	ndelay(p->frame_time);
+ 
+ 	serial_port_out(p, UART_MCR, up->mcr | UART_MCR_LOOP);
 diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_port.c
+index 328711b5df1a8..4206f3d0b01e4 100644
 --- a/drivers/tty/serial/8250/8250_port.c
 +++ b/drivers/tty/serial/8250/8250_port.c
-@@ -708,7 +708,12 @@ static void serial8250_clear_interrupts(
+@@ -708,7 +708,12 @@ static void serial8250_clear_interrupts(struct uart_port *port)
  	serial_port_in(port, UART_MSR);
  }
  
@@ -602,7 +632,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  {
  	if (up->capabilities & UART_CAP_UUE)
  		serial_out(up, UART_IER, UART_IER_UUE);
-@@ -716,6 +721,14 @@ static void serial8250_clear_IER(struct
+@@ -716,6 +721,14 @@ static void serial8250_clear_IER(struct uart_8250_port *up)
  		serial_out(up, UART_IER, 0);
  }
  
@@ -617,7 +647,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  /*
   * This is a quickie test to see how big the FIFO is.
   * It doesn't work at all the time, more's the pity.
-@@ -1288,9 +1301,6 @@ void serial8250_em485_stop_tx(struct uar
+@@ -1288,9 +1301,6 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p, bool toggle_ier)
  {
  	unsigned char mcr = serial8250_in_MCR(p);
  
@@ -627,7 +657,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  	if (p->port.rs485.flags & SER_RS485_RTS_AFTER_SEND)
  		mcr |= UART_MCR_RTS;
  	else
-@@ -1306,6 +1316,16 @@ void serial8250_em485_stop_tx(struct uar
+@@ -1306,6 +1316,16 @@ void serial8250_em485_stop_tx(struct uart_8250_port *p, bool toggle_ier)
  		serial8250_clear_and_reinit_fifos(p);
  
  		if (toggle_ier) {
@@ -644,7 +674,31 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  			p->ier |= UART_IER_RLSI | UART_IER_RDI;
  			serial_port_out(&p->port, UART_IER, p->ier);
  		}
-@@ -3214,7 +3234,11 @@ EXPORT_SYMBOL_NS_GPL(serial8250_fifo_wai
+@@ -3199,11 +3219,22 @@ void serial8250_set_defaults(struct uart_8250_port *up)
+ }
+ EXPORT_SYMBOL_GPL(serial8250_set_defaults);
+ 
+-void serial8250_fifo_wait_for_lsr_thre(struct uart_8250_port *up, unsigned int count)
++void serial8250_fifo_wait_for_lsr_thre(struct uart_8250_port *up,
++				       struct nbcon_write_context *wctxt,
++				       unsigned int count)
+ {
+ 	unsigned int i;
+ 
+ 	for (i = 0; i < count; i++) {
++		/*
++		 * Pass the ownership as quickly as possible to a higher
++		 * priority context. Otherwise, its attempt to take over
++		 * the ownership might timeout. The new owner will wait
++		 * for UART_LSR_THRE before reusing the fifo.
++		 */
++               if (wctxt && !nbcon_can_proceed(wctxt))
++                       return;
++
+ 		if (wait_for_lsr(up, UART_LSR_THRE))
+ 			return;
+ 	}
+@@ -3214,7 +3245,11 @@ EXPORT_SYMBOL_NS_GPL(serial8250_fifo_wait_for_lsr_thre, "SERIAL_8250");
  
  static void serial8250_console_putchar(struct uart_port *port, unsigned char ch)
  {
@@ -656,35 +710,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  }
  
  static void serial8250_console_wait_putchar(struct uart_port *port, unsigned char ch)
-@@ -3251,6 +3275,27 @@ static void serial8250_console_restore(s
- 	serial8250_out_MCR(up, up->mcr | UART_MCR_DTR | UART_MCR_RTS);
- }
- 
-+static void fifo_wait_for_lsr(struct uart_8250_port *up,
-+			      struct nbcon_write_context *wctxt,
-+			      unsigned int count)
-+{
-+	unsigned int i;
-+
-+	for (i = 0; i < count; i++) {
-+		/*
-+		 * Pass the ownership as quickly as possible to a higher
-+		 * priority context. Otherwise, its attempt to take over
-+		 * the ownership might timeout. The new owner will wait
-+		 * for UART_LSR_THRE before reusing the fifo.
-+		 */
-+		if (!nbcon_can_proceed(wctxt))
-+			return;
-+
-+		if (wait_for_lsr(up, UART_LSR_THRE))
-+			return;
-+	}
-+}
-+
- /*
-  * Print a string to the serial port using the device FIFO
-  *
-@@ -3258,20 +3303,29 @@ static void serial8250_console_restore(s
+@@ -3258,20 +3293,29 @@ static void serial8250_console_restore(struct uart_8250_port *up)
   * to get empty.
   */
  static void serial8250_console_fifo_write(struct uart_8250_port *up,
@@ -703,7 +729,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  	while (s != end) {
  		/* Allow timeout for each byte of a possibly full FIFO */
 -		serial8250_fifo_wait_for_lsr_thre(up, fifosize);
-+		fifo_wait_for_lsr(up, wctxt, fifosize);
++		serial8250_fifo_wait_for_lsr_thre(up, wctxt, fifosize);
  
 +		/*
 +		 * Fill the FIFO. If a handover or takeover occurs, writing
@@ -717,7 +743,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  			if (*s == '\n' && !cr_sent) {
  				serial8250_console_putchar(port, '\r');
  				cr_sent = true;
-@@ -3279,6 +3333,8 @@ static void serial8250_console_fifo_writ
+@@ -3279,6 +3323,8 @@ static void serial8250_console_fifo_write(struct uart_8250_port *up,
  				serial8250_console_putchar(port, *s++);
  				cr_sent = false;
  			}
@@ -726,12 +752,12 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  		}
  		tx_count = i;
  	}
-@@ -3287,39 +3343,57 @@ static void serial8250_console_fifo_writ
+@@ -3287,39 +3333,57 @@ static void serial8250_console_fifo_write(struct uart_8250_port *up,
  	 * Allow timeout for each byte written since the caller will only wait
  	 * for UART_LSR_BOTH_EMPTY using the timeout of a single character
  	 */
 -	serial8250_fifo_wait_for_lsr_thre(up, tx_count);
-+	fifo_wait_for_lsr(up, wctxt, tx_count);
++	serial8250_fifo_wait_for_lsr_thre(up, wctxt, tx_count);
 +}
 +
 +static void serial8250_console_byte_write(struct uart_8250_port *up,
@@ -759,11 +785,11 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  /*
 - *	Print a string to the serial port trying not to disturb
 - *	any possible real use of the port...
-- *
-- *	The console_lock must be held when we get here.
 + * Print a string to the serial port trying not to disturb
 + * any possible real use of the port...
   *
+- *	The console_lock must be held when we get here.
+- *
 - *	Doing runtime PM is really a bad idea for the kernel console.
 - *	Thus, we assume the function is called when device is powered up.
 + * Doing runtime PM is really a bad idea for the kernel console.
@@ -780,11 +806,11 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
 -	unsigned long flags;
 -	unsigned int ier, use_fifo;
 -	int locked = 1;
--
--	touch_nmi_watchdog();
 +	unsigned int ier;
 +	bool use_fifo;
  
+-	touch_nmi_watchdog();
+-
 -	if (oops_in_progress)
 -		locked = uart_port_trylock_irqsave(port, &flags);
 -	else
@@ -804,7 +830,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  
  	/* check scratch reg to see if port powered off during system sleep */
  	if (up->canary && (up->canary != serial_port_in(port, UART_SCR))) {
-@@ -3333,6 +3407,18 @@ void serial8250_console_write(struct uar
+@@ -3333,6 +3397,18 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
  		mdelay(port->rs485.delay_rts_before_send);
  	}
  
@@ -823,7 +849,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  	use_fifo = (up->capabilities & UART_CAP_FIFO) &&
  		/*
  		 * BCM283x requires to check the fifo
-@@ -3353,10 +3439,23 @@ void serial8250_console_write(struct uar
+@@ -3353,10 +3429,23 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
  		 */
  		!(up->port.flags & UPF_CONS_FLOW);
  
@@ -849,7 +875,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  
  	/*
  	 *	Finally, wait for transmitter to become empty
-@@ -3379,11 +3478,18 @@ void serial8250_console_write(struct uar
+@@ -3379,11 +3468,18 @@ void serial8250_console_write(struct uart_8250_port *up, const char *s,
  	 *	call it if we have saved something in the saved flags
  	 *	while processing with interrupts off.
  	 */
@@ -872,7 +898,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  }
  
  static unsigned int probe_baud(struct uart_port *port)
-@@ -3401,8 +3507,24 @@ static unsigned int probe_baud(struct ua
+@@ -3401,8 +3497,24 @@ static unsigned int probe_baud(struct uart_port *port)
  	return (port->uartclk / 16) / quot;
  }
  
@@ -897,7 +923,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  	int baud = 9600;
  	int bits = 8;
  	int parity = 'n';
-@@ -3412,6 +3534,9 @@ int serial8250_console_setup(struct uart
+@@ -3412,6 +3524,9 @@ int serial8250_console_setup(struct uart_port *port, char *options, bool probe)
  	if (!port->iobase && !port->membase)
  		return -ENODEV;
  
@@ -908,7 +934,7 @@ diff --git a/drivers/tty/serial/8250/8250_port.c b/drivers/tty/serial/8250/8250_
  		uart_parse_options(options, &baud, &parity, &bits, &flow);
  	else if (probe)
 diff --git a/include/linux/serial_8250.h b/include/linux/serial_8250.h
-index 01efdce0fda07..c10b31a79fe61 100644
+index a95b2d143d248..03b17423fc5af 100644
 --- a/include/linux/serial_8250.h
 +++ b/include/linux/serial_8250.h
 @@ -150,8 +150,17 @@ struct uart_8250_port {
@@ -929,7 +955,7 @@ index 01efdce0fda07..c10b31a79fe61 100644
  
  	struct uart_8250_dma	*dma;
  	const struct uart_8250_ops *ops;
-@@ -202,8 +211,8 @@ void serial8250_tx_chars(struct uart_8250_port *up);
+@@ -203,8 +212,8 @@ void serial8250_tx_chars(struct uart_8250_port *up);
  unsigned int serial8250_modem_status(struct uart_8250_port *up);
  void serial8250_init_port(struct uart_8250_port *up);
  void serial8250_set_defaults(struct uart_8250_port *up);
@@ -972,8 +998,8 @@ index a9e6354d9e257..691c5671b3460 100644
  };
 diff --git a/localversion-rt b/localversion-rt
 new file mode 100644
-index 0000000000000..6f206be67cd28
+index 0000000000000..c3054d08a1129
 --- /dev/null
 +++ b/localversion-rt
 @@ -0,0 +1 @@
-+-rt1
++-rt2
