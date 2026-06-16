@@ -68,7 +68,7 @@ _vmx_hack=y
 pkgbase=linux-nspa
 pkgver=7.0.12
 pkgdesc='Linux-NSPA: PREEMPT_RT_FULL kernel with a twist'
-pkgrel=1
+pkgrel=3
 arch=('x86_64' 'x86_64_v3')
 _srcname=linux-${pkgver}
 url="https://github.com/nine7nine/Linux-NSPA"
@@ -126,8 +126,6 @@ source=(
   "1119-mm-compaction-Skip_all_non-migratable_pages_during_scan.patch"
   "1122-dma-buf-sync_file-Speed_up_ioctl_by_omitting_debug_names.patch"
   "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
-  "1201-irq_work-raise-irq_workd-to-sched_set_fifo-on-RT.patch"
-  "1202-drm-i915-display-recover-instead-of-wedging-on-lost-flip_done.patch"
   "0001-sched-cache-Introduce-infrastructure-for-cache-aware-load-balancing.patch"
   "0002-sched-cache-Limit-the-scan-number-of-CPUs-when-calculating-task-occupancy.patch"
   "0003-sched-cache-Record-per-LLC-utilization-to-guide-cache-aware-scheduling-decisions.patch"
@@ -163,6 +161,7 @@ source=(
   "1013-ntsync-dedicated-slab-caches.patch"
   "1014-ntsync-channel-send-pi-lockless-target-scan.patch"
   "1015-ntsync-wait-q-kmem-cache.patch"
+  "1204-drm-i915-gt-breadcrumbs-signaler-PI-lock-on-RT.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -536,8 +535,6 @@ sha256sums=('57edc9a41efc1ca6b797afa8f4a587a30da2af6bca7356eb56e1e1a4ada265da'
             'e6ff1293531eefbec669a8fa5258545acf3d95cd6d19919f233e369cf8e289e8'
             'c1f8a7cd2eb63e1dc1a4c1e35618cf8c8e34714e0634d91c293f70a4335b7122'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
-            '6019a258ac52ef0052663a3520e3fbaa3e6d0e60492bb67bde97ed46b1e0ab41'
-            '8f05ffa65f0c3042aadab5d81c750edcb3b6d07a8ccf8b7a20dd440038c04a87'
             '84d28687c8b45705c0373800fde9a2ad94684c80d6a585471cdace295544b27f'
             'e65d97f8be05430e6a851992541eaaac80690863a5a74edf2aed50cf3544b042'
             'dde1dc58b19fa38486da2b99418e8f6de41c05c002460f012749662a7b72c2bb'
@@ -572,4 +569,5 @@ sha256sums=('57edc9a41efc1ca6b797afa8f4a587a30da2af6bca7356eb56e1e1a4ada265da'
             '047a20035a7414299d572c64fb2f9371de3e3622151fadae10475572829f15dd'
             '5d725ba0f818b3c006b2053ac51b9405a35266a226d953e37684528390a20bfb'
             'a68e24641848ef3c06c2486016ef70e4a8bfe45104249e5dd5f1164a877c7c63'
-            '072a6aac3f4a9b320fb6930845ce947cd9a9ae663879b3b0a472180173b26ca4')
+            '072a6aac3f4a9b320fb6930845ce947cd9a9ae663879b3b0a472180173b26ca4'
+            '457c40b341080b268081e0aaab7ca858c5513bc152723473406783df76e4b786')

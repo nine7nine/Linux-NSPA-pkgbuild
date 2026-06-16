@@ -1,0 +1,88 @@
+From: i915-rt-audit
+Subject: [PATCH] drm/i915/gt: fix breadcrumb signaler livelock on PREEMPT_RT
+
+intel_context_remove_breadcrumbs() busy-waits for any in-flight
+signal_irq_work() to finish walking b->signalers:
+
+    while (atomic_read(&b->signaler_active))
+            cpu_relax();
+
+On PREEMPT_RT signal_irq_work() runs in the threaded irq_work kthread
+(low SCHED_FIFO) because it takes sleeping locks, while
+intel_context_remove_breadcrumbs() runs from the execlists submission
+tasklet inside the i915 threaded IRQ handler (higher SCHED_FIFO). If the
+IRQ thread preempts the irq_work after atomic_inc() but before
+atomic_dec() and then spins in cpu_relax(), the lower-priority irq_work
+can never run the matching atomic_dec(): cpu_relax() does not yield to a
+lower-priority task on the same CPU. With RT throttling disabled this is
+an unbounded priority-inversion livelock - the i915 IRQ thread wedges,
+the pending pipe vblank is never serviced, and the display freezes.
+
+Replace the open-coded atomic busy-wait with a spinlock barrier:
+signal_irq_work() holds b->signaler_active_sync across the walk, and the
+waiter takes and releases it. On RT the rtmutex hands priority
+inheritance to the irq_work kthread so it makes progress; on !RT it is a
+plain spinlock barrier. The lock follows the same discipline already used
+for ce->signal_lock in these two functions (plain spin_lock() in
+signal_irq_work(), spin_lock_irqsave() in
+intel_context_remove_breadcrumbs()).
+
+Based on the intel-gfx discussion between Maarten Lankhorst and Sebastian
+Andrzej Siewior (signaler_active_sync / spin_is_locked).
+---
+diff --git a/drivers/gpu/drm/i915/gt/intel_breadcrumbs.c b/drivers/gpu/drm/i915/gt/intel_breadcrumbs.c
+index a2b4139..d13c6dd 100644
+--- a/drivers/gpu/drm/i915/gt/intel_breadcrumbs.c
++++ b/drivers/gpu/drm/i915/gt/intel_breadcrumbs.c
+@@ -209,7 +209,7 @@ static void signal_irq_work(struct irq_work *work)
+ 		intel_breadcrumbs_disarm_irq(b);
+ 
+ 	rcu_read_lock();
+-	atomic_inc(&b->signaler_active);
++	spin_lock(&b->signaler_active_sync);
+ 	list_for_each_entry_rcu(ce, &b->signalers, signal_link) {
+ 		struct i915_request *rq;
+ 
+@@ -245,7 +245,7 @@ static void signal_irq_work(struct irq_work *work)
+ 				i915_request_put(rq);
+ 		}
+ 	}
+-	atomic_dec(&b->signaler_active);
++	spin_unlock(&b->signaler_active_sync);
+ 	rcu_read_unlock();
+ 
+ 	llist_for_each_safe(signal, sn, signal) {
+@@ -286,6 +286,7 @@ intel_breadcrumbs_create(struct intel_engine_cs *irq_engine)
+ 	kref_init(&b->ref);
+ 
+ 	spin_lock_init(&b->signalers_lock);
++	spin_lock_init(&b->signaler_active_sync);
+ 	INIT_LIST_HEAD(&b->signalers);
+ 	init_llist_head(&b->signaled_requests);
+ 
+@@ -487,8 +488,10 @@ void intel_context_remove_breadcrumbs(struct intel_context *ce,
+ 	if (release)
+ 		intel_context_put(ce);
+ 
+-	while (atomic_read(&b->signaler_active))
+-		cpu_relax();
++	if (spin_is_locked(&b->signaler_active_sync)) {
++		spin_lock_irqsave(&b->signaler_active_sync, flags);
++		spin_unlock_irqrestore(&b->signaler_active_sync, flags);
++	}
+ }
+ 
+ static void print_signals(struct intel_breadcrumbs *b, struct drm_printer *p)
+diff --git a/drivers/gpu/drm/i915/gt/intel_breadcrumbs_types.h b/drivers/gpu/drm/i915/gt/intel_breadcrumbs_types.h
+index bdf09fd..d071f4f 100644
+--- a/drivers/gpu/drm/i915/gt/intel_breadcrumbs_types.h
++++ b/drivers/gpu/drm/i915/gt/intel_breadcrumbs_types.h
+@@ -39,7 +39,7 @@ struct intel_breadcrumbs {
+ 	spinlock_t signalers_lock; /* protects the list of signalers */
+ 	struct list_head signalers;
+ 	struct llist_head signaled_requests;
+-	atomic_t signaler_active;
++	spinlock_t signaler_active_sync;
+ 
+ 	spinlock_t irq_lock; /* protects the interrupt from hardirq context */
+ 	struct irq_work irq_work; /* for use from inside irq_lock */
